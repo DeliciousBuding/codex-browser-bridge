@@ -235,11 +235,13 @@ quit
 
 ### Navigation
 
-| Tool                  | Description                                         |
-| --------------------- | --------------------------------------------------- |
-| `codex_navigate`      | Navigate a tab to a URL                             |
-| `codex_reload`        | Reload a tab                                        |
-| `codex_wait_for_load` | Poll `document.readyState` until `complete`         |
+| Tool                       | Description                                         |
+| -------------------------- | --------------------------------------------------- |
+| `codex_navigate`           | Navigate a tab to a URL                             |
+| `codex_navigate_back`      | Navigate a tab back one entry in its history        |
+| `codex_navigate_forward`   | Navigate a tab forward one entry in its history     |
+| `codex_reload`             | Reload a tab                                        |
+| `codex_wait_for_load`      | Poll `document.readyState` until `complete`         |
 
 ### Page inspection
 
