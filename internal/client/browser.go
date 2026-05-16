@@ -63,35 +63,7 @@ func (c *Client) CloseTab(tabID string) error {
 	if err != nil {
 		return fmt.Errorf("close_tab requires numeric tab_id, got %q", tabID)
 	}
-	// First get the target info to find the targetId
-	targets, err := c.executeCdp(id, "Target.getTargets", nil)
-	if err != nil {
-		// Fallback: try Page.close
-		_, err2 := c.executeCdp(id, "Page.close", nil)
-		return err2
-	}
-	// Try to find the targetId for this tab
-	var targetInfo struct {
-		TargetInfos []struct {
-			TargetID string `json:"targetId"`
-			TabID    int    `json:"tabId,omitempty"`
-		} `json:"targetInfos"`
-	}
-	if json.Unmarshal(targets, &targetInfo) == nil {
-		for _, t := range targetInfo.TargetInfos {
-			if t.TabID == id {
-				_, err = c.SendRequest("executeCdp", map[string]interface{}{
-					"tabId": id,
-					"method": "Target.closeTarget",
-					"commandParams": map[string]interface{}{
-						"targetId": t.TargetID,
-					},
-				})
-				return err
-			}
-		}
-	}
-	_, err = c.executeCdp(id, "Page.close", nil)
+	_, err = c.cdpWithAttach(id, "Page.close", nil)
 	return err
 }
 
@@ -109,14 +81,8 @@ func (c *Client) Navigate(tabID, url string) error {
 	if err != nil {
 		return fmt.Errorf("navigate requires numeric tab_id, got %q", tabID)
 	}
-	// Ensure tab is attached to this session first
-	_, _ = c.SendRequest("attach", map[string]interface{}{
-		"tabId": id,
-	})
-	_, err = c.SendRequest("executeCdp", map[string]interface{}{
-		"tabId":         id,
-		"method":        "Page.navigate",
-		"commandParams": map[string]interface{}{"url": url},
+	_, err = c.cdpWithAttach(id, "Page.navigate", map[string]interface{}{
+		"url": url,
 	})
 	return err
 }
@@ -127,7 +93,7 @@ func (c *Client) NavigateBack(tabID string) error {
 	if err != nil {
 		return err
 	}
-	raw, err := c.executeCdp(id, "Page.getNavigationHistory", nil)
+	raw, err := c.cdpWithAttach(id, "Page.getNavigationHistory", nil)
 	if err != nil {
 		return err
 	}
@@ -145,7 +111,7 @@ func (c *Client) NavigateBack(tabID string) error {
 		return fmt.Errorf("no previous page in history")
 	}
 	entryID := history.Entries[history.CurrentIndex-1].ID
-	_, err = c.executeCdp(id, "Page.navigateToHistoryEntry", map[string]interface{}{
+	_, err = c.cdpWithAttach(id, "Page.navigateToHistoryEntry", map[string]interface{}{
 		"entryId": entryID,
 	})
 	return err
@@ -157,7 +123,7 @@ func (c *Client) NavigateForward(tabID string) error {
 	if err != nil {
 		return err
 	}
-	raw, err := c.executeCdp(id, "Page.getNavigationHistory", nil)
+	raw, err := c.cdpWithAttach(id, "Page.getNavigationHistory", nil)
 	if err != nil {
 		return err
 	}
@@ -175,7 +141,7 @@ func (c *Client) NavigateForward(tabID string) error {
 		return fmt.Errorf("no next page in history")
 	}
 	entryID := history.Entries[history.CurrentIndex+1].ID
-	_, err = c.executeCdp(id, "Page.navigateToHistoryEntry", map[string]interface{}{
+	_, err = c.cdpWithAttach(id, "Page.navigateToHistoryEntry", map[string]interface{}{
 		"entryId": entryID,
 	})
 	return err
@@ -187,7 +153,7 @@ func (c *Client) Reload(tabID string) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.executeCdp(id, "Page.reload", nil)
+	_, err = c.cdpWithAttach(id, "Page.reload", nil)
 	return err
 }
 
@@ -197,15 +163,27 @@ func (c *Client) executeCdp(tabID int, method string, params map[string]interfac
 	if params == nil {
 		params = map[string]interface{}{}
 	}
-	// Ensure tab is attached to this session first
-	_, _ = c.SendRequest("attach", map[string]interface{}{
+	return c.SendRequest("executeCdp", map[string]interface{}{
+		"target": map[string]interface{}{
+			"tabId": tabID,
+		},
+		"method":        method,
+		"commandParams": params,
+	})
+}
+
+// attachTab attaches the debugger to a tab (required before CDP calls).
+func (c *Client) attachTab(tabID int) error {
+	_, err := c.SendRequest("attach", map[string]interface{}{
 		"tabId": tabID,
 	})
-	return c.SendRequest("executeCdp", map[string]interface{}{
-		"tabId":          tabID,
-		"method":         method,
-		"commandParams":  params,
-	})
+	return err
+}
+
+// cdpWithAttach attaches the debugger and then executes a CDP command.
+func (c *Client) cdpWithAttach(tabID int, method string, params map[string]interface{}) (json.RawMessage, error) {
+	_ = c.attachTab(tabID)
+	return c.executeCdp(tabID, method, params)
 }
 
 // --- Playwright API (via executeUnhandledCommand) ---

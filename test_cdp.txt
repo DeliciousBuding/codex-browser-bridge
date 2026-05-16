@@ -1,4 +1,0 @@
-tabs
-try attach {"tabId":1}
-try executeCdp {"tabId":1,"method":"Page.navigate","commandParams":{"url":"https://example.com"}}
-quit
