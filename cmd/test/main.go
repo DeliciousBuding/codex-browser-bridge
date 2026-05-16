@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -19,41 +20,76 @@ func main() {
 	}
 	defer c.Close()
 
-	// 1. Get backend info
-	info, err := c.GetInfo()
-	if err != nil {
-		fmt.Printf("GetInfo error: %v\n", err)
-	} else {
-		fmt.Printf("Backend: %s\n", string(info))
-	}
-
-	// 2. Create a new tab
+	// 1. Create tab
 	tabID, err := c.CreateTab()
 	if err != nil {
-		fmt.Printf("CreateTab error: %v\n", err)
+		fmt.Printf("FAIL createTab: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Created tab: %s\n", tabID)
+	fmt.Printf("OK createTab: %s\n", tabID)
 
-	// 3. Navigate the tab
+	// 2. Navigate
 	err = c.Navigate(tabID, "https://example.com")
 	if err != nil {
-		fmt.Printf("Navigate error: %v\n", err)
+		fmt.Printf("FAIL navigate: %v\n", err)
 	} else {
-		fmt.Printf("Navigated tab %s to https://example.com\n", tabID)
+		fmt.Printf("OK navigate\n")
 	}
 
-	// 4. Wait for page load
+	// 3. Wait for load
 	time.Sleep(2 * time.Second)
 
-	// 5. List tabs to verify
+	// 4. List tabs
 	tabs, err := c.ListTabs()
 	if err != nil {
-		fmt.Printf("ListTabs error: %v\n", err)
+		fmt.Printf("FAIL listTabs: %v\n", err)
 	} else {
-		fmt.Printf("Tabs:\n")
 		for _, t := range tabs {
-			fmt.Printf("  [%s] %s — %s\n", t.ID, t.Title, t.URL)
+			fmt.Printf("OK tab: [%s] %s — %s\n", t.ID, t.Title, t.URL)
 		}
+	}
+
+	// 5. Screenshot
+	b64, err := c.Screenshot(tabID, false)
+	if err != nil {
+		fmt.Printf("FAIL screenshot: %v\n", err)
+	} else {
+		fmt.Printf("OK screenshot: %d bytes base64\n", len(b64))
+	}
+
+	// 6. DOM snapshot
+	snap, err := c.DOMSnapshot(tabID)
+	if err != nil {
+		fmt.Printf("FAIL domSnapshot: %v\n", err)
+	} else {
+		if len(snap) > 200 {
+			snap = snap[:200] + "..."
+		}
+		fmt.Printf("OK domSnapshot: %s\n", snap)
+	}
+
+	// 7. Evaluate JS
+	raw, err := c.Evaluate(tabID, "document.title")
+	if err != nil {
+		fmt.Printf("FAIL evaluate: %v\n", err)
+	} else {
+		var result struct {
+			Result struct {
+				Value string `json:"value"`
+			} `json:"result"`
+		}
+		if json.Unmarshal(raw, &result) == nil {
+			fmt.Printf("OK evaluate: document.title = %q\n", result.Result.Value)
+		} else {
+			fmt.Printf("OK evaluate: %s\n", string(raw)[:100])
+		}
+	}
+
+	// 8. Close tab
+	err = c.CloseTab(tabID)
+	if err != nil {
+		fmt.Printf("FAIL closeTab: %v\n", err)
+	} else {
+		fmt.Printf("OK closeTab\n")
 	}
 }

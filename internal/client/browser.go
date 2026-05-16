@@ -186,159 +186,257 @@ func (c *Client) cdpWithAttach(tabID int, method string, params map[string]inter
 	return c.executeCdp(tabID, method, params)
 }
 
-// --- Playwright API (via executeUnhandledCommand) ---
+// --- Playwright API (via CDP) ---
 
 // DOMSnapshot returns an accessibility tree snapshot of the page.
 func (c *Client) DOMSnapshot(tabID string) (string, error) {
-	raw, err := c.executeUnhandledCommand("playwright_dom_snapshot", map[string]interface{}{
-		"tab_id": tabID,
+	id, err := strconv.Atoi(tabID)
+	if err != nil {
+		return "", fmt.Errorf("snapshot requires numeric tab_id, got %q", tabID)
+	}
+	// Use CDP Accessibility.getFullAXTree for accessibility snapshot
+	raw, err := c.cdpWithAttach(id, "Accessibility.getFullAXTree", nil)
+	if err != nil {
+		// Fallback: use Runtime.evaluate to get document.body text
+		raw2, err2 := c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
+			"expression": `document.body ? document.body.innerText : document.documentElement.innerText`,
+			"returnByValue": true,
+		})
+		if err2 != nil {
+			return "", fmt.Errorf("dom_snapshot failed: %v (fallback: %v)", err, err2)
+		}
+		var evalResult struct {
+			Result struct {
+				Value string `json:"value"`
+			} `json:"result"`
+		}
+		if json.Unmarshal(raw2, &evalResult) == nil {
+			return evalResult.Result.Value, nil
+		}
+		return string(raw2), nil
+	}
+	return string(raw), nil
+}
+
+// Screenshot captures a screenshot of the tab. Returns base64-encoded PNG.
+func (c *Client) Screenshot(tabID string, fullPage bool) (string, error) {
+	id, err := strconv.Atoi(tabID)
+	if err != nil {
+		return "", fmt.Errorf("screenshot requires numeric tab_id, got %q", tabID)
+	}
+	raw, err := c.cdpWithAttach(id, "Page.captureScreenshot", map[string]interface{}{
+		"format":  "png",
 	})
 	if err != nil {
 		return "", err
 	}
 	var result struct {
-		DOMSnapshot string `json:"dom_snapshot"`
+		Data string `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
-		// Try as direct string
-		var s string
-		if err2 := json.Unmarshal(raw, &s); err2 == nil {
-			return s, nil
-		}
 		return string(raw), nil
 	}
-	return result.DOMSnapshot, nil
+	return result.Data, nil
 }
 
-// Click clicks an element identified by a Playwright selector.
-func (c *Client) Click(tabID, selector string) error {
-	_, err := c.executeUnhandledCommand("playwright_click", map[string]interface{}{
-		"tab_id":   tabID,
-		"selector": selector,
+// --- CUA (Computer Use Agent) API via CDP ---
+
+// CUAClick clicks at screen coordinates via CDP Input.dispatchMouseEvent.
+func (c *Client) CUAClick(tabID string, x, y int) error {
+	id, err := strconv.Atoi(tabID)
+	if err != nil {
+		return err
+	}
+	_, err = c.cdpWithAttach(id, "Input.dispatchMouseEvent", map[string]interface{}{
+		"type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 1,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = c.cdpWithAttach(id, "Input.dispatchMouseEvent", map[string]interface{}{
+		"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1,
 	})
 	return err
 }
 
-// Fill fills a form input identified by a Playwright selector.
+// CUAType types text via CDP Input.dispatchKeyEvent.
+func (c *Client) CUAType(tabID, text string) error {
+	id, err := strconv.Atoi(tabID)
+	if err != nil {
+		return err
+	}
+	for _, ch := range text {
+		_, err = c.cdpWithAttach(id, "Input.dispatchKeyEvent", map[string]interface{}{
+			"type": "char", "text": string(ch),
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CUAKeypress presses keyboard keys via CDP Input.dispatchKeyEvent.
+func (c *Client) CUAKeypress(tabID string, keys []string) error {
+	id, err := strconv.Atoi(tabID)
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		_, err = c.cdpWithAttach(id, "Input.dispatchKeyEvent", map[string]interface{}{
+			"type": "keyDown", "key": key,
+		})
+		if err != nil {
+			return err
+		}
+		_, err = c.cdpWithAttach(id, "Input.dispatchKeyEvent", map[string]interface{}{
+			"type": "keyUp", "key": key,
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CUAScroll scrolls at coordinates via CDP Input.dispatchMouseEvent.
+func (c *Client) CUAScroll(tabID string, x, y, scrollX, scrollY int) error {
+	id, err := strconv.Atoi(tabID)
+	if err != nil {
+		return err
+	}
+	_, err = c.cdpWithAttach(id, "Input.dispatchMouseEvent", map[string]interface{}{
+		"type": "mouseWheel", "x": x, "y": y,
+		"deltaX": float64(scrollX), "deltaY": float64(scrollY),
+	})
+	return err
+}
+
+// --- DOM CUA API via CDP ---
+
+// DomCUAClick clicks a DOM node by its backend node ID via CDP.
+func (c *Client) DomCUAClick(tabID, nodeID string) error {
+	id, err := strconv.Atoi(tabID)
+	if err != nil {
+		return err
+	}
+	nID, err := strconv.Atoi(nodeID)
+	if err != nil {
+		return err
+	}
+	// Resolve node to coordinates, then click
+	_, err = c.cdpWithAttach(id, "DOM.resolveNode", map[string]interface{}{
+		"backendNodeId": nID,
+	})
+	if err != nil {
+		return err
+	}
+	// Get the node's box model and click center
+	raw, err := c.cdpWithAttach(id, "DOM.getBoxModel", map[string]interface{}{
+		"backendNodeId": nID,
+	})
+	if err != nil {
+		return err
+	}
+	var box struct {
+		Model struct {
+			Content [8]float64 `json:"content"`
+		} `json:"model"`
+	}
+	if err := json.Unmarshal(raw, &box); err != nil {
+		return fmt.Errorf("parse box model: %w", err)
+	}
+	// Content quad: [x1,y1, x2,y2, x3,y3, x4,y4] — center is average
+	cx := (box.Model.Content[0] + box.Model.Content[2] + box.Model.Content[4] + box.Model.Content[6]) / 4
+	cy := (box.Model.Content[1] + box.Model.Content[3] + box.Model.Content[5] + box.Model.Content[7]) / 4
+	return c.CUAClick(tabID, int(cx), int(cy))
+}
+
+// GetVisibleDOM returns a simplified DOM tree via CDP.
+func (c *Client) GetVisibleDOM(tabID string) (string, error) {
+	id, err := strconv.Atoi(tabID)
+	if err != nil {
+		return "", err
+	}
+	raw, err := c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
+		"expression": `(() => {
+			function walk(node, depth) {
+				if (depth > 5) return '';
+				if (!node || node.nodeType !== 1) return '';
+				const tag = node.tagName.toLowerCase();
+				const id = node.id ? '#'+node.id : '';
+				const cls = node.className ? '.'+String(node.className).replace(/\\s+/g,'.') : '';
+				const text = node.childNodes.length === 1 && node.childNodes[0].nodeType === 3 ? node.childNodes[0].textContent.trim() : '';
+				const rect = node.getBoundingClientRect();
+				const vis = rect.width > 0 && rect.height > 0;
+				if (!vis) return '';
+				let line = '  '.repeat(depth) + '<' + tag + id + cls + '>';
+				if (text) line += ' ' + text.slice(0,80);
+				line += '\\n';
+				for (const ch of node.children) line += walk(ch, depth+1);
+				return line;
+			}
+			return walk(document.body, 0);
+		})()`,
+		"returnByValue": true,
+	})
+	if err != nil {
+		return "", err
+	}
+	var result struct {
+		Result struct {
+			Value string `json:"value"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return string(raw), nil
+	}
+	return result.Result.Value, nil
+}
+
+// DomCUAType types into the currently focused element.
+func (c *Client) DomCUAType(tabID, text string) error {
+	return c.CUAType(tabID, text)
+}
+
+// --- High-level browser actions via CDP ---
+
+// Click clicks an element by CSS selector via CDP.
+func (c *Client) Click(tabID, selector string) error {
+	id, err := strconv.Atoi(tabID)
+	if err != nil {
+		return err
+	}
+	js := fmt.Sprintf(`document.querySelector(%q).click()`, selector)
+	_, err = c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
+		"expression": js,
+	})
+	return err
+}
+
+// Fill fills a form input by CSS selector via CDP.
 func (c *Client) Fill(tabID, selector, value string) error {
-	_, err := c.executeUnhandledCommand("playwright_fill", map[string]interface{}{
-		"tab_id":   tabID,
-		"selector": selector,
-		"value":    value,
+	id, err := strconv.Atoi(tabID)
+	if err != nil {
+		return err
+	}
+	js := fmt.Sprintf(`(() => { const el = document.querySelector(%q); if(el) { el.focus(); el.value = %q; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); } })()`, selector, value)
+	_, err = c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
+		"expression": js,
 	})
 	return err
 }
 
 // Evaluate runs JavaScript in the page context and returns the result.
 func (c *Client) Evaluate(tabID, expression string) (json.RawMessage, error) {
-	return c.executeUnhandledCommand("playwright_evaluate", map[string]interface{}{
-		"tab_id":     tabID,
-		"expression": expression,
-	})
-}
-
-// Screenshot captures a screenshot of the tab. Returns base64-encoded PNG.
-func (c *Client) Screenshot(tabID string, fullPage bool) (string, error) {
-	raw, err := c.executeUnhandledCommand("playwright_screenshot", map[string]interface{}{
-		"tab_id":   tabID,
-		"fullPage": fullPage,
-	})
+	id, err := strconv.Atoi(tabID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	var result struct {
-		Base64 string `json:"base64"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return string(raw), nil
-	}
-	return result.Base64, nil
-}
-
-// WaitForLoadState waits for a page load state (load, domcontentloaded, networkidle).
-func (c *Client) WaitForLoadState(tabID, state string) error {
-	_, err := c.executeUnhandledCommand("playwright_wait_for_load_state", map[string]interface{}{
-		"tab_id": tabID,
-		"state":  state,
+	return c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
+		"expression":    expression,
+		"returnByValue": true,
 	})
-	return err
-}
-
-// --- CUA (Computer Use Agent) API ---
-
-// CUAClick clicks at screen coordinates.
-func (c *Client) CUAClick(tabID string, x, y int) error {
-	_, err := c.executeUnhandledCommand("cua_click", map[string]interface{}{
-		"tab_id": tabID,
-		"x":      x,
-		"y":      y,
-	})
-	return err
-}
-
-// CUAType types text at the current focus.
-func (c *Client) CUAType(tabID, text string) error {
-	_, err := c.executeUnhandledCommand("cua_type", map[string]interface{}{
-		"tab_id": tabID,
-		"text":   text,
-	})
-	return err
-}
-
-// CUAKeypress presses keyboard keys.
-func (c *Client) CUAKeypress(tabID string, keys []string) error {
-	_, err := c.executeUnhandledCommand("cua_keypress", map[string]interface{}{
-		"tab_id": tabID,
-		"keys":   keys,
-	})
-	return err
-}
-
-// CUAScroll scrolls at coordinates.
-func (c *Client) CUAScroll(tabID string, x, y, scrollX, scrollY int) error {
-	_, err := c.executeUnhandledCommand("cua_scroll", map[string]interface{}{
-		"tab_id":   tabID,
-		"x":        x,
-		"y":        y,
-		"scroll_x": scrollX,
-		"scroll_y": scrollY,
-	})
-	return err
-}
-
-// --- DOM CUA API ---
-
-// DomCUAClick clicks a DOM node by its backend node ID.
-func (c *Client) DomCUAClick(tabID, nodeID string) error {
-	_, err := c.executeUnhandledCommand("dom_cua_click", map[string]interface{}{
-		"tab_id":  tabID,
-		"node_id": nodeID,
-	})
-	return err
-}
-
-// GetVisibleDOM returns a visible DOM tree with node IDs for interaction.
-func (c *Client) GetVisibleDOM(tabID string) (string, error) {
-	raw, err := c.executeUnhandledCommand("dom_cua_get_visible_dom", map[string]interface{}{
-		"tab_id": tabID,
-	})
-	if err != nil {
-		return "", err
-	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s, nil
-	}
-	return string(raw), nil
-}
-
-// DomCUAType types into the currently focused element.
-func (c *Client) DomCUAType(tabID, text string) error {
-	_, err := c.executeUnhandledCommand("dom_cua_type", map[string]interface{}{
-		"tab_id": tabID,
-		"text":   text,
-	})
-	return err
 }
 
 // --- User Tab API ---
@@ -426,14 +524,4 @@ func (c *Client) FinalizeTabs(keep []map[string]interface{}) error {
 // GetInfo returns backend info from the extension.
 func (c *Client) GetInfo() (json.RawMessage, error) {
 	return c.SendRequest("getInfo", nil)
-}
-
-// --- executeUnhandledCommand helper ---
-
-func (c *Client) executeUnhandledCommand(cmdType string, params map[string]interface{}) (json.RawMessage, error) {
-	if params == nil {
-		params = map[string]interface{}{}
-	}
-	params["type"] = cmdType
-	return c.SendRequest("executeUnhandledCommand", params)
 }
