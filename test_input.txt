@@ -1,0 +1,5 @@
+user-tabs
+create
+nav 1 https://example.com
+snapshot 1
+quit
