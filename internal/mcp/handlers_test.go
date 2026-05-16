@@ -103,7 +103,32 @@ func callTool(t *testing.T, s *MCPServer, name string, args map[string]interface
 	}
 	raw, _ := json.Marshal(args)
 	result, err := tool.Handler(raw)
-	return result, err == nil
+	if err != nil {
+		return err.Error(), false
+	}
+	return flattenContent(result), true
+}
+
+func callToolRaw(t *testing.T, s *MCPServer, name string, args map[string]interface{}) ([]Content, error) {
+	t.Helper()
+	tool, ok := s.toolMap[name]
+	if !ok {
+		t.Fatalf("tool %q not registered", name)
+	}
+	raw, _ := json.Marshal(args)
+	return tool.Handler(raw)
+}
+
+func flattenContent(content []Content) string {
+	parts := make([]string, 0, len(content))
+	for _, c := range content {
+		if c.Type == "text" {
+			parts = append(parts, c.Text)
+		} else if c.Type == "image" {
+			parts = append(parts, "[image:"+c.MimeType+"]")
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func TestHandleListTabs(t *testing.T) {
@@ -174,12 +199,25 @@ func TestHandleScreenshot(t *testing.T) {
 	})
 	defer cleanup()
 
-	out, ok := callTool(t, srv, "codex_screenshot", map[string]interface{}{"tab_id": "3"})
-	if !ok {
-		t.Fatalf("handler errored: %s", out)
+	content, err := callToolRaw(t, srv, "codex_screenshot", map[string]interface{}{"tab_id": "3"})
+	if err != nil {
+		t.Fatalf("handler errored: %v", err)
 	}
-	if out != "PNGDATA" {
-		t.Errorf("expected base64 data, got %q", out)
+	var img *Content
+	for i := range content {
+		if content[i].Type == "image" {
+			img = &content[i]
+			break
+		}
+	}
+	if img == nil {
+		t.Fatalf("no image content block returned: %+v", content)
+	}
+	if img.Data != "PNGDATA" {
+		t.Errorf("image data = %q, want PNGDATA", img.Data)
+	}
+	if img.MimeType != "image/png" {
+		t.Errorf("image mimeType = %q, want image/png", img.MimeType)
 	}
 }
 
