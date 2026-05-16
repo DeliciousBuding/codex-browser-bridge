@@ -1,6 +1,11 @@
 run:
   timeout: 3m
   tests: true
+  # Pin the analysis target below the latest released golangci-lint
+  # toolchain (currently 1.24). The project's go.mod declares 1.26 for
+  # the runtime toolchain, but no 1.25+ syntax is used; this just stops
+  # golangci-lint from refusing to load the config.
+  go: "1.24"
 
 linters:
   disable-all: true
