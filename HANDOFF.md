@@ -96,45 +96,35 @@ codex-browser-bridge/
 
 ## 未完成的工作 / 下一步
 
-### 最高优先级: 调试 pipe 连接 (未验证)
+### ✅ 已完成 (2026-05-16)
 
-`bridge.exe -mode cli` 还没测试过。go-winio 的 `DialPipe` 能否成功连接到 `codex-browser-use-*` pipe 是未知数。
+1. **Pipe 连接调试** — 完成
+   - go-winio `DialPipe` 成功连接 `codex-browser-use\*` pipes
+   - 关键发现：wire protocol 方法名是 **camelCase**（`getInfo`、`getTabs`、`createTab`），不是 snake_case
+   - `executeCdp` 需要 `{target: {tabId}}` 嵌套格式，且必须先调用 `attach`
+   - 每次连接创建新 session，tab 不能跨 session 使用
 
-**可能的问题:**
-1. **Pipe 名称中的反斜杠** — 部分 pipe 名是 `codex-browser-use\<uuid>` (带反斜杠)，`PipePath()` 生成的路径可能是 `\\.\pipe\codex-browser-use\<uuid>`，需要确认 go-winio 是否正确处理
-2. **客户端类型区分** — 9 个 pipe 可能分别对应 extension/iab/cdp 三种后端，目前直接取第一个，可能连到错误的类型
-3. **握手协议** — 连接后可能需要先发送 `get_info` 或类似握手命令，确认后端类型
-4. **Session 参数格式** — `session_id` 和 `turn_id` 是否必须是特定格式的 UUID，还是任意字符串
+2. **核心 API 验证** — 完成
+   - `ping` → `"pong"` ✅
+   - `getInfo` → Chrome extension 1.1.4 ✅
+   - `getTabs` → session 内标签页列表 ✅
+   - `createTab` → 创建新标签页 ✅
+   - `getUserTabs` → 用户浏览器所有标签页 ✅（返回裸数组，id 可能是数字）
+   - `claimUserTab` → 需要整数 tabId ✅
+   - `nameSession` → 会话命名 ✅
+   - `executeCdp` → `{target:{tabId}}` + `attach` ✅
 
-### 高优先级: 端到端测试
+3. **端到端测试** — 完成
+   - `createTab → attach → executeCdp(Page.navigate) → getTabs` 全流程通过
+   - 导航到 https://example.com 成功，标签页标题更新为 "Example Domain"
 
-```
-# 1. 确认连接
-bridge.exe -mode cli
-> info           # 获取后端信息
-> tabs           # 列出标签页
+### 中优先级: MCP Server
 
-# 2. 基本操作
-> create         # 创建新标签页
-> nav 1 https://example.com    # 导航
-> snapshot 1     # DOM 快照
-> screenshot 1   # 截图
-
-# 3. MCP 模式测试
-bridge.exe -mode mcp
-# 发送 JSON-RPC:
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
-{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
-```
-
-### 中优先级: 功能完善
-
-- [ ] 多 pipe 时识别 extension vs iab vs cdp 类型（通过 `get_info` 握手）
-- [ ] 截图返回格式处理（base64 vs byte array）
-- [ ] `finalize_tabs` 的 keep 参数正确构造
-- [ ] 错误重连机制（pipe 断开后自动重连）
-- [ ] MCP server 的 `initialized` notification 处理
-- [ ] 请求超时可配置化
+- [ ] 测试 MCP stdio 模式（`bridge.exe -mode mcp`）
+- [ ] MCP tool handler 使用正确的 camelCase 方法名
+- [ ] 处理 `initialized` notification
+- [ ] screenshot 返回 base64 PNG
+- [ ] DOM snapshot 通过 `executeCdp` + `Runtime.evaluate` 实现
 
 ### 低优先级: 打磨
 
@@ -144,6 +134,7 @@ bridge.exe -mode mcp
 - [ ] 日志级别控制 (`-log-level debug|info|warn|error`)
 - [ ] 单元测试 (frame encode/decode)
 - [ ] 非 Windows 平台的 stub 实现
+- [ ] 多 pipe 时智能选择 extension vs iab vs cdp 后端
 
 ---
 
