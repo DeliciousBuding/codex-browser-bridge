@@ -2,15 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.2.0] - 2026-05-16
 
 ### Added
-- Unit tests for `protocol`, `client`, `discovery`, and `mcp` packages
-- `NewMCPServerWithIO` for testable I/O injection
+- `codex_navigate_back` and `codex_navigate_forward` MCP tools (history navigation was already in the client; now exposed)
+- `codex_wait_for_load` MCP tool — polls `document.readyState` until `complete` or timeout
+- `codex_screenshot` now returns MCP `image` content so agents can view the screenshot directly (previously only base64 text)
+- `MCPServer.SetVersion` so the build version flows into the MCP `initialize` handshake (`serverInfo.version`)
+- Unit tests across `protocol`, `client`, `discovery`, and `mcp` packages
+  - In-memory `net.Pipe` fake server for end-to-end RPC tests without a real Codex pipe
+  - Concurrent `SendRequest` stress test under `-race`
+  - Wire-format invariants for `executeCdp`, `claimUserTab`, history navigation, JS escaping, CUA event sequencing, DOM box-model math
+  - MCP handler integration tests that exercise the full client → MCP path
+- `NewMCPServerWithIO` constructor for testable I/O injection
+- CI now runs `go test -race -cover`
 
 ### Fixed
 - `discovery.extractUUID` no longer truncates UUIDs containing hyphens
-- Better error messages on pipe-not-found and dial failures
+- Clearer error messages on pipe-not-found and dial failures
+- `Makefile install-local` now copies the `.exe` binary on Windows
+- Duplicate option numbering in README install sections
+
+### Internal
+- `client.NewFromConn` for wrapping an existing `net.Conn` (used by tests)
+- `cover.out` and `*.coverprofile` added to `.gitignore`
 
 ## [0.1.0] - 2026-05-16
 
