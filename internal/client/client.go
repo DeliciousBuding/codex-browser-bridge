@@ -1,0 +1,201 @@
+package client
+
+import (
+	"bufio"
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/user/codex-browser-bridge/internal/discovery"
+	"github.com/user/codex-browser-bridge/internal/protocol"
+)
+
+// Client communicates with the Codex Chrome extension via a named pipe.
+type Client struct {
+	conn    net.Conn
+	reader  *bufio.Reader
+	writer  sync.Mutex
+	nextID  atomic.Int64
+	session protocol.SessionParams
+
+	pendingMu sync.Mutex
+	pending   map[int]chan *protocol.Response
+
+	ctx    context.Context
+	cancel context.CancelFunc
+	log    *log.Logger
+}
+
+// Connect dials a named pipe and returns a ready-to-use Client.
+// If pipeName is empty, auto-discovers the first codex-browser-use-* pipe.
+func Connect(pipeName string, logger *log.Logger) (*Client, error) {
+	if pipeName == "" {
+		pipes, err := discovery.DiscoverCodexPipes()
+		if err != nil {
+			return nil, fmt.Errorf("discover pipes: %w", err)
+		}
+		if len(pipes) == 0 {
+			return nil, fmt.Errorf("no codex-browser-use pipes found; is Codex Desktop running?")
+		}
+		pipeName = pipes[0].Name
+		if logger != nil {
+			logger.Printf("auto-discovered pipe: %s", pipeName)
+		}
+	}
+
+	path := discovery.PipePath(pipeName)
+	conn, err := dialNamedPipe(path)
+	if err != nil {
+		return nil, fmt.Errorf("dial pipe %s: %w", path, err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &Client{
+		conn:    conn,
+		reader:  bufio.NewReaderSize(conn, 256*1024),
+		session: protocol.SessionParams{
+			SessionID: newUUID(),
+			TurnID:    newUUID(),
+		},
+		pending: make(map[int]chan *protocol.Response),
+		ctx:     ctx,
+		cancel:  cancel,
+		log:     logger,
+	}
+
+	go c.readLoop()
+	return c, nil
+}
+
+// Close shuts down the connection.
+func (c *Client) Close() error {
+	c.cancel()
+	return c.conn.Close()
+}
+
+// SendRequest sends a JSON-RPC request and waits for the response.
+func (c *Client) SendRequest(method string, params map[string]interface{}) (json.RawMessage, error) {
+	id := int(c.nextID.Add(1))
+
+	// Merge session params into the request params
+	fullParams := map[string]interface{}{
+		"session_id": c.session.SessionID,
+		"turn_id":    c.session.TurnID,
+	}
+	for k, v := range params {
+		fullParams[k] = v
+	}
+
+	req := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      id,
+		Method:  method,
+		Params:  fullParams,
+	}
+
+	ch := make(chan *protocol.Response, 1)
+	c.pendingMu.Lock()
+	c.pending[id] = ch
+	c.pendingMu.Unlock()
+
+	defer func() {
+		c.pendingMu.Lock()
+		delete(c.pending, id)
+		c.pendingMu.Unlock()
+	}()
+
+	c.writer.Lock()
+	err := protocol.EncodeFrame(c.conn, req)
+	c.writer.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("send request %s: %w", method, err)
+	}
+
+	if c.log != nil {
+		c.log.Printf("→ %s (id=%d)", method, id)
+	}
+
+	select {
+	case resp := <-ch:
+		if resp.Error != nil {
+			return nil, fmt.Errorf("rpc error in %s: %s", method, resp.Error.Message)
+		}
+		return resp.Result, nil
+	case <-c.ctx.Done():
+		return nil, fmt.Errorf("connection closed while waiting for %s", method)
+	case <-time.After(30 * time.Second):
+		return nil, fmt.Errorf("timeout waiting for %s response", method)
+	}
+}
+
+// SendNotification sends a JSON-RPC notification (no response expected).
+func (c *Client) SendNotification(method string, params interface{}) error {
+	msg := struct {
+		JSONRPC string      `json:"jsonrpc"`
+		Method  string      `json:"method"`
+		Params  interface{} `json:"params,omitempty"`
+	}{
+		JSONRPC: "2.0",
+		Method:  method,
+		Params:  params,
+	}
+	c.writer.Lock()
+	defer c.writer.Unlock()
+	return protocol.EncodeFrame(c.conn, msg)
+}
+
+func (c *Client) readLoop() {
+	for {
+		raw, err := protocol.DecodeFrame(c.reader)
+		if err != nil {
+			if c.ctx.Err() != nil {
+				return // graceful shutdown
+			}
+			if c.log != nil {
+				c.log.Printf("read error: %v", err)
+			}
+			c.cancel()
+			return
+		}
+
+		// Try to parse as response (has "id" field)
+		var resp protocol.Response
+		if err := json.Unmarshal(raw, &resp); err == nil && resp.ID != 0 {
+			c.pendingMu.Lock()
+			ch, ok := c.pending[resp.ID]
+			c.pendingMu.Unlock()
+			if ok {
+				ch <- &resp
+			}
+			continue
+		}
+
+		// Otherwise it's a notification or request from the server — log and ignore
+		if c.log != nil {
+			c.log.Printf("← notification: %s", truncate(string(raw), 200))
+		}
+	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
+// newUUID generates a UUID v4 string without external dependencies.
+func newUUID() string {
+	var b [16]byte
+	rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
