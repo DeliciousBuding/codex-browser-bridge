@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/DeliciousBuding/codex-browser-bridge/security/advisories/new
+    about: Report security issues privately. Do not open public issues for vulnerabilities.
+  - name: Question or discussion
+    url: https://github.com/DeliciousBuding/codex-browser-bridge/discussions
+    about: Ask a question or discuss design ideas.
