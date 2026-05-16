@@ -62,10 +62,16 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 			"Try: restart Codex Desktop, then re-open the Codex Chrome Extension.", path, err)
 	}
 
+	return newClient(conn, logger), nil
+}
+
+// newClient wraps an established net.Conn in a Client and starts the read loop.
+// Exported as a private helper so tests can drive Client over an in-memory pipe.
+func newClient(conn net.Conn, logger *log.Logger) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Client{
-		conn:    conn,
-		reader:  bufio.NewReaderSize(conn, 256*1024),
+		conn:   conn,
+		reader: bufio.NewReaderSize(conn, 256*1024),
 		session: protocol.SessionParams{
 			SessionID: newUUID(),
 			TurnID:    newUUID(),
@@ -75,9 +81,8 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 		cancel:  cancel,
 		log:     logger,
 	}
-
 	go c.readLoop()
-	return c, nil
+	return c
 }
 
 // Close shuts down the connection.
