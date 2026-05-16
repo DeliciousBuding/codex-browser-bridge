@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Unit tests for `protocol`, `client`, `discovery`, and `mcp` packages
+- `NewMCPServerWithIO` for testable I/O injection
+
+### Fixed
+- `discovery.extractUUID` no longer truncates UUIDs containing hyphens
+- Better error messages on pipe-not-found and dial failures
+
 ## [0.1.0] - 2026-05-16
 
 ### Added
