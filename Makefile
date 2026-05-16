@@ -3,7 +3,7 @@
 VERSION ?= dev
 
 build:
-	go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o bin/codex-browser-bridge ./cmd/bridge
+	go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o bin/codex-browser-bridge.exe ./cmd/bridge
 
 test:
 	go vet ./...

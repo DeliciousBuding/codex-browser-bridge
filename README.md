@@ -19,6 +19,7 @@
   <a href="https://github.com/DeliciousBuding/codex-browser-bridge/actions">
     <img src="https://img.shields.io/github/actions/workflow/status/DeliciousBuding/codex-browser-bridge/ci.yml?style=flat-square" alt="CI">
   </a>
+  <a href="README.zh-CN.md">中文</a>
 </p>
 
 ---
