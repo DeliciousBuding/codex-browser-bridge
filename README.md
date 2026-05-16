@@ -75,7 +75,13 @@ The current version is designed for local Windows environments where Codex Deskt
 
 ## Installation
 
-### Option 1: Install with Go
+### Option 1: Install with npm
+
+```bash
+npm i -g @delicious233/codex-browser-bridge
+```
+
+### Option 2: Install with Go
 
 ```bash
 go install github.com/DeliciousBuding/codex-browser-bridge/cmd/bridge@latest
@@ -83,7 +89,7 @@ go install github.com/DeliciousBuding/codex-browser-bridge/cmd/bridge@latest
 
 Make sure your Go binary path is available in `PATH`.
 
-### Option 2: Download a release
+### Option 3: Download a release
 
 Download the latest binary from:
 

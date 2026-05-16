@@ -1,0 +1,37 @@
+{
+  "name": "@delicious233/codex-browser-bridge",
+  "version": "0.1.0",
+  "private": false,
+  "description": "MCP server that exposes Codex Desktop's Chrome browser bridge for Claude Code and other agents.",
+  "bin": {
+    "codex-browser-bridge": "bin/codex-browser-bridge"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "files": [
+    "bin/codex-browser-bridge",
+    "scripts/install.js"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DeliciousBuding/codex-browser-bridge.git",
+    "directory": "npm"
+  },
+  "keywords": [
+    "codex",
+    "chrome",
+    "mcp",
+    "browser",
+    "claude-code",
+    "agent",
+    "automation",
+    "devtools"
+  ],
+  "author": "DeliciousBuding",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "os": ["win32"]
+}
