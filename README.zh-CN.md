@@ -219,12 +219,13 @@ info          ping          try <method> [json]   quit
 |------|------|
 | `codex_navigate` | 导航到指定 URL |
 | `codex_reload` | 重新加载标签页 |
+| `codex_wait_for_load` | 轮询 `document.readyState` 直到 `complete` |
 
 ### 页面检查
 
 | 工具 | 说明 |
 |------|------|
-| `codex_screenshot` | 截取 base64 PNG 截图 |
+| `codex_screenshot` | 截取页面截图（返回 MCP image 内容） |
 | `codex_dom_snapshot` | 获取无障碍树快照 |
 | `codex_dom_get_visible` | 获取简化版可见 DOM 树 |
 | `codex_evaluate` | 在页面上下文中执行 JavaScript |
