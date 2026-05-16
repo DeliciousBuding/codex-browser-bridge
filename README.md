@@ -382,3 +382,7 @@ MIT License.
 ## Disclaimer
 
 This is an independent third-party project. It is not affiliated with, endorsed by, or connected to OpenAI, Codex Desktop, Anthropic, Claude Code, Google, or Chrome.
+
+## Acknowledgments
+
+Thanks to [LINUX DO](https://linux.do/) for the community support and feedback.
