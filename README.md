@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="assets/hero.png" alt="codex-browser-bridge" width="720">
+</p>
+
+<p align="center">
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
     Let Claude Code and other MCP agents control your existing Chrome browser through Codex Desktop's browser bridge.
