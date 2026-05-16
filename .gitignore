@@ -1,0 +1,21 @@
+# Binaries
+*.exe
+bin/
+bridge
+codex-browser-bridge
+
+# Test artifacts
+test_*.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/

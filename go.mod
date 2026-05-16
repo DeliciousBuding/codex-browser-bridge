@@ -1,4 +1,4 @@
-module github.com/user/codex-browser-bridge
+module github.com/DeliciousBuding/codex-browser-bridge
 
 go 1.26.1
 
