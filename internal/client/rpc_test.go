@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -180,6 +181,42 @@ func TestSendRequestTimesOutOnClosedConn(t *testing.T) {
 		t.Fatal("SendRequest did not return after server close")
 	}
 	c.Close()
+}
+
+func TestSendRequestConcurrent(t *testing.T) {
+	c, srv := newPipedClient(t, func(req protocol.Request) (interface{}, *protocol.ErrorObject) {
+		return map[string]int{"echo": req.ID}, nil
+	})
+	defer srv.close()
+	defer c.Close()
+
+	const n = 32
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			raw, err := c.SendRequest("ping", nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			var got map[string]int
+			if err := json.Unmarshal(raw, &got); err != nil {
+				errs <- err
+				return
+			}
+			if got["echo"] == 0 {
+				errs <- fmt.Errorf("missing echoed id: %v", got)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("concurrent request: %v", err)
+	}
 }
 
 func contains(s, substr string) bool {
