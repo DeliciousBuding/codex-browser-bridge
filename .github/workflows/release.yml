@@ -40,26 +40,24 @@ jobs:
         run: sha256sum codex-browser-bridge*.exe > checksums.txt
 
       - name: Generate release notes
-        id: notes
         shell: bash
         run: |
           if [ -f CHANGELOG.md ]; then
-            notes=$(awk '/^## \[/{if(found) exit; found=1; next} found{print}' CHANGELOG.md)
+            awk '/^## \[/{if(found) exit; found=1; next} found{print}' CHANGELOG.md > release_notes.txt
           fi
-          if [ -z "$notes" ]; then
-            notes=$(git log --oneline --no-merges $(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD)
+          if [ ! -s release_notes.txt ]; then
+            prev=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || git rev-list --max-parents=0 HEAD)
+            git log --oneline --no-merges "$prev"..HEAD > release_notes.txt
           fi
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$notes" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          gh release create "${{ steps.version.outputs.tag }}" `
-            --title "${{ steps.version.outputs.tag }}" `
-            --notes "${{ steps.notes.outputs.notes }}" `
-            codex-browser-bridge.exe `
-            codex-browser-bridge-arm64.exe `
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes-file release_notes.txt \
+            codex-browser-bridge.exe \
+            codex-browser-bridge-arm64.exe \
             checksums.txt
