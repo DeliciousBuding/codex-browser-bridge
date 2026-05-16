@@ -21,9 +21,9 @@ type MCPServer struct {
 }
 
 type Tool struct {
-	Name        string                                         `json:"name"`
-	Description string                                         `json:"description"`
-	InputSchema json.RawMessage                                `json:"inputSchema"`
+	Name        string                                        `json:"name"`
+	Description string                                        `json:"description"`
+	InputSchema json.RawMessage                               `json:"inputSchema"`
 	Handler     func(args json.RawMessage) ([]Content, error) `json:"-"`
 }
 
@@ -206,7 +206,7 @@ func (s *MCPServer) handleMessage(req struct {
 			tools[i] = map[string]interface{}{
 				"name":        t.Name,
 				"description": t.Description,
-				"inputSchema": json.RawMessage(t.InputSchema),
+				"inputSchema": t.InputSchema,
 			}
 		}
 		s.writeResult(req.ID, map[string]interface{}{"tools": tools})
