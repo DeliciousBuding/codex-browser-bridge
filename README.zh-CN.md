@@ -75,7 +75,13 @@ Agent 因此可以：
 
 ## 安装
 
-### 方式一：Go install
+### 方式一：npm install
+
+```bash
+npm i -g @delicious233/codex-browser-bridge
+```
+
+### 方式二：Go install
 
 ```bash
 go install github.com/DeliciousBuding/codex-browser-bridge/cmd/bridge@latest
