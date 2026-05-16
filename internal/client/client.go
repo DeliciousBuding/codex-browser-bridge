@@ -62,12 +62,13 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 			"Try: restart Codex Desktop, then re-open the Codex Chrome Extension.", path, err)
 	}
 
-	return newClient(conn, logger), nil
+	return NewFromConn(conn, logger), nil
 }
 
-// newClient wraps an established net.Conn in a Client and starts the read loop.
-// Exported as a private helper so tests can drive Client over an in-memory pipe.
-func newClient(conn net.Conn, logger *log.Logger) *Client {
+// NewFromConn wraps an established net.Conn in a Client and starts the read loop.
+// Useful for tests that want to drive Client over an in-memory pipe, or callers
+// that establish the transport themselves.
+func NewFromConn(conn net.Conn, logger *log.Logger) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Client{
 		conn:   conn,

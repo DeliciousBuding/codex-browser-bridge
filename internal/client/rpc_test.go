@@ -67,7 +67,7 @@ func newPipedClient(t *testing.T, handler func(protocol.Request) (interface{}, *
 	t.Helper()
 	clientConn, serverConn := net.Pipe()
 	srv := newFakeServer(t, serverConn, handler)
-	c := newClient(clientConn, nil)
+	c := NewFromConn(clientConn, nil)
 	return c, srv
 }
 
