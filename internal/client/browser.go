@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 )
 
 // --- High-level browser API methods ---
@@ -155,6 +156,44 @@ func (c *Client) Reload(tabID string) error {
 	}
 	_, err = c.cdpWithAttach(id, "Page.reload", nil)
 	return err
+}
+
+// WaitForLoad polls document.readyState until it equals "complete" or timeoutMs elapses.
+// Returns the final readyState observed; error if it never reached "complete".
+func (c *Client) WaitForLoad(tabID string, timeoutMs int) (string, error) {
+	id, err := strconv.Atoi(tabID)
+	if err != nil {
+		return "", fmt.Errorf("wait_for_load requires numeric tab_id, got %q", tabID)
+	}
+	if timeoutMs <= 0 {
+		timeoutMs = 10000
+	}
+	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
+	last := ""
+	for {
+		raw, err := c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
+			"expression":    "document.readyState",
+			"returnByValue": true,
+		})
+		if err != nil {
+			return last, err
+		}
+		var result struct {
+			Result struct {
+				Value string `json:"value"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(raw, &result); err == nil {
+			last = result.Result.Value
+			if last == "complete" {
+				return last, nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return last, fmt.Errorf("timed out after %dms waiting for readyState=complete (last=%q)", timeoutMs, last)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // --- CDP helper ---

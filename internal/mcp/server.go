@@ -80,6 +80,9 @@ func (s *MCPServer) registerTools() {
 		{Name: "codex_reload", Description: "Reload a tab",
 			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"}},"required":["tab_id"]}`),
 			Handler:     s.handleReload},
+		{Name: "codex_wait_for_load", Description: "Poll document.readyState until it equals \"complete\" or timeout (ms) elapses. Useful after navigation on slow pages.",
+			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"},"timeout_ms":{"type":"number","description":"Timeout in milliseconds. Defaults to 10000."}},"required":["tab_id"]}`),
+			Handler:     s.handleWaitForLoad},
 
 		// Playwright API
 		{Name: "codex_dom_snapshot", Description: "Get accessibility tree DOM snapshot of a tab",
@@ -319,6 +322,19 @@ func (s *MCPServer) handleReload(args json.RawMessage) ([]Content, error) {
 		return nil, err
 	}
 	return textContent(fmt.Sprintf("Reloaded tab %s", p.TabID)), nil
+}
+
+func (s *MCPServer) handleWaitForLoad(args json.RawMessage) ([]Content, error) {
+	var p struct {
+		TabID     string `json:"tab_id"`
+		TimeoutMs int    `json:"timeout_ms"`
+	}
+	json.Unmarshal(args, &p)
+	state, err := s.client.WaitForLoad(p.TabID, p.TimeoutMs)
+	if err != nil {
+		return nil, err
+	}
+	return textContent(fmt.Sprintf("Tab %s reached readyState=%s", p.TabID, state)), nil
 }
 
 func (s *MCPServer) handleDOMSnapshot(args json.RawMessage) ([]Content, error) {
