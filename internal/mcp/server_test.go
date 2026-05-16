@@ -31,7 +31,7 @@ func decodeResponses(t *testing.T, out *bytes.Buffer) []map[string]interface{} {
 
 func TestRegisteredToolCount(t *testing.T) {
 	s, _ := newTestServer("")
-	const want = 21
+	const want = 22
 	if len(s.tools) != want {
 		t.Errorf("tool count = %d, want %d", len(s.tools), want)
 	}

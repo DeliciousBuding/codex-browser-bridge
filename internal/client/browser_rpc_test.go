@@ -225,6 +225,59 @@ func TestScreenshotExtractsBase64Data(t *testing.T) {
 	}
 }
 
+func TestWaitForLoadReturnsOnComplete(t *testing.T) {
+	var calls int
+	var mu sync.Mutex
+	c, _, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} {
+		if req.Method != "executeCdp" {
+			return map[string]bool{"ok": true}
+		}
+		mu.Lock()
+		calls++
+		state := "loading"
+		if calls >= 2 {
+			state = "complete"
+		}
+		mu.Unlock()
+		return map[string]interface{}{"result": map[string]interface{}{"value": state}}
+	})
+	defer cleanup()
+
+	state, err := c.WaitForLoad("3", 5000)
+	if err != nil {
+		t.Fatalf("WaitForLoad: %v", err)
+	}
+	if state != "complete" {
+		t.Errorf("final state = %q, want complete", state)
+	}
+}
+
+func TestWaitForLoadTimesOut(t *testing.T) {
+	c, _, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} {
+		if req.Method != "executeCdp" {
+			return map[string]bool{"ok": true}
+		}
+		return map[string]interface{}{"result": map[string]interface{}{"value": "loading"}}
+	})
+	defer cleanup()
+
+	state, err := c.WaitForLoad("3", 250)
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if state != "loading" {
+		t.Errorf("last observed state = %q, want loading", state)
+	}
+}
+
+func TestWaitForLoadRejectsNonNumeric(t *testing.T) {
+	c, _, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} { return map[string]bool{} })
+	defer cleanup()
+	if _, err := c.WaitForLoad("abc", 1000); err == nil {
+		t.Fatal("expected error for non-numeric tab id, got nil")
+	}
+}
+
 func TestEvaluateForwardsExpression(t *testing.T) {
 	c, rec, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} {
 		return map[string]interface{}{"result": map[string]interface{}{"value": 99}}
