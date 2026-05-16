@@ -89,7 +89,7 @@ go install github.com/DeliciousBuding/codex-browser-bridge/cmd/bridge@latest
 
 确保 Go 的 bin 路径在 `PATH` 中。
 
-### 方式二：下载 Release
+### 方式三：下载 Release
 
 从以下地址下载最新二进制文件：
 

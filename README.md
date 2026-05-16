@@ -99,7 +99,7 @@ https://github.com/DeliciousBuding/codex-browser-bridge/releases
 
 Then place `codex-browser-bridge.exe` somewhere in your `PATH`.
 
-### Option 3: Build from source
+### Option 4: Build from source
 
 ```bash
 git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
