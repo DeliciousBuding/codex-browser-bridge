@@ -190,6 +190,72 @@ func TestHandleNavigate(t *testing.T) {
 	}
 }
 
+func TestHandleNavigateBack(t *testing.T) {
+	srv, pipe, cleanup := newServerWithPipe(t, func(req protocol.Request) (interface{}, *protocol.ErrorObject) {
+		if req.Method != "executeCdp" {
+			return map[string]bool{"ok": true}, nil
+		}
+		params, _ := req.Params.(map[string]interface{})
+		if params["method"] == "Page.getNavigationHistory" {
+			return map[string]interface{}{
+				"currentIndex": 1,
+				"entries": []map[string]interface{}{
+					{"id": 100, "url": "https://a.test"},
+					{"id": 101, "url": "https://b.test"},
+				},
+			}, nil
+		}
+		return map[string]bool{"ok": true}, nil
+	})
+	defer cleanup()
+
+	out, ok := callTool(t, srv, "codex_navigate_back", map[string]interface{}{"tab_id": "5"})
+	if !ok {
+		t.Fatalf("handler errored: %s", out)
+	}
+	if !strings.Contains(out, "back") {
+		t.Errorf("output should mention back navigation: %s", out)
+	}
+
+	hasNavigate := false
+	for _, m := range pipe.recordedMethods() {
+		if m == "executeCdp" {
+			hasNavigate = true
+		}
+	}
+	if !hasNavigate {
+		t.Errorf("expected executeCdp calls, got %v", pipe.recordedMethods())
+	}
+}
+
+func TestHandleNavigateForward(t *testing.T) {
+	srv, _, cleanup := newServerWithPipe(t, func(req protocol.Request) (interface{}, *protocol.ErrorObject) {
+		if req.Method != "executeCdp" {
+			return map[string]bool{"ok": true}, nil
+		}
+		params, _ := req.Params.(map[string]interface{})
+		if params["method"] == "Page.getNavigationHistory" {
+			return map[string]interface{}{
+				"currentIndex": 0,
+				"entries": []map[string]interface{}{
+					{"id": 100, "url": "https://a.test"},
+					{"id": 101, "url": "https://b.test"},
+				},
+			}, nil
+		}
+		return map[string]bool{"ok": true}, nil
+	})
+	defer cleanup()
+
+	out, ok := callTool(t, srv, "codex_navigate_forward", map[string]interface{}{"tab_id": "5"})
+	if !ok {
+		t.Fatalf("handler errored: %s", out)
+	}
+	if !strings.Contains(out, "forward") {
+		t.Errorf("output should mention forward navigation: %s", out)
+	}
+}
+
 func TestHandleScreenshot(t *testing.T) {
 	srv, _, cleanup := newServerWithPipe(t, func(req protocol.Request) (interface{}, *protocol.ErrorObject) {
 		if req.Method == "executeCdp" {

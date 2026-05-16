@@ -17,6 +17,7 @@ type MCPServer struct {
 	toolMap map[string]Tool
 	in      io.Reader
 	out     io.Writer
+	version string
 }
 
 type Tool struct {
@@ -52,9 +53,18 @@ func NewMCPServerWithIO(c *client.Client, in io.Reader, out io.Writer) *MCPServe
 		toolMap: make(map[string]Tool),
 		in:      in,
 		out:     out,
+		version: "dev",
 	}
 	s.registerTools()
 	return s
+}
+
+// SetVersion overrides the version reported in the MCP initialize handshake.
+// main.go calls this with the ldflags-injected build version.
+func (s *MCPServer) SetVersion(v string) {
+	if v != "" {
+		s.version = v
+	}
 }
 
 func (s *MCPServer) registerTools() {
@@ -80,6 +90,12 @@ func (s *MCPServer) registerTools() {
 		{Name: "codex_reload", Description: "Reload a tab",
 			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"}},"required":["tab_id"]}`),
 			Handler:     s.handleReload},
+		{Name: "codex_navigate_back", Description: "Navigate a tab back one entry in its history",
+			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"}},"required":["tab_id"]}`),
+			Handler:     s.handleNavigateBack},
+		{Name: "codex_navigate_forward", Description: "Navigate a tab forward one entry in its history",
+			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"}},"required":["tab_id"]}`),
+			Handler:     s.handleNavigateForward},
 		{Name: "codex_wait_for_load", Description: "Poll document.readyState until it equals \"complete\" or timeout (ms) elapses. Useful after navigation on slow pages.",
 			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"},"timeout_ms":{"type":"number","description":"Timeout in milliseconds. Defaults to 10000."}},"required":["tab_id"]}`),
 			Handler:     s.handleWaitForLoad},
@@ -182,7 +198,7 @@ func (s *MCPServer) handleMessage(req struct {
 		s.writeResult(req.ID, map[string]interface{}{
 			"protocolVersion": "2024-11-05",
 			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
-			"serverInfo":      map[string]interface{}{"name": "codex-browser-bridge", "version": "0.1.0"},
+			"serverInfo":      map[string]interface{}{"name": "codex-browser-bridge", "version": s.version},
 		})
 	case "tools/list":
 		tools := make([]map[string]interface{}, len(s.tools))
@@ -322,6 +338,28 @@ func (s *MCPServer) handleReload(args json.RawMessage) ([]Content, error) {
 		return nil, err
 	}
 	return textContent(fmt.Sprintf("Reloaded tab %s", p.TabID)), nil
+}
+
+func (s *MCPServer) handleNavigateBack(args json.RawMessage) ([]Content, error) {
+	var p struct {
+		TabID string `json:"tab_id"`
+	}
+	json.Unmarshal(args, &p)
+	if err := s.client.NavigateBack(p.TabID); err != nil {
+		return nil, err
+	}
+	return textContent(fmt.Sprintf("Navigated tab %s back", p.TabID)), nil
+}
+
+func (s *MCPServer) handleNavigateForward(args json.RawMessage) ([]Content, error) {
+	var p struct {
+		TabID string `json:"tab_id"`
+	}
+	json.Unmarshal(args, &p)
+	if err := s.client.NavigateForward(p.TabID); err != nil {
+		return nil, err
+	}
+	return textContent(fmt.Sprintf("Navigated tab %s forward", p.TabID)), nil
 }
 
 func (s *MCPServer) handleWaitForLoad(args json.RawMessage) ([]Content, error) {
