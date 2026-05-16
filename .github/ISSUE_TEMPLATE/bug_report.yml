@@ -1,0 +1,85 @@
+name: Bug report
+description: Something isn't working as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill in as much as you can — the more reproducible, the faster it gets fixed.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: A clear description of the bug, including which MCP tool was called and what response you got.
+      placeholder: |
+        I called codex_screenshot and got "attach failed for tab 5: ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start Codex Desktop and Chrome
+        2. Run `codex-browser-bridge -mode cli`
+        3. Type `tabs`
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: input
+    id: bridge-version
+    attributes:
+      label: codex-browser-bridge version
+      description: Output of `codex-browser-bridge --version`
+      placeholder: v0.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: codex-version
+    attributes:
+      label: Codex Desktop version
+    validations:
+      required: false
+
+  - type: input
+    id: chrome-version
+    attributes:
+      label: Chrome version
+    validations:
+      required: false
+
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 Pro 10.0.26200
+    validations:
+      required: false
+
+  - type: textarea
+    id: discover-output
+    attributes:
+      label: Output of `codex-browser-bridge -mode discover`
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Bridge logs
+      description: Stderr from the bridge (`[codex-bridge] ...` lines), if any.
+      render: text
+    validations:
+      required: false
