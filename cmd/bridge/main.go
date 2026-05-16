@@ -217,9 +217,7 @@ func runCLI(pipeName string, logger *log.Logger) {
 	}
 }
 
-type scanner struct {
-	buf []byte
-}
+type scanner struct{}
 
 func newScanner() *scanner {
 	return &scanner{}

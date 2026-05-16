@@ -206,7 +206,9 @@ func truncate(s string, n int) string {
 // newUUID generates a UUID v4 string without external dependencies.
 func newUUID() string {
 	var b [16]byte
-	rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
