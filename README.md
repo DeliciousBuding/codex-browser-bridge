@@ -235,20 +235,21 @@ quit
 
 ### Navigation
 
-| Tool             | Description             |
-| ---------------- | ----------------------- |
-| `codex_navigate` | Navigate a tab to a URL |
-| `codex_reload`   | Reload a tab            |
+| Tool                  | Description                                         |
+| --------------------- | --------------------------------------------------- |
+| `codex_navigate`      | Navigate a tab to a URL                             |
+| `codex_reload`        | Reload a tab                                        |
+| `codex_wait_for_load` | Poll `document.readyState` until `complete`         |
 
 ### Page inspection
 
-| Tool                    | Description                                |
-| ----------------------- | ------------------------------------------ |
-| `codex_screenshot`      | Capture a screenshot as base64 PNG         |
-| `codex_dom_snapshot`    | Get an accessibility tree snapshot         |
-| `codex_dom_get_visible` | Get a simplified visible DOM tree          |
-| `codex_evaluate`        | Evaluate JavaScript in the page context    |
-| `codex_get_info`        | Get backend information from the extension |
+| Tool                    | Description                                  |
+| ----------------------- | -------------------------------------------- |
+| `codex_screenshot`      | Capture a screenshot (returns MCP image)     |
+| `codex_dom_snapshot`    | Get an accessibility tree snapshot           |
+| `codex_dom_get_visible` | Get a simplified visible DOM tree            |
+| `codex_evaluate`        | Evaluate JavaScript in the page context      |
+| `codex_get_info`        | Get backend information from the extension   |
 
 ### Interaction
 
