@@ -351,3 +351,7 @@ MIT License
 ## 免责声明
 
 本项目为独立第三方项目，与 OpenAI、Codex Desktop、Anthropic、Claude Code、Google 或 Chrome 无关联、无认可、无从属关系。
+
+## 致谢
+
+感谢 [LINUX DO](https://linux.do/) 社区的支持与反馈。
