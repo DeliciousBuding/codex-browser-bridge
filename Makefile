@@ -10,7 +10,7 @@ test:
 	go test ./...
 
 install-local: build
-	cp bin/codex-browser-bridge ~/.local/bin/codex-browser-bridge
+	cp bin/codex-browser-bridge.exe ~/.local/bin/codex-browser-bridge.exe
 
 clean:
 	rm -rf bin/
