@@ -1,6 +1,6 @@
 module github.com/DeliciousBuding/codex-browser-bridge
 
-go 1.26.1
+go 1.23
 
 require github.com/Microsoft/go-winio v0.6.2
 

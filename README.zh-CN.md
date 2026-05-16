@@ -19,6 +19,12 @@
   <a href="https://github.com/DeliciousBuding/codex-browser-bridge/actions">
     <img src="https://img.shields.io/github/actions/workflow/status/DeliciousBuding/codex-browser-bridge/ci.yml?style=flat-square" alt="CI">
   </a>
+  <a href="https://codecov.io/gh/DeliciousBuding/codex-browser-bridge">
+    <img src="https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square" alt="Coverage">
+  </a>
+  <a href="https://goreportcard.com/report/github.com/DeliciousBuding/codex-browser-bridge">
+    <img src="https://goreportcard.com/badge/github.com/DeliciousBuding/codex-browser-bridge?style=flat-square" alt="Go Report Card">
+  </a>
   <a href="README.md">English</a>
 </p>
 

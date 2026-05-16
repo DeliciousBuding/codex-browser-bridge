@@ -11,10 +11,10 @@ import (
 
 // Tab represents an open browser tab.
 type Tab struct {
-	ID    string `json:"-"`
+	ID    string      `json:"-"`
 	RawID interface{} `json:"id"`
-	URL   string `json:"url,omitempty"`
-	Title string `json:"title,omitempty"`
+	URL   string      `json:"url,omitempty"`
+	Title string      `json:"title,omitempty"`
 }
 
 func (t *Tab) normalize() {
@@ -240,7 +240,7 @@ func (c *Client) DOMSnapshot(tabID string) (string, error) {
 	if err != nil {
 		// Fallback: use Runtime.evaluate to get document.body text
 		raw2, err2 := c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
-			"expression": `document.body ? document.body.innerText : document.documentElement.innerText`,
+			"expression":    `document.body ? document.body.innerText : document.documentElement.innerText`,
 			"returnByValue": true,
 		})
 		if err2 != nil {
@@ -260,13 +260,16 @@ func (c *Client) DOMSnapshot(tabID string) (string, error) {
 }
 
 // Screenshot captures a screenshot of the tab. Returns base64-encoded PNG.
+// fullPage is reserved for a future implementation using Page.getLayoutMetrics
+// + clip; currently always captures the viewport.
 func (c *Client) Screenshot(tabID string, fullPage bool) (string, error) {
+	_ = fullPage
 	id, err := strconv.Atoi(tabID)
 	if err != nil {
 		return "", fmt.Errorf("screenshot requires numeric tab_id, got %q", tabID)
 	}
 	raw, err := c.cdpWithAttach(id, "Page.captureScreenshot", map[string]interface{}{
-		"format":  "png",
+		"format": "png",
 	})
 	if err != nil {
 		return "", err
@@ -484,12 +487,12 @@ func (c *Client) Evaluate(tabID, expression string) (json.RawMessage, error) {
 
 // UserTab represents a tab in the user's browser.
 type UserTab struct {
-	ID         string `json:"-"`
+	ID         string      `json:"-"`
 	RawID      interface{} `json:"id"`
-	Title      string `json:"title,omitempty"`
-	URL        string `json:"url,omitempty"`
-	LastOpened string `json:"lastOpened,omitempty"`
-	TabGroup   string `json:"tabGroup,omitempty"`
+	Title      string      `json:"title,omitempty"`
+	URL        string      `json:"url,omitempty"`
+	LastOpened string      `json:"lastOpened,omitempty"`
+	TabGroup   string      `json:"tabGroup,omitempty"`
 }
 
 // normalize converts RawID to the string ID field.
