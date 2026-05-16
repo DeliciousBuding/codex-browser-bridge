@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/user/codex-browser-bridge/internal/client"
+	"github.com/DeliciousBuding/codex-browser-bridge/internal/client"
 )
 
 type MCPServer struct {

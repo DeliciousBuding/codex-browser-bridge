@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Get version
+        id: version
+        run: echo "tag=${{ github.ref_name }}" >> $env:GITHUB_OUTPUT
+
+      - name: Build Windows binaries
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          for arch in amd64 arm64; do
+            suffix=""
+            if [ "$arch" = "arm64" ]; then suffix="-arm64"; fi
+            GOOS=windows GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" \
+              -o "codex-browser-bridge-windows${suffix}.exe" ./cmd/bridge
+          done
+
+      - name: Build Linux binaries
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          for arch in amd64 arm64; do
+            suffix=""
+            if [ "$arch" = "arm64" ]; then suffix="-arm64"; fi
+            GOOS=linux GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" \
+              -o "codex-browser-bridge-linux${suffix}" ./cmd/bridge
+            tar czf "codex-browser-bridge-linux${suffix}.tar.gz" "codex-browser-bridge-linux${suffix}"
+            rm "codex-browser-bridge-linux${suffix}"
+          done
+
+      - name: Build macOS binaries
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          for arch in amd64 arm64; do
+            suffix=""
+            if [ "$arch" = "arm64" ]; then suffix="-arm64"; fi
+            GOOS=darwin GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" \
+              -o "codex-browser-bridge-darwin${suffix}" ./cmd/bridge
+            tar czf "codex-browser-bridge-darwin${suffix}.tar.gz" "codex-browser-bridge-darwin${suffix}"
+            rm "codex-browser-bridge-darwin${suffix}"
+          done
+
+      - name: Generate checksums
+        shell: bash
+        run: sha256sum codex-browser-bridge-*.{exe,tar.gz} > checksums.txt
+
+      - name: Generate release notes
+        id: notes
+        shell: bash
+        run: |
+          if [ -f CHANGELOG.md ]; then
+            notes=$(awk '/^## \[/{if(found) exit; found=1; next} found{print}' CHANGELOG.md)
+          fi
+          if [ -z "$notes" ]; then
+            notes=$(git log --oneline --no-merges $(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD)
+          fi
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$notes" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" `
+            --title "${{ steps.version.outputs.tag }}" `
+            --notes "${{ steps.notes.outputs.notes }}" `
+            codex-browser-bridge-*.exe `
+            codex-browser-bridge-*.tar.gz `
+            checksums.txt

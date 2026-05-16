@@ -7,15 +7,23 @@ import (
 	"log"
 	"os"
 
-	"github.com/user/codex-browser-bridge/internal/client"
-	"github.com/user/codex-browser-bridge/internal/discovery"
-	"github.com/user/codex-browser-bridge/internal/mcp"
+	"github.com/DeliciousBuding/codex-browser-bridge/internal/client"
+	"github.com/DeliciousBuding/codex-browser-bridge/internal/discovery"
+	"github.com/DeliciousBuding/codex-browser-bridge/internal/mcp"
 )
+
+var version = "dev"
 
 func main() {
 	mode := flag.String("mode", "mcp", "Mode: mcp (MCP server via stdio), cli (interactive), discover (list pipes)")
 	pipe := flag.String("pipe", "", "Pipe name override (auto-discovers if empty)")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("codex-browser-bridge %s\n", version)
+		return
+	}
 
 	logger := log.New(os.Stderr, "[codex-bridge] ", log.LstdFlags)
 

@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/user/codex-browser-bridge/internal/discovery"
-	"github.com/user/codex-browser-bridge/internal/protocol"
+	"github.com/DeliciousBuding/codex-browser-bridge/internal/discovery"
+	"github.com/DeliciousBuding/codex-browser-bridge/internal/protocol"
 )
 
 // Client communicates with the Codex Chrome extension via a named pipe.
