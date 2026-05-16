@@ -1,0 +1,66 @@
+run:
+  timeout: 3m
+  tests: true
+  # Pin the analysis target below the latest released golangci-lint
+  # toolchain (currently 1.24). The project's go.mod declares 1.26 for
+  # the runtime toolchain, but no 1.25+ syntax is used; this just stops
+  # golangci-lint from refusing to load the config.
+  go: "1.24"
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - unconvert
+    - revive
+    - gofmt
+    - goimports
+
+linters-settings:
+  errcheck:
+    check-type-assertions: false
+    exclude-functions:
+      - encoding/json.Unmarshal
+      - encoding/json.Marshal
+      - (*encoding/json.Encoder).Encode
+      - fmt.Fprintln
+      - fmt.Fprintf
+      - fmt.Println
+      - fmt.Printf
+
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+        arguments: ["disableStutteringCheck"]
+      - name: increment-decrement
+      - name: var-declaration
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - revive
+        - unused
+  max-issues-per-linter: 0
+  max-same-issues: 0
