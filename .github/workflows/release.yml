@@ -24,49 +24,20 @@ jobs:
         id: version
         run: echo "tag=${{ github.ref_name }}" >> $env:GITHUB_OUTPUT
 
-      - name: Build Windows binaries
+      - name: Build
         shell: bash
         run: |
           VERSION="${{ steps.version.outputs.tag }}"
-          for arch in amd64 arm64; do
-            suffix=""
-            if [ "$arch" = "arm64" ]; then suffix="-arm64"; fi
-            GOOS=windows GOARCH=$arch go build -trimpath \
-              -ldflags "-s -w -X main.version=$VERSION" \
-              -o "codex-browser-bridge-windows${suffix}.exe" ./cmd/bridge
-          done
-
-      - name: Build Linux binaries
-        shell: bash
-        run: |
-          VERSION="${{ steps.version.outputs.tag }}"
-          for arch in amd64 arm64; do
-            suffix=""
-            if [ "$arch" = "arm64" ]; then suffix="-arm64"; fi
-            GOOS=linux GOARCH=$arch go build -trimpath \
-              -ldflags "-s -w -X main.version=$VERSION" \
-              -o "codex-browser-bridge-linux${suffix}" ./cmd/bridge
-            tar czf "codex-browser-bridge-linux${suffix}.tar.gz" "codex-browser-bridge-linux${suffix}"
-            rm "codex-browser-bridge-linux${suffix}"
-          done
-
-      - name: Build macOS binaries
-        shell: bash
-        run: |
-          VERSION="${{ steps.version.outputs.tag }}"
-          for arch in amd64 arm64; do
-            suffix=""
-            if [ "$arch" = "arm64" ]; then suffix="-arm64"; fi
-            GOOS=darwin GOARCH=$arch go build -trimpath \
-              -ldflags "-s -w -X main.version=$VERSION" \
-              -o "codex-browser-bridge-darwin${suffix}" ./cmd/bridge
-            tar czf "codex-browser-bridge-darwin${suffix}.tar.gz" "codex-browser-bridge-darwin${suffix}"
-            rm "codex-browser-bridge-darwin${suffix}"
-          done
+          GOOS=windows GOARCH=amd64 go build -trimpath \
+            -ldflags "-s -w -X main.version=$VERSION" \
+            -o "codex-browser-bridge.exe" ./cmd/bridge
+          GOOS=windows GOARCH=arm64 go build -trimpath \
+            -ldflags "-s -w -X main.version=$VERSION" \
+            -o "codex-browser-bridge-arm64.exe" ./cmd/bridge
 
       - name: Generate checksums
         shell: bash
-        run: sha256sum codex-browser-bridge-*.{exe,tar.gz} > checksums.txt
+        run: sha256sum codex-browser-bridge*.exe > checksums.txt
 
       - name: Generate release notes
         id: notes
@@ -89,6 +60,6 @@ jobs:
           gh release create "${{ steps.version.outputs.tag }}" `
             --title "${{ steps.version.outputs.tag }}" `
             --notes "${{ steps.notes.outputs.notes }}" `
-            codex-browser-bridge-*.exe `
-            codex-browser-bridge-*.tar.gz `
+            codex-browser-bridge.exe `
+            codex-browser-bridge-arm64.exe `
             checksums.txt
