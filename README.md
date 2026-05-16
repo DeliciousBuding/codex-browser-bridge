@@ -13,6 +13,8 @@
 
 Single Go binary that connects AI agents to the user's existing Chrome browser through Codex Desktop's Chrome extension infrastructure — named pipes, CDP, and JSON-RPC.
 
+> **Windows only** — uses Windows Named Pipes (`\\.\pipe\codex-browser-use-*`) to communicate with the Codex Chrome Extension host.
+
 **Why?** Codex Desktop's `browser-client.mjs` depends on `import.meta.__codexNativePipe`, a privileged object injected by Codex's custom ESM loader. Claude Code can't access it. But the underlying protocol is simple (JSON-RPC 2.0 over length-prefixed frames), so this bridge reimplements it.
 
 ## Quick Start
