@@ -182,7 +182,9 @@ func (c *Client) attachTab(tabID int) error {
 
 // cdpWithAttach attaches the debugger and then executes a CDP command.
 func (c *Client) cdpWithAttach(tabID int, method string, params map[string]interface{}) (json.RawMessage, error) {
-	_ = c.attachTab(tabID)
+	if err := c.attachTab(tabID); err != nil {
+		return nil, fmt.Errorf("attach failed for tab %d: %w", tabID, err)
+	}
 	return c.executeCdp(tabID, method, params)
 }
 
@@ -508,6 +510,8 @@ func (c *Client) ClaimUserTab(tabID string) (Tab, error) {
 		return Tab{}, fmt.Errorf("decode claimUserTab: %w", err)
 	}
 	result.normalize()
+	// Auto-attach debugger so CDP commands work immediately
+	_ = c.attachTab(tabIDInt)
 	return result, nil
 }
 

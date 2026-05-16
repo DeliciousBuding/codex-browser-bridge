@@ -129,7 +129,7 @@ func (c *Client) SendRequest(method string, params map[string]interface{}) (json
 		return resp.Result, nil
 	case <-c.ctx.Done():
 		return nil, fmt.Errorf("connection closed while waiting for %s", method)
-	case <-time.After(30 * time.Second):
+	case <-time.After(60 * time.Second):
 		return nil, fmt.Errorf("timeout waiting for %s response", method)
 	}
 }
