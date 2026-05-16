@@ -15,6 +15,8 @@ type MCPServer struct {
 	client  *client.Client
 	tools   []Tool
 	toolMap map[string]Tool
+	in      io.Reader
+	out     io.Writer
 }
 
 type Tool struct {
@@ -25,9 +27,15 @@ type Tool struct {
 }
 
 func NewMCPServer(c *client.Client) *MCPServer {
+	return NewMCPServerWithIO(c, os.Stdin, os.Stdout)
+}
+
+func NewMCPServerWithIO(c *client.Client, in io.Reader, out io.Writer) *MCPServer {
 	s := &MCPServer{
 		client:  c,
 		toolMap: make(map[string]Tool),
+		in:      in,
+		out:     out,
 	}
 	s.registerTools()
 	return s
@@ -115,7 +123,7 @@ func (s *MCPServer) registerTools() {
 
 // Run reads JSON-RPC from stdin and writes responses to stdout (MCP stdio transport).
 func (s *MCPServer) Run() error {
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(s.in)
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -215,7 +223,7 @@ func (s *MCPServer) writeResult(id json.RawMessage, result interface{}) {
 		"result":  result,
 	}
 	data, _ := json.Marshal(resp)
-	fmt.Println(string(data))
+	fmt.Fprintln(s.out, string(data))
 }
 
 func (s *MCPServer) writeError(id json.RawMessage, code int, msg string) {
@@ -225,7 +233,7 @@ func (s *MCPServer) writeError(id json.RawMessage, code int, msg string) {
 		"error":   map[string]interface{}{"code": code, "message": msg},
 	}
 	data, _ := json.Marshal(resp)
-	fmt.Println(string(data))
+	fmt.Fprintln(s.out, string(data))
 }
 
 // --- Tool handler implementations ---

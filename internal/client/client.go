@@ -41,7 +41,12 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 			return nil, fmt.Errorf("discover pipes: %w", err)
 		}
 		if len(pipes) == 0 {
-			return nil, fmt.Errorf("no codex-browser-use pipes found; is Codex Desktop running?")
+			return nil, fmt.Errorf("no codex-browser-use pipes found.\n" +
+				"Checklist:\n" +
+				"  1. Codex Desktop is running\n" +
+				"  2. Chrome is running\n" +
+				"  3. Codex Chrome Extension is installed and enabled\n" +
+				"  4. The extension has connected to Codex Desktop (open a Codex chat once to trigger initialization)")
 		}
 		pipeName = pipes[0].Name
 		if logger != nil {
@@ -52,7 +57,9 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 	path := discovery.PipePath(pipeName)
 	conn, err := dialNamedPipe(path)
 	if err != nil {
-		return nil, fmt.Errorf("dial pipe %s: %w", path, err)
+		return nil, fmt.Errorf("dial pipe %s: %w\n"+
+			"This usually means the pipe is stale (Codex Desktop restarted) or the extension lost its host.\n"+
+			"Try: restart Codex Desktop, then re-open the Codex Chrome Extension.", path, err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
