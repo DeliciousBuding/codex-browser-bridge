@@ -218,6 +218,8 @@ info          ping          try <method> [json]   quit
 | 工具 | 说明 |
 |------|------|
 | `codex_navigate` | 导航到指定 URL |
+| `codex_navigate_back` | 历史记录后退一项 |
+| `codex_navigate_forward` | 历史记录前进一项 |
 | `codex_reload` | 重新加载标签页 |
 | `codex_wait_for_load` | 轮询 `document.readyState` 直到 `complete` |
 

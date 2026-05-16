@@ -65,6 +65,7 @@ func runMCP(pipeName string, logger *log.Logger) {
 	logger.Println("Connected to Codex browser pipe")
 
 	srv := mcp.NewMCPServer(c)
+	srv.SetVersion(version)
 	if err := srv.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "MCP server error: %v\n", err)
 		os.Exit(1)
