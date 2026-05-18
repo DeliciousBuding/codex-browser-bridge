@@ -185,8 +185,8 @@ func TestHandleNavigate(t *testing.T) {
 	}
 
 	methods := pipe.recordedMethods()
-	if len(methods) < 2 || methods[0] != "attach" || methods[1] != "executeCdp" {
-		t.Errorf("expected attach + executeCdp, got %v", methods)
+	if len(methods) < 3 || methods[0] != "detach" || methods[1] != "attach" || methods[2] != "executeCdp" {
+		t.Errorf("expected detach + attach + executeCdp, got %v", methods)
 	}
 }
 
