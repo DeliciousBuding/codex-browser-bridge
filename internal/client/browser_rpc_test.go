@@ -72,26 +72,29 @@ func TestNavigateSendsCDPNavigate(t *testing.T) {
 	}
 
 	calls := rec.snapshot()
-	if len(calls) < 2 {
-		t.Fatalf("expected attach + executeCdp, got %d calls", len(calls))
+	if len(calls) < 3 {
+		t.Fatalf("expected detach + attach + executeCdp, got %d calls: %v", len(calls), calls)
 	}
-	if calls[0].method != "attach" {
-		t.Errorf("first call %q, want attach", calls[0].method)
+	if calls[0].method != "detach" {
+		t.Errorf("first call %q, want detach", calls[0].method)
 	}
-	if calls[1].method != "executeCdp" {
-		t.Errorf("second call %q, want executeCdp", calls[1].method)
+	if calls[1].method != "attach" {
+		t.Errorf("second call %q, want attach", calls[1].method)
 	}
-	target, _ := calls[1].params["target"].(map[string]interface{})
+	if calls[2].method != "executeCdp" {
+		t.Errorf("third call %q, want executeCdp", calls[2].method)
+	}
+	target, _ := calls[2].params["target"].(map[string]interface{})
 	if target == nil {
-		t.Fatalf("executeCdp missing nested target: %+v", calls[1].params)
+		t.Fatalf("executeCdp missing nested target: %+v", calls[2].params)
 	}
 	if got, ok := target["tabId"].(float64); !ok || int(got) != 17 {
 		t.Errorf("target.tabId = %v, want 17", target["tabId"])
 	}
-	if calls[1].params["method"] != "Page.navigate" {
-		t.Errorf("CDP method = %v, want Page.navigate", calls[1].params["method"])
+	if calls[2].params["method"] != "Page.navigate" {
+		t.Errorf("CDP method = %v, want Page.navigate", calls[2].params["method"])
 	}
-	cmd, _ := calls[1].params["commandParams"].(map[string]interface{})
+	cmd, _ := calls[2].params["commandParams"].(map[string]interface{})
 	if cmd["url"] != "https://example.com" {
 		t.Errorf("commandParams.url = %v", cmd["url"])
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 
@@ -26,6 +27,14 @@ func main() {
 	}
 
 	logger := log.New(os.Stderr, "[codex-bridge] ", log.LstdFlags)
+
+	// If BRIDGE_DEBUG_LOG is set, also tee logs to that file
+	if debugPath := os.Getenv("BRIDGE_DEBUG_LOG"); debugPath != "" {
+		if f, err := os.OpenFile(debugPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+			logger = log.New(io.MultiWriter(os.Stderr, f), "[codex-bridge] ", log.LstdFlags)
+			defer f.Close()
+		}
+	}
 
 	switch *mode {
 	case "discover":
@@ -55,21 +64,25 @@ func runDiscover() {
 }
 
 func runMCP(pipeName string, logger *log.Logger) {
+	logger.Println("runMCP starting, discovering pipes...")
 	c, err := client.Connect(pipeName, logger)
 	if err != nil {
+		logger.Printf("Failed to connect: %v", err)
 		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
 		os.Exit(1)
 	}
 	defer c.Close()
 
-	logger.Println("Connected to Codex browser pipe")
+	logger.Println("Connected to Codex browser pipe, starting MCP server...")
 
 	srv := mcp.NewMCPServer(c)
 	srv.SetVersion(version)
 	if err := srv.Run(); err != nil {
+		logger.Printf("MCP server error: %v", err)
 		fmt.Fprintf(os.Stderr, "MCP server error: %v\n", err)
 		os.Exit(1)
 	}
+	logger.Println("MCP server exited normally")
 }
 
 func runCLI(pipeName string, logger *log.Logger) {
