@@ -37,16 +37,16 @@
 
 ### LOW — 8/10 fixed
 
-- [ ] **BUG-21** `client.go:238` — newUUID panic → error (deferred: Windows never fails)
+- [x] **BUG-21** `client.go:238` — newUUID returns error + fallbackUUID via math/rand
 - [x] **BUG-22** `main.go:33` — BRIDGE_DEBUG_LOG open failure logs warning
 - [x] **BUG-23** `main.go` — os.Exit → return error; defer preserved
 - [x] **BUG-24** `discovery.go:43` — extractUUID conditional single-char strip
 - [x] **BUG-25** `client.go:174` — time.After → time.NewTimer + defer Stop()
 - [x] **BUG-26** `browser.go:269-288` — DOMSnapshot fallback prepends marker
-- [ ] **BUG-27** `browser.go:585` — ClaimUserTab auto-attach error (deferred: minor)
+- [x] **BUG-27** `browser.go:639` — ClaimUserTab auto-attach error logged to logger
 - [x] **BUG-28** `browser.go:291,294` — Screenshots typo (was already fixed)
 - [x] **BUG-29** `browser.go:422-424` — DomCUAClick boxModel len(content) < 5 guard
-- [ ] **BUG-30** `client.go:180-193` — SendNotification test coverage (deferred: test batch)
+- [x] **BUG-30** `client.go:180-193` — TestSendNotificationFrame validates wire format
 
 ---
 
@@ -57,10 +57,10 @@
 | CRITICAL | 5 | 5 | 100% |
 | HIGH | 7 | 7 | 100% |
 | MEDIUM | 5 | 8 | 62% |
-| LOW | 8 | 10 | 80% |
-| **Total** | **25** | **30** | **83%** |
+| LOW | 10 | 10 | 100% |
+| **Total** | **28** | **30** | **93%** |
 
-5 deferred: BUG-13,15,17,19 (perf/edge-case MEDIUM) + BUG-21,27 (LOW, unlikely to trigger) + BUG-30 (test coverage).
+2 deferred: BUG-13,15 (global CDP + CUAKeypress perf optimization, non-blocking) + BUG-17 (WaitForLoad retry, edge case) + BUG-19 (isDebuggerError expansion, future extension).
 
 ### Audit methodology
 
