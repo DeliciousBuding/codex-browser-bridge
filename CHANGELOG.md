@@ -41,10 +41,6 @@ All notable changes to this project will be documented in this file.
 - `WaitForLoadTimeout` test: `strings.HasPrefix` replaces fragile `[:7]` slice
 - E2E Screenshot test now validates non-empty base64 return value
 
-### Audit
-- 6 subagents scanned in parallel: 2×Opus (core logic, protocol), 2×Sonnet (errors, tests), 2×Haiku (surface, main+discovery)
-- 30 bugs found, 28 fixed (93%). 2 deferred: global CDP attach optimization, CUAKeypress attach optimization
-
 ## [0.2.0] - 2026-05-16
 
 ### Added
