@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/DeliciousBuding/codex-browser-bridge/internal/client"
 	"github.com/DeliciousBuding/codex-browser-bridge/internal/discovery"
@@ -30,9 +31,12 @@ func main() {
 
 	// If BRIDGE_DEBUG_LOG is set, also tee logs to that file
 	if debugPath := os.Getenv("BRIDGE_DEBUG_LOG"); debugPath != "" {
-		if f, err := os.OpenFile(debugPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+		f, err := os.OpenFile(debugPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
 			logger = log.New(io.MultiWriter(os.Stderr, f), "[codex-bridge] ", log.LstdFlags)
 			defer func() { _ = f.Close() }()
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: BRIDGE_DEBUG_LOG=%s but failed to open: %v\n", debugPath, err)
 		}
 	}
 
@@ -40,9 +44,15 @@ func main() {
 	case "discover":
 		runDiscover()
 	case "mcp":
-		runMCP(*pipe, logger)
+		if err := runMCP(*pipe, logger); err != nil {
+			fmt.Fprintf(os.Stderr, "MCP error: %v\n", err)
+			os.Exit(1)
+		}
 	case "cli":
-		runCLI(*pipe, logger)
+		if err := runCLI(*pipe, logger); err != nil {
+			fmt.Fprintf(os.Stderr, "CLI error: %v\n", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown mode: %s\n", *mode)
 		os.Exit(1)
@@ -63,13 +73,11 @@ func runDiscover() {
 	fmt.Println(string(data))
 }
 
-func runMCP(pipeName string, logger *log.Logger) {
+func runMCP(pipeName string, logger *log.Logger) error {
 	logger.Println("runMCP starting, discovering pipes...")
 	c, err := client.Connect(pipeName, logger)
 	if err != nil {
-		logger.Printf("Failed to connect: %v", err)
-		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to connect: %w", err)
 	}
 	defer func() { _ = c.Close() }()
 
@@ -78,18 +86,16 @@ func runMCP(pipeName string, logger *log.Logger) {
 	srv := mcp.NewMCPServer(c)
 	srv.SetVersion(version)
 	if err := srv.Run(); err != nil {
-		logger.Printf("MCP server error: %v", err)
-		fmt.Fprintf(os.Stderr, "MCP server error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("MCP server error: %w", err)
 	}
 	logger.Println("MCP server exited normally")
+	return nil
 }
 
-func runCLI(pipeName string, logger *log.Logger) {
+func runCLI(pipeName string, logger *log.Logger) error {
 	c, err := client.Connect(pipeName, logger)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to connect: %w", err)
 	}
 	defer func() { _ = c.Close() }()
 
@@ -100,12 +106,19 @@ func runCLI(pipeName string, logger *log.Logger) {
 	scanner := newScanner()
 	for {
 		fmt.Print("> ")
-		line := scanner.nextLine()
+		line, ok := scanner.nextLine()
+		if !ok {
+			fmt.Println("\nGoodbye.")
+			return nil
+		}
 		if line == "" {
 			continue
 		}
 
 		args := splitArgs(line)
+		if len(args) == 0 {
+			continue
+		}
 		cmd := args[0]
 
 		switch cmd {
@@ -209,8 +222,8 @@ func runCLI(pipeName string, logger *log.Logger) {
 			// Everything after "try method " is the JSON params
 			method := args[1]
 			var params map[string]interface{}
-			if len(line) > len("try ")+len(method)+1 {
-				jsonStr := line[len("try ")+len(method)+1:]
+			if len(args) > 2 {
+				jsonStr := strings.Join(args[2:], " ")
 				if err := json.Unmarshal([]byte(jsonStr), &params); err != nil {
 					fmt.Printf("Invalid JSON params: %v\n", err)
 					continue
@@ -223,7 +236,7 @@ func runCLI(pipeName string, logger *log.Logger) {
 				fmt.Println(string(raw))
 			}
 		case "quit", "exit":
-			return
+			return nil
 		default:
 			fmt.Printf("Unknown command: %s\n", cmd)
 		}
@@ -236,13 +249,16 @@ func newScanner() *scanner {
 	return &scanner{}
 }
 
-func (s *scanner) nextLine() string {
+func (s *scanner) nextLine() (string, bool) {
 	var line []byte
 	b := make([]byte, 1)
 	for {
 		n, err := os.Stdin.Read(b)
+		if err == io.EOF {
+			return "", false
+		}
 		if err != nil || n == 0 {
-			return ""
+			return "", false
 		}
 		if b[0] == '\n' {
 			break
@@ -251,7 +267,7 @@ func (s *scanner) nextLine() string {
 			line = append(line, b[0])
 		}
 	}
-	return string(line)
+	return string(line), true
 }
 
 func splitArgs(s string) []string {
