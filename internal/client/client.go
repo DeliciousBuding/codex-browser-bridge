@@ -63,18 +63,33 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 				continue
 			}
 			c := NewFromConn(conn, logger)
-			// Health check: send a quick getInfo to verify the pipe is usable
-			result, err := c.SendRequest("getInfo", nil)
-			if err != nil {
-				_ = c.Close()
-				lastErr = err
-				if logger != nil {
-					logger.Printf("pipe %s health check failed: %v, trying next...", p.UUID, err)
-				}
-				continue
+			// Health check with short timeout
+			type healthResult struct {
+				result json.RawMessage
+				err    error
 			}
-			if logger != nil {
-				logger.Printf("auto-discovered pipe: %s (verified, info=%s)", p.Name, truncate(string(result), 120))
+			hc := make(chan healthResult, 1)
+			go func() {
+				r, e := c.SendRequest("getInfo", nil)
+				hc <- healthResult{r, e}
+			}()
+			select {
+			case hr := <-hc:
+				if hr.err != nil {
+					_ = c.Close()
+					lastErr = hr.err
+					if logger != nil {
+						logger.Printf("pipe %s health check failed: %v, trying next...", p.UUID, hr.err)
+					}
+					continue
+				}
+				if logger != nil {
+					logger.Printf("auto-discovered pipe: %s (verified, info=%s)", p.Name, truncate(string(hr.result), 120))
+				}
+			case <-time.After(5 * time.Second):
+				_ = c.Close()
+				lastErr = fmt.Errorf("health check timed out")
+				continue
 			}
 			return c, nil
 		}
@@ -163,6 +178,9 @@ func (c *Client) SendRequest(method string, params map[string]interface{}) (json
 		c.log.Printf("→ %s (id=%d)", method, id)
 	}
 
+	timer := time.NewTimer(60 * time.Second)
+	defer timer.Stop()
+
 	select {
 	case resp := <-ch:
 		if resp.Error != nil {
@@ -171,7 +189,7 @@ func (c *Client) SendRequest(method string, params map[string]interface{}) (json
 		return resp.Result, nil
 	case <-c.ctx.Done():
 		return nil, fmt.Errorf("connection closed while waiting for %s", method)
-	case <-time.After(60 * time.Second):
+	case <-timer.C:
 		return nil, fmt.Errorf("timeout waiting for %s response", method)
 	}
 }
@@ -208,12 +226,16 @@ func (c *Client) readLoop() {
 
 		// Try to parse as response (has "id" field)
 		var resp protocol.Response
-		if err := json.Unmarshal(raw, &resp); err == nil && resp.ID != 0 {
+		if err := json.Unmarshal(raw, &resp); err == nil && resp.ID != nil {
 			c.pendingMu.Lock()
-			ch, ok := c.pending[resp.ID]
+			ch, ok := c.pending[*resp.ID]
 			c.pendingMu.Unlock()
 			if ok {
-				ch <- &resp
+				select {
+				case ch <- &resp:
+				default:
+					// duplicate or late response; drop
+				}
 			}
 			continue
 		}
