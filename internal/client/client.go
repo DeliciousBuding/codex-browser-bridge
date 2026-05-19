@@ -78,17 +78,17 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 			}
 			return c, nil
 		}
-		return nil, fmt.Errorf("all %d pipes failed. Last error: %w"+
-			"Try: restart Codex Desktop, then re-open the Codex Chrome Extension.",
+		return nil, fmt.Errorf("all %d pipes failed; last error: %w. "+
+			"Try: restart Codex Desktop, then re-open the Codex Chrome Extension",
 			len(pipes), lastErr)
 	}
 
 	path := discovery.PipePath(pipeName)
 	conn, err := dialNamedPipe(path)
 	if err != nil {
-		return nil, fmt.Errorf("dial pipe %s: %w"+
-			"This usually means the pipe is stale (Codex Desktop restarted) or the extension lost its host.\n"+
-			"Try: restart Codex Desktop, then re-open the Codex Chrome Extension.", path, err)
+		return nil, fmt.Errorf("dial pipe %s: %w. "+
+			"This usually means the pipe is stale (Codex Desktop restarted) or the extension lost its host. "+
+			"Try: restart Codex Desktop, then re-open the Codex Chrome Extension", path, err)
 	}
 
 	return NewFromConn(conn, logger), nil
