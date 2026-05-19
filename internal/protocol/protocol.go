@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // JSON-RPC 2.0 message types (Codex uses JSON-RPC without the "jsonrpc":"2.0" field on responses)
@@ -32,7 +33,9 @@ type ErrorObject struct {
 }
 
 func (e *ErrorObject) Error() string {
-	return fmt.Sprintf("json-rpc error %d: %s", e.Code, e.Message)
+	msg := strings.ReplaceAll(e.Message, "\n", "\\n")
+	msg = strings.ReplaceAll(msg, "\r", "\\r")
+	return fmt.Sprintf("json-rpc error %d: %s", e.Code, msg)
 }
 
 // SessionParams are injected into every request's params
