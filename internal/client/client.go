@@ -66,7 +66,7 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 			// Health check: send a quick getInfo to verify the pipe is usable
 			result, err := c.SendRequest("getInfo", nil)
 			if err != nil {
-				c.Close()
+				_ = c.Close()
 				lastErr = err
 				if logger != nil {
 					logger.Printf("pipe %s health check failed: %v, trying next...", p.UUID, err)
@@ -78,7 +78,7 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 			}
 			return c, nil
 		}
-		return nil, fmt.Errorf("all %d pipes failed. Last error: %w\n"+
+		return nil, fmt.Errorf("all %d pipes failed. Last error: %w"+
 			"Try: restart Codex Desktop, then re-open the Codex Chrome Extension.",
 			len(pipes), lastErr)
 	}
@@ -86,7 +86,7 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 	path := discovery.PipePath(pipeName)
 	conn, err := dialNamedPipe(path)
 	if err != nil {
-		return nil, fmt.Errorf("dial pipe %s: %w\n"+
+		return nil, fmt.Errorf("dial pipe %s: %w"+
 			"This usually means the pipe is stale (Codex Desktop restarted) or the extension lost its host.\n"+
 			"Try: restart Codex Desktop, then re-open the Codex Chrome Extension.", path, err)
 	}

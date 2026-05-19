@@ -8,6 +8,7 @@ import (
 
 const codexPipePrefix = "codex-browser-use"
 
+// PipeInfo holds the name and UUID of a discovered Codex named pipe.
 type PipeInfo struct {
 	Name string
 	UUID string
@@ -44,6 +45,7 @@ func extractUUID(name string) string {
 	return rest
 }
 
+// PipePath returns the full \\.\pipe\ path for a named pipe.
 func PipePath(name string) string {
 	return `\\.\pipe\` + name
 }

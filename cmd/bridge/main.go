@@ -32,7 +32,7 @@ func main() {
 	if debugPath := os.Getenv("BRIDGE_DEBUG_LOG"); debugPath != "" {
 		if f, err := os.OpenFile(debugPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 			logger = log.New(io.MultiWriter(os.Stderr, f), "[codex-bridge] ", log.LstdFlags)
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 		}
 	}
 
@@ -71,7 +71,7 @@ func runMCP(pipeName string, logger *log.Logger) {
 		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
 		os.Exit(1)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	logger.Println("Connected to Codex browser pipe, starting MCP server...")
 
@@ -91,7 +91,7 @@ func runCLI(pipeName string, logger *log.Logger) {
 		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
 		os.Exit(1)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	fmt.Println("Connected to Codex browser pipe")
 	fmt.Println("Commands: tabs, create, close <id>, user-tabs, claim <id>, nav <id> <url>,")
