@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.3.0] - 2026-05-19
 
-### Fixed — 28 bugs from 6-agent cross-audit
+### Fixed
 
 **Critical (5)**
 - MCP buffer limit: `bufio.Reader` 4KB default → 10MB to prevent `ErrBufferFull` crash on real messages
