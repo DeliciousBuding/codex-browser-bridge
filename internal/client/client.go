@@ -33,7 +33,8 @@ type Client struct {
 }
 
 // Connect dials a named pipe and returns a ready-to-use Client.
-// If pipeName is empty, auto-discovers the first codex-browser-use-* pipe.
+// If pipeName is empty, auto-discovers codex-browser-use-* pipes and tries each
+// one until a successful connection is made.
 func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 	if pipeName == "" {
 		pipes, err := discovery.DiscoverCodexPipes()
@@ -48,18 +49,46 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 				"  3. Codex Chrome Extension is installed and enabled\n" +
 				"  4. The extension has connected to Codex Desktop (open a Codex chat once to trigger initialization)")
 		}
-		pipeName = pipes[0].Name
-		if logger != nil {
-			logger.Printf("auto-discovered pipe: %s", pipeName)
+
+		// Try each pipe until one connects AND passes health check
+		var lastErr error
+		for _, p := range pipes {
+			path := discovery.PipePath(p.Name)
+			conn, err := dialNamedPipe(path)
+			if err != nil {
+				lastErr = err
+				if logger != nil {
+					logger.Printf("pipe %s failed: %v, trying next...", p.UUID, err)
+				}
+				continue
+			}
+			c := NewFromConn(conn, logger)
+			// Health check: send a quick getInfo to verify the pipe is usable
+			result, err := c.SendRequest("getInfo", nil)
+			if err != nil {
+				_ = c.Close()
+				lastErr = err
+				if logger != nil {
+					logger.Printf("pipe %s health check failed: %v, trying next...", p.UUID, err)
+				}
+				continue
+			}
+			if logger != nil {
+				logger.Printf("auto-discovered pipe: %s (verified, info=%s)", p.Name, truncate(string(result), 120))
+			}
+			return c, nil
 		}
+		return nil, fmt.Errorf("all %d pipes failed; last error: %w. "+
+			"Try: restart Codex Desktop, then re-open the Codex Chrome Extension",
+			len(pipes), lastErr)
 	}
 
 	path := discovery.PipePath(pipeName)
 	conn, err := dialNamedPipe(path)
 	if err != nil {
-		return nil, fmt.Errorf("dial pipe %s: %w\n"+
-			"This usually means the pipe is stale (Codex Desktop restarted) or the extension lost its host.\n"+
-			"Try: restart Codex Desktop, then re-open the Codex Chrome Extension.", path, err)
+		return nil, fmt.Errorf("dial pipe %s: %w. "+
+			"This usually means the pipe is stale (Codex Desktop restarted) or the extension lost its host. "+
+			"Try: restart Codex Desktop, then re-open the Codex Chrome Extension", path, err)
 	}
 
 	return NewFromConn(conn, logger), nil

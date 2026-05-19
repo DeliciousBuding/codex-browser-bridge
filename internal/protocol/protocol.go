@@ -9,6 +9,7 @@ import (
 
 // JSON-RPC 2.0 message types (Codex uses JSON-RPC without the "jsonrpc":"2.0" field on responses)
 
+// Request is a JSON-RPC 2.0 request message.
 type Request struct {
 	JSONRPC string      `json:"jsonrpc"`
 	ID      int         `json:"id"`
@@ -16,12 +17,14 @@ type Request struct {
 	Params  interface{} `json:"params,omitempty"`
 }
 
+// Response is a JSON-RPC 2.0 response message.
 type Response struct {
 	ID     int             `json:"id"`
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  *ErrorObject    `json:"error,omitempty"`
 }
 
+// ErrorObject carries a JSON-RPC error.
 type ErrorObject struct {
 	Code    int         `json:"code"`
 	Message string      `json:"message"`

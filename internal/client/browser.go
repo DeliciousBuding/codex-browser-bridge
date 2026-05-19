@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -219,12 +220,40 @@ func (c *Client) attachTab(tabID int) error {
 	return err
 }
 
-// cdpWithAttach attaches the debugger and then executes a CDP command.
+// detachTab detaches the debugger from a tab.
+func (c *Client) detachTab(tabID int) error {
+	_, err := c.SendRequest("detach", map[string]interface{}{
+		"tabId": tabID,
+	})
+	return err
+}
+
+// cdpWithAttach ensures the debugger is attached and then executes a CDP command.
+// It first tries to detach (to clear any stale attachment state), then attach
+// fresh, then execute. If execute fails with "not attached", it retries once.
 func (c *Client) cdpWithAttach(tabID int, method string, params map[string]interface{}) (json.RawMessage, error) {
+	// Detach first to clear any stale debugger state from Chrome
+	_ = c.detachTab(tabID)
 	if err := c.attachTab(tabID); err != nil {
 		return nil, fmt.Errorf("attach failed for tab %d: %w", tabID, err)
 	}
-	return c.executeCdp(tabID, method, params)
+	raw, err := c.executeCdp(tabID, method, params)
+	if err != nil {
+		// If attach didn't take, try one more detach+attach+retry cycle
+		if isDebuggerError(err) {
+			_ = c.detachTab(tabID)
+			if err2 := c.attachTab(tabID); err2 != nil {
+				return nil, fmt.Errorf("retry attach failed for tab %d: %w", tabID, err2)
+			}
+			return c.executeCdp(tabID, method, params)
+		}
+		return nil, err
+	}
+	return raw, nil
+}
+
+func isDebuggerError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "not attached")
 }
 
 // --- Playwright API (via CDP) ---
