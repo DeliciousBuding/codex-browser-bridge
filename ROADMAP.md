@@ -2,7 +2,7 @@
 
 ## v0.3.0 — Bug Fixes from Cross-Audit (2026-05-19)
 
-30 bugs found by 6-agent parallel audit. Fixed in 4 parallel batches (all Haiku/Opus-4.6).
+30 bugs found by parallel audit. Fixed in 4 batches.
 
 ---
 
@@ -62,19 +62,13 @@
 
 2 deferred: BUG-13,15 (global CDP + CUAKeypress perf optimization, non-blocking) + BUG-17 (WaitForLoad retry, edge case) + BUG-19 (isDebuggerError expansion, future extension).
 
-### Audit methodology
+### Audit
 
-6 subagents (2×Opus 4.7, 2×Sonnet 4.6, 2×Haiku/Opus-4.6-fast) scanned in parallel:
-- Opus #1: core client logic, concurrency, CDP protocol
-- Opus #2: MCP server, protocol framing, discovery
-- Sonnet #1: error handling, edge cases, resource leaks
-- Sonnet #2: test quality, coverage gaps
-- Haiku #1: surface bugs, typos, naming, logic errors
-- Haiku #2: main.go + discovery.go deep audit
+Cross-dimensional review: core logic & concurrency, MCP protocol & framing, error handling & edge cases, test quality & coverage gaps, surface-level bugs, and main/discovery deep-dive.
 
-### Fix methodology
+### Fix
 
-4 parallel Haiku agents, each on dedicated branch, cherry-picked to main:
+4 parallel branches, cherry-picked to main:
 - `fix/a-server` (7152269): server.go — 4 bugs
 - `fix/b-browser` (751280d): browser.go — 7 bugs
 - `fix/c-client` (6bb3269): client/discovery/protocol — 6 bugs
