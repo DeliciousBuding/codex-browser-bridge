@@ -2,6 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-05-19
+
+### Fixed — 28 bugs from 6-agent cross-audit
+
+**Critical (5)**
+- MCP buffer limit: `bufio.Reader` 4KB default → 10MB to prevent `ErrBufferFull` crash on real messages
+- MCP protocol: `notifications/initialized` no longer produces error response (JSON-RPC 2.0 §4.1)
+- CLI whitespace-only input no longer panics (`args[0]` index out of range)
+- CLI EOF no longer spins at 100% CPU
+- Fill element-not-found now returns an explicit error instead of silently succeeding
+
+**High (7)**
+- All 19 MCP tool handlers now check `json.Unmarshal` errors (previously silently zeroed on type mismatch)
+- JS injection vector fixed: Go `%q` replaced with `json.Marshal` for JavaScript string literals in Click/Fill
+- `Response.ID` changed from `int` to `*int` so `id:0` is not misclassified as notification
+- `json.Marshal` errors in `writeResult`/`writeError` and handler `MarshalIndent` calls now checked
+- `NavigateBack`/`NavigateForward` now validate both array bounds instead of one
+- PowerShell pipe discovery subprocess now has 15s timeout via `context.WithTimeout`
+- `readLoop` was blocking send on duplicate responses; now uses non-blocking select
+
+**Medium (5)**
+- `CUAType` now dispatches keyDown+char+keyUp sequence per CDP spec; attaches debugger once
+- Health check during pipe auto-discovery uses 5s timeout (was 60s)
+- CLI `try` command JSON extraction uses `args[2:]` instead of fragile byte offset
+- `DOMSnapshot` fallback prepends marker to distinguish plain-text from AX tree
+- `DomCUAClick` checks `len(content) >= 5` before box model coordinate access
+
+**Low (10)**
+- `newUUID` returns error + `fallbackUUID` via `math/rand` instead of `panic`
+- `BRIDGE_DEBUG_LOG` open failure now logs warning to stderr
+- `os.Exit` moved out of `runMCP`/`runCLI` into `main()` so deferred cleanup runs
+- `extractUUID` uses conditional single-char strip instead of greedy `TrimLeft`
+- `time.After` replaced with `time.NewTimer` + deferred `Stop()` to prevent leaks
+- `ClaimUserTab` auto-attach error now logged
+- Screenshots typo fixed (was already resolved)
+- `SendNotification` test coverage added (`TestSendNotificationFrame`)
+- `WaitForLoadTimeout` test: `strings.HasPrefix` replaces fragile `[:7]` slice
+- E2E Screenshot test now validates non-empty base64 return value
+
+### Audit
+- 6 subagents scanned in parallel: 2×Opus (core logic, protocol), 2×Sonnet (errors, tests), 2×Haiku (surface, main+discovery)
+- 30 bugs found, 28 fixed (93%). 2 deferred: global CDP attach optimization, CUAKeypress attach optimization
+
 ## [0.2.0] - 2026-05-16
 
 ### Added
