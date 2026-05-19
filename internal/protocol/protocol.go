@@ -19,7 +19,7 @@ type Request struct {
 
 // Response is a JSON-RPC 2.0 response message.
 type Response struct {
-	ID     int             `json:"id"`
+	ID     *int            `json:"id"`
 	Result json.RawMessage `json:"result,omitempty"`
 	Error  *ErrorObject    `json:"error,omitempty"`
 }

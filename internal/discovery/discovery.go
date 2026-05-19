@@ -1,9 +1,11 @@
 package discovery
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 const codexPipePrefix = "codex-browser-use"
@@ -16,7 +18,9 @@ type PipeInfo struct {
 
 // DiscoverCodexPipes lists Windows named pipes matching codex-browser-use-*
 func DiscoverCodexPipes() ([]PipeInfo, error) {
-	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command",
 		"Get-ChildItem '\\\\.\\pipe\\' | Select-Object -ExpandProperty Name")
 	out, err := cmd.Output()
 	if err != nil {
@@ -41,7 +45,9 @@ func parsePipeList(output string) []PipeInfo {
 // Returns "" if the name has no separator after the prefix.
 func extractUUID(name string) string {
 	rest := strings.TrimPrefix(name, codexPipePrefix)
-	rest = strings.TrimLeft(rest, "-\\")
+	if len(rest) > 0 && (rest[0] == '-' || rest[0] == '\\') {
+		rest = rest[1:]
+	}
 	return rest
 }
 

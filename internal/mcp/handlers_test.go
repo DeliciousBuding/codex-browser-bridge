@@ -55,7 +55,8 @@ func (s *pipeServer) serve() {
 			b, _ := json.Marshal(result)
 			resultRaw = b
 		}
-		resp := protocol.Response{ID: req.ID, Result: resultRaw, Error: errObj}
+		id := req.ID
+		resp := protocol.Response{ID: &id, Result: resultRaw, Error: errObj}
 		if err := protocol.EncodeFrame(s.conn, resp); err != nil {
 			return
 		}
