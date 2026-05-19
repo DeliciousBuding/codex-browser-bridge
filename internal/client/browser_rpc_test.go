@@ -413,9 +413,10 @@ func TestNavigateBackUsesHistoryEntry(t *testing.T) {
 	}
 
 	var navCall *recordedCall
-	for i, call := range rec.snapshot() {
+	snap := rec.snapshot()
+	for _, call := range snap {
 		if call.method == "executeCdp" && call.params["method"] == "Page.navigateToHistoryEntry" {
-			c := rec.snapshot()[i]
+			c := call
 			navCall = &c
 			break
 		}
@@ -631,6 +632,9 @@ func TestDomCUAClickComputesBoxCenter(t *testing.T) {
 		}
 		params, _ := req.Params.(map[string]interface{})
 		switch params["method"] {
+		case "DOM.resolveNode":
+			// DomCUAClick resolves node before getting box model
+			return map[string]interface{}{"object": map[string]interface{}{"objectId": "test"}}
 		case "DOM.getBoxModel":
 			return map[string]interface{}{
 				"model": map[string]interface{}{

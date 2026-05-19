@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -227,4 +228,66 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestSendNotificationFrame verifies that SendNotification encodes a
+// valid JSON-RPC notification frame: no "id" field, correct length prefix,
+// method and params properly encoded.
+func TestSendNotificationFrame(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	c := NewFromConn(clientConn, nil)
+	defer c.Close()
+
+	serverReader := bufio.NewReader(serverConn)
+
+	type notifMsg struct {
+		JSONRPC string      `json:"jsonrpc"`
+		Method  string      `json:"method"`
+		Params  interface{} `json:"params,omitempty"`
+	}
+
+	var got notifMsg
+	errCh := make(chan error, 1)
+	go func() {
+		raw, err := protocol.DecodeFrame(serverReader)
+		if err != nil {
+			errCh <- fmt.Errorf("decode frame: %w", err)
+			return
+		}
+		// Verify no "id" field in raw JSON (JSON-RPC notification)
+		if bytes.Contains(raw, []byte(`"id"`)) {
+			errCh <- fmt.Errorf("notification frame contains 'id' field: %s", raw)
+			return
+		}
+		if err := json.Unmarshal(raw, &got); err != nil {
+			errCh <- fmt.Errorf("unmarshal: %w", err)
+			return
+		}
+		errCh <- nil
+	}()
+
+	err := c.SendNotification("test.event", map[string]string{"hello": "world"})
+	if err != nil {
+		t.Fatalf("SendNotification: %v", err)
+	}
+
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	if got.JSONRPC != "2.0" {
+		t.Errorf("jsonrpc = %q, want \"2.0\"", got.JSONRPC)
+	}
+	if got.Method != "test.event" {
+		t.Errorf("method = %q, want \"test.event\"", got.Method)
+	}
+	paramsMap, ok := got.Params.(map[string]interface{})
+	if !ok {
+		t.Fatalf("params is %T, want map", got.Params)
+	}
+	if v, ok := paramsMap["hello"].(string); !ok || v != "world" {
+		t.Errorf("params[hello] = %v, want \"world\"", paramsMap["hello"])
+	}
 }

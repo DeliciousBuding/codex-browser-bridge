@@ -3,7 +3,7 @@ package client
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
+	cryptoRand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"math/rand"
 
 	"github.com/DeliciousBuding/codex-browser-bridge/internal/discovery"
 	"github.com/DeliciousBuding/codex-browser-bridge/internal/protocol"
@@ -114,12 +116,28 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 // that establish the transport themselves.
 func NewFromConn(conn net.Conn, logger *log.Logger) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	sessionID, err := newUUID()
+	if err != nil {
+		if logger != nil {
+			logger.Printf("newUUID failed, using fallback: %v", err)
+		}
+		sessionID = fallbackUUID()
+	}
+	turnID, err := newUUID()
+	if err != nil {
+		if logger != nil {
+			logger.Printf("newUUID failed, using fallback: %v", err)
+		}
+		turnID = fallbackUUID()
+	}
+
 	c := &Client{
 		conn:   conn,
 		reader: bufio.NewReaderSize(conn, 256*1024),
 		session: protocol.SessionParams{
-			SessionID: newUUID(),
-			TurnID:    newUUID(),
+			SessionID: sessionID,
+			TurnID:    turnID,
 		},
 		pending: make(map[int]chan *protocol.Response),
 		ctx:     ctx,
@@ -255,10 +273,22 @@ func truncate(s string, n int) string {
 }
 
 // newUUID generates a UUID v4 string without external dependencies.
-func newUUID() string {
+func newUUID() (string, error) {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	if _, err := cryptoRand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("crypto/rand failed: %w", err)
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+// fallbackUUID generates a UUID v4 using math/rand when crypto/rand is unavailable.
+func fallbackUUID() string {
+	var b [16]byte
+	for i := range b {
+		b[i] = byte(rand.Intn(256))
 	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 10

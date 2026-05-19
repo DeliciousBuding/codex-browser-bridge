@@ -636,7 +636,9 @@ func (c *Client) ClaimUserTab(tabID string) (Tab, error) {
 	}
 	result.normalize()
 	// Auto-attach debugger so CDP commands work immediately
-	_ = c.attachTab(tabIDInt)
+	if err := c.attachTab(tabIDInt); err != nil && c.log != nil {
+		c.log.Printf("claim tab %d: auto-attach failed: %v", tabIDInt, err)
+	}
 	return result, nil
 }
 
