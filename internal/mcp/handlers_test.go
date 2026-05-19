@@ -291,7 +291,10 @@ func TestHandleScreenshot(t *testing.T) {
 
 func TestHandleEvaluate(t *testing.T) {
 	srv, pipe, cleanup := newServerWithPipe(t, func(req protocol.Request) (interface{}, *protocol.ErrorObject) {
-		return map[string]interface{}{"result": map[string]interface{}{"value": "hello"}}, nil
+		if req.Method == "executeCdp" {
+			return map[string]interface{}{"result": map[string]interface{}{"value": "hello"}}, nil
+		}
+		return map[string]bool{"ok": true}, nil
 	})
 	defer cleanup()
 

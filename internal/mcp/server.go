@@ -136,10 +136,10 @@ func (s *MCPServer) registerTools() {
 			Handler:     s.handleCUAScroll},
 
 		// DOM CUA
-		{Name: "codex_dom_get_visible", Description: "Get visible DOM with node IDs for DOM-based interaction",
+		{Name: "codex_dom_get_visible", Description: "Get a simplified visible DOM tree (human-readable; use codex_dom_snapshot for node IDs usable with codex_dom_click)",
 			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"}},"required":["tab_id"]}`),
 			Handler:     s.handleGetVisibleDOM},
-		{Name: "codex_dom_click", Description: "Click a DOM node by its node ID",
+		{Name: "codex_dom_click", Description: "Click a DOM node by its accessibility node ID from codex_dom_snapshot",
 			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"},"node_id":{"type":"string"}},"required":["tab_id","node_id"]}`),
 			Handler:     s.handleDomClick},
 
@@ -216,6 +216,8 @@ func (s *MCPServer) handleMessage(req struct {
 		s.writeResult(req.ID, map[string]interface{}{"tools": tools})
 	case "tools/call":
 		s.handleToolCall(req.ID, req.Params)
+	case "ping":
+		s.writeResult(req.ID, map[string]interface{}{})
 	case "notifications/initialized":
 		// Notification — no response per JSON-RPC 2.0 Section 4.1
 	default:
