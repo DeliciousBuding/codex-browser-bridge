@@ -52,6 +52,13 @@ func Connect(pipeName string, logger *log.Logger) (*Client, error) {
 				"  4. The extension has connected to Codex Desktop (open a Codex chat once to trigger initialization)")
 		}
 
+		// The pipe prefix namespace is flat: any local process can create pipes with
+		// the "codex-browser-use-" prefix. When multiple pipes exist, an attacker
+		// could register a fake pipe before the legitimate Codex Desktop starts.
+		if len(pipes) > 1 && logger != nil {
+			logger.Printf("Warning: multiple codex-browser-use pipes found (%d). This may indicate stale or unauthorized pipes.", len(pipes))
+		}
+
 		// Try each pipe until one connects AND passes health check
 		var lastErr error
 		for _, p := range pipes {

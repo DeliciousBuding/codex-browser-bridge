@@ -260,7 +260,10 @@ func isDebuggerError(err error) bool {
 // in JavaScript string literals (e.g., inside Runtime.evaluate expressions).
 // Unlike Go's %q, json.Marshal uses the same escaping rules as JavaScript.
 func jsonEscaped(s string) string {
-	b, _ := json.Marshal(s)
+	b, err := json.Marshal(s)
+	if err != nil {
+		return `""`
+	}
 	return string(b)
 }
 
