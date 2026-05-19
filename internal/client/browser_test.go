@@ -35,7 +35,10 @@ func TestUserTabNormalize(t *testing.T) {
 }
 
 func TestNewUUIDFormat(t *testing.T) {
-	u := newUUID()
+	u, err := newUUID()
+	if err != nil {
+		t.Fatalf("newUUID: %v", err)
+	}
 	if len(u) != 36 {
 		t.Fatalf("UUID length = %d, want 36: %q", len(u), u)
 	}
@@ -56,7 +59,10 @@ func TestNewUUIDFormat(t *testing.T) {
 func TestNewUUIDUnique(t *testing.T) {
 	seen := make(map[string]struct{}, 1000)
 	for i := 0; i < 1000; i++ {
-		u := newUUID()
+		u, err := newUUID()
+		if err != nil {
+			t.Fatalf("newUUID iteration %d: %v", i, err)
+		}
 		if _, dup := seen[u]; dup {
 			t.Fatalf("duplicate UUID after %d iterations: %s", i, u)
 		}

@@ -1,6 +1,8 @@
 package client
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/DeliciousBuding/codex-browser-bridge/internal/protocol"
@@ -15,8 +17,14 @@ func TestCdpWithAttachSequence(t *testing.T) {
 	}{
 		{"Navigate", func(c *Client) error { return c.Navigate("1", "https://test.com") }},
 		{"Screenshot", func(c *Client) error {
-			_, err := c.Screenshot("1", false)
-			return err
+			b64, err := c.Screenshot("1", false)
+			if err != nil {
+				return err
+			}
+			if b64 == "" {
+				return fmt.Errorf("expected non-empty screenshot data")
+			}
+			return nil
 		}},
 		{"Evaluate", func(c *Client) error {
 			_, err := c.Evaluate("1", "1+1")
@@ -30,6 +38,7 @@ func TestCdpWithAttachSequence(t *testing.T) {
 				if req.Method == "executeCdp" {
 					return map[string]interface{}{
 						"result": map[string]interface{}{"value": "ok"},
+						"data":   "iVBORw0KGgo...",
 					}
 				}
 				return map[string]bool{"ok": true}
@@ -99,7 +108,7 @@ func TestWaitForLoadTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected timeout error, got state=%q", state)
 	}
-	if err.Error() == "" || err.Error()[:7] != "timed o" {
+	if err.Error() == "" || !strings.HasPrefix(err.Error(), "timed o") {
 		t.Errorf("error = %v, should mention timeout", err)
 	}
 }
