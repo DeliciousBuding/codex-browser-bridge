@@ -122,9 +122,10 @@ func callToolRaw(t *testing.T, s *MCPServer, name string, args map[string]interf
 func flattenContent(content []Content) string {
 	parts := make([]string, 0, len(content))
 	for _, c := range content {
-		if c.Type == "text" {
+		switch c.Type {
+		case "text":
 			parts = append(parts, c.Text)
-		} else if c.Type == "image" {
+		case "image":
 			parts = append(parts, "[image:"+c.MimeType+"]")
 		}
 	}
