@@ -122,9 +122,10 @@ func callToolRaw(t *testing.T, s *MCPServer, name string, args map[string]interf
 func flattenContent(content []Content) string {
 	parts := make([]string, 0, len(content))
 	for _, c := range content {
-		if c.Type == "text" {
+		switch c.Type {
+		case "text":
 			parts = append(parts, c.Text)
-		} else if c.Type == "image" {
+		case "image":
 			parts = append(parts, "[image:"+c.MimeType+"]")
 		}
 	}
@@ -185,8 +186,8 @@ func TestHandleNavigate(t *testing.T) {
 	}
 
 	methods := pipe.recordedMethods()
-	if len(methods) < 2 || methods[0] != "attach" || methods[1] != "executeCdp" {
-		t.Errorf("expected attach + executeCdp, got %v", methods)
+	if len(methods) < 3 || methods[0] != "detach" || methods[1] != "attach" || methods[2] != "executeCdp" {
+		t.Errorf("expected detach + attach + executeCdp, got %v", methods)
 	}
 }
 
