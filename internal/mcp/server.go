@@ -162,7 +162,7 @@ func (s *MCPServer) registerTools() {
 
 // Run reads JSON-RPC from stdin and writes responses to stdout (MCP stdio transport).
 func (s *MCPServer) Run() error {
-	reader := bufio.NewReader(s.in)
+	reader := bufio.NewReaderSize(s.in, 10*1024*1024)
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -216,8 +216,12 @@ func (s *MCPServer) handleMessage(req struct {
 		s.writeResult(req.ID, map[string]interface{}{"tools": tools})
 	case "tools/call":
 		s.handleToolCall(req.ID, req.Params)
+	case "notifications/initialized":
+		// Notification — no response per JSON-RPC 2.0 Section 4.1
 	default:
-		s.writeError(req.ID, -32601, "Unknown method: "+req.Method)
+		if len(req.ID) > 0 && string(req.ID) != "null" {
+			s.writeError(req.ID, -32601, "Unknown method: "+req.Method)
+		}
 	}
 }
 
@@ -255,7 +259,11 @@ func (s *MCPServer) writeResult(id json.RawMessage, result interface{}) {
 		"id":      id,
 		"result":  result,
 	}
-	data, _ := json.Marshal(resp)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp marshal error: %v\n", err)
+		return
+	}
 	fmt.Fprintln(s.out, string(data))
 }
 
@@ -265,7 +273,11 @@ func (s *MCPServer) writeError(id json.RawMessage, code int, msg string) {
 		"id":      id,
 		"error":   map[string]interface{}{"code": code, "message": msg},
 	}
-	data, _ := json.Marshal(resp)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp marshal error: %v\n", err)
+		return
+	}
 	fmt.Fprintln(s.out, string(data))
 }
 
@@ -276,7 +288,10 @@ func (s *MCPServer) handleListTabs(_ json.RawMessage) ([]Content, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, _ := json.MarshalIndent(tabs, "", "  ")
+	data, err := json.MarshalIndent(tabs, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal tabs: %v", err)
+	}
 	return textContent(string(data)), nil
 }
 
@@ -292,7 +307,9 @@ func (s *MCPServer) handleCloseTab(args json.RawMessage) ([]Content, error) {
 	var p struct {
 		TabID string `json:"tab_id"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.CloseTab(p.TabID); err != nil {
 		return nil, err
 	}
@@ -304,7 +321,10 @@ func (s *MCPServer) handleUserTabs(_ json.RawMessage) ([]Content, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, _ := json.MarshalIndent(tabs, "", "  ")
+	data, err := json.MarshalIndent(tabs, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal tabs: %v", err)
+	}
 	return textContent(string(data)), nil
 }
 
@@ -312,12 +332,17 @@ func (s *MCPServer) handleClaimTab(args json.RawMessage) ([]Content, error) {
 	var p struct {
 		TabID string `json:"tab_id"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	tab, err := s.client.ClaimUserTab(p.TabID)
 	if err != nil {
 		return nil, err
 	}
-	data, _ := json.Marshal(tab)
+	data, err := json.Marshal(tab)
+	if err != nil {
+		return nil, fmt.Errorf("marshal tab: %v", err)
+	}
 	return textContent(string(data)), nil
 }
 
@@ -326,7 +351,9 @@ func (s *MCPServer) handleNavigate(args json.RawMessage) ([]Content, error) {
 		TabID string `json:"tab_id"`
 		URL   string `json:"url"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.Navigate(p.TabID, p.URL); err != nil {
 		return nil, err
 	}
@@ -337,7 +364,9 @@ func (s *MCPServer) handleReload(args json.RawMessage) ([]Content, error) {
 	var p struct {
 		TabID string `json:"tab_id"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.Reload(p.TabID); err != nil {
 		return nil, err
 	}
@@ -348,7 +377,9 @@ func (s *MCPServer) handleNavigateBack(args json.RawMessage) ([]Content, error) 
 	var p struct {
 		TabID string `json:"tab_id"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.NavigateBack(p.TabID); err != nil {
 		return nil, err
 	}
@@ -359,7 +390,9 @@ func (s *MCPServer) handleNavigateForward(args json.RawMessage) ([]Content, erro
 	var p struct {
 		TabID string `json:"tab_id"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.NavigateForward(p.TabID); err != nil {
 		return nil, err
 	}
@@ -371,7 +404,9 @@ func (s *MCPServer) handleWaitForLoad(args json.RawMessage) ([]Content, error) {
 		TabID     string `json:"tab_id"`
 		TimeoutMs int    `json:"timeout_ms"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	state, err := s.client.WaitForLoad(p.TabID, p.TimeoutMs)
 	if err != nil {
 		return nil, err
@@ -383,7 +418,9 @@ func (s *MCPServer) handleDOMSnapshot(args json.RawMessage) ([]Content, error) {
 	var p struct {
 		TabID string `json:"tab_id"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	snap, err := s.client.DOMSnapshot(p.TabID)
 	if err != nil {
 		return nil, err
@@ -396,7 +433,9 @@ func (s *MCPServer) handleScreenshot(args json.RawMessage) ([]Content, error) {
 		TabID    string `json:"tab_id"`
 		FullPage bool   `json:"fullPage"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	b64, err := s.client.Screenshot(p.TabID, p.FullPage)
 	if err != nil {
 		return nil, err
@@ -412,7 +451,9 @@ func (s *MCPServer) handleClick(args json.RawMessage) ([]Content, error) {
 		TabID    string `json:"tab_id"`
 		Selector string `json:"selector"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.Click(p.TabID, p.Selector); err != nil {
 		return nil, err
 	}
@@ -425,7 +466,9 @@ func (s *MCPServer) handleFill(args json.RawMessage) ([]Content, error) {
 		Selector string `json:"selector"`
 		Value    string `json:"value"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.Fill(p.TabID, p.Selector, p.Value); err != nil {
 		return nil, err
 	}
@@ -437,7 +480,9 @@ func (s *MCPServer) handleEvaluate(args json.RawMessage) ([]Content, error) {
 		TabID      string `json:"tab_id"`
 		Expression string `json:"expression"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	result, err := s.client.Evaluate(p.TabID, p.Expression)
 	if err != nil {
 		return nil, err
@@ -451,7 +496,9 @@ func (s *MCPServer) handleCUAClick(args json.RawMessage) ([]Content, error) {
 		X     int    `json:"x"`
 		Y     int    `json:"y"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.CUAClick(p.TabID, p.X, p.Y); err != nil {
 		return nil, err
 	}
@@ -463,7 +510,9 @@ func (s *MCPServer) handleCUAType(args json.RawMessage) ([]Content, error) {
 		TabID string `json:"tab_id"`
 		Text  string `json:"text"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.CUAType(p.TabID, p.Text); err != nil {
 		return nil, err
 	}
@@ -475,7 +524,9 @@ func (s *MCPServer) handleCUAKeypress(args json.RawMessage) ([]Content, error) {
 		TabID string   `json:"tab_id"`
 		Keys  []string `json:"keys"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.CUAKeypress(p.TabID, p.Keys); err != nil {
 		return nil, err
 	}
@@ -490,7 +541,9 @@ func (s *MCPServer) handleCUAScroll(args json.RawMessage) ([]Content, error) {
 		ScrollX int    `json:"scroll_x"`
 		ScrollY int    `json:"scroll_y"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.CUAScroll(p.TabID, p.X, p.Y, p.ScrollX, p.ScrollY); err != nil {
 		return nil, err
 	}
@@ -501,7 +554,9 @@ func (s *MCPServer) handleGetVisibleDOM(args json.RawMessage) ([]Content, error)
 	var p struct {
 		TabID string `json:"tab_id"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	dom, err := s.client.GetVisibleDOM(p.TabID)
 	if err != nil {
 		return nil, err
@@ -514,7 +569,9 @@ func (s *MCPServer) handleDomClick(args json.RawMessage) ([]Content, error) {
 		TabID  string `json:"tab_id"`
 		NodeID string `json:"node_id"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.DomCUAClick(p.TabID, p.NodeID); err != nil {
 		return nil, err
 	}
@@ -525,7 +582,9 @@ func (s *MCPServer) handleNameSession(args json.RawMessage) ([]Content, error) {
 	var p struct {
 		Name string `json:"name"`
 	}
-	json.Unmarshal(args, &p)
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
 	if err := s.client.NameSession(p.Name); err != nil {
 		return nil, err
 	}
