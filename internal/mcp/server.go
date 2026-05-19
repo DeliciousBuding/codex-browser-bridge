@@ -11,6 +11,7 @@ import (
 	"github.com/DeliciousBuding/codex-browser-bridge/internal/client"
 )
 
+// MCPServer is an MCP stdio server that exposes browser automation tools.
 type MCPServer struct {
 	client  *client.Client
 	tools   []Tool
@@ -20,6 +21,7 @@ type MCPServer struct {
 	version string
 }
 
+// Tool defines an MCP tool exposed by the server.
 type Tool struct {
 	Name        string                                        `json:"name"`
 	Description string                                        `json:"description"`
@@ -43,10 +45,12 @@ func imageContent(b64, mime string) Content {
 	return Content{Type: "image", Data: b64, MimeType: mime}
 }
 
+// NewMCPServer creates an MCP server using os.Stdin and os.Stdout for transport.
 func NewMCPServer(c *client.Client) *MCPServer {
 	return NewMCPServerWithIO(c, os.Stdin, os.Stdout)
 }
 
+// NewMCPServerWithIO creates an MCP server with custom I/O streams.
 func NewMCPServerWithIO(c *client.Client, in io.Reader, out io.Writer) *MCPServer {
 	s := &MCPServer{
 		client:  c,
