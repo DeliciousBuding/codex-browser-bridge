@@ -502,7 +502,17 @@ func TestClickEscapesSelector(t *testing.T) {
 }
 
 func TestFillEscapesValue(t *testing.T) {
-	c, rec, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} { return map[string]bool{"ok": true} })
+	c, rec, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} {
+		if req.Method == "executeCdp" {
+			return map[string]interface{}{
+				"result": map[string]interface{}{
+					"value": `{"ok":true}`,
+					"type":  "string",
+				},
+			}
+		}
+		return map[string]bool{"ok": true}
+	})
 	defer cleanup()
 
 	value := `pwd"with\quote`

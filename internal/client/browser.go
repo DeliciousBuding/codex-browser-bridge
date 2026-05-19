@@ -109,7 +109,7 @@ func (c *Client) NavigateBack(tabID string) error {
 	if err := json.Unmarshal(raw, &history); err != nil {
 		return err
 	}
-	if history.CurrentIndex <= 0 {
+	if history.CurrentIndex <= 0 || history.CurrentIndex >= len(history.Entries) {
 		return fmt.Errorf("no previous page in history")
 	}
 	entryID := history.Entries[history.CurrentIndex-1].ID
@@ -139,7 +139,7 @@ func (c *Client) NavigateForward(tabID string) error {
 	if err := json.Unmarshal(raw, &history); err != nil {
 		return err
 	}
-	if history.CurrentIndex >= len(history.Entries)-1 {
+	if history.CurrentIndex < 0 || history.CurrentIndex >= len(history.Entries)-1 {
 		return fmt.Errorf("no next page in history")
 	}
 	entryID := history.Entries[history.CurrentIndex+1].ID
@@ -256,6 +256,14 @@ func isDebuggerError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "not attached")
 }
 
+// jsonEscaped returns a JSON-escaped representation of s suitable for embedding
+// in JavaScript string literals (e.g., inside Runtime.evaluate expressions).
+// Unlike Go's %q, json.Marshal uses the same escaping rules as JavaScript.
+func jsonEscaped(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
 // --- Playwright API (via CDP) ---
 
 // DOMSnapshot returns an accessibility tree snapshot of the page.
@@ -281,9 +289,9 @@ func (c *Client) DOMSnapshot(tabID string) (string, error) {
 			} `json:"result"`
 		}
 		if json.Unmarshal(raw2, &evalResult) == nil {
-			return evalResult.Result.Value, nil
+			return "/* fallback: plain text */\n" + evalResult.Result.Value, nil
 		}
-		return string(raw2), nil
+		return "/* fallback: plain text */\n" + string(raw2), nil
 	}
 	return string(raw), nil
 }
@@ -338,9 +346,29 @@ func (c *Client) CUAType(tabID, text string) error {
 	if err != nil {
 		return err
 	}
+	// Ensure debugger is attached once before the key sequence
+	_ = c.detachTab(id)
+	if err := c.attachTab(id); err != nil {
+		return fmt.Errorf("attach failed for tab %d: %w", id, err)
+	}
 	for _, ch := range text {
-		_, err = c.cdpWithAttach(id, "Input.dispatchKeyEvent", map[string]interface{}{
+		// keyDown
+		_, err = c.executeCdp(id, "Input.dispatchKeyEvent", map[string]interface{}{
+			"type": "keyDown", "key": string(ch), "text": string(ch),
+		})
+		if err != nil {
+			return err
+		}
+		// char
+		_, err = c.executeCdp(id, "Input.dispatchKeyEvent", map[string]interface{}{
 			"type": "char", "text": string(ch),
+		})
+		if err != nil {
+			return err
+		}
+		// keyUp
+		_, err = c.executeCdp(id, "Input.dispatchKeyEvent", map[string]interface{}{
+			"type": "keyUp", "key": string(ch), "text": string(ch),
 		})
 		if err != nil {
 			return err
@@ -413,11 +441,14 @@ func (c *Client) DomCUAClick(tabID, nodeID string) error {
 	}
 	var box struct {
 		Model struct {
-			Content [8]float64 `json:"content"`
+			Content []float64 `json:"content"`
 		} `json:"model"`
 	}
 	if err := json.Unmarshal(raw, &box); err != nil {
 		return fmt.Errorf("parse box model: %w", err)
+	}
+	if len(box.Model.Content) < 5 {
+		return fmt.Errorf("box model has insufficient content quads: got %d elements", len(box.Model.Content))
 	}
 	// Content quad: [x1,y1, x2,y2, x3,y3, x4,y4] — center is average
 	cx := (box.Model.Content[0] + box.Model.Content[2] + box.Model.Content[4] + box.Model.Content[6]) / 4
@@ -480,7 +511,7 @@ func (c *Client) Click(tabID, selector string) error {
 	if err != nil {
 		return err
 	}
-	js := fmt.Sprintf(`document.querySelector(%q).click()`, selector)
+	js := fmt.Sprintf(`document.querySelector(%s).click()`, jsonEscaped(selector))
 	_, err = c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
 		"expression": js,
 	})
@@ -493,11 +524,34 @@ func (c *Client) Fill(tabID, selector, value string) error {
 	if err != nil {
 		return err
 	}
-	js := fmt.Sprintf(`(() => { const el = document.querySelector(%q); if(el) { el.focus(); el.value = %q; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); } })()`, selector, value)
-	_, err = c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
+	s := jsonEscaped(selector)
+	v := jsonEscaped(value)
+	js := fmt.Sprintf(`(function(){var el=document.querySelector(%s);if(!el)return JSON.stringify({error:'element not found: '+%s});el.focus();el.value=%s;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));return JSON.stringify({ok:true})})()`, s, s, v)
+	raw, err := c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
 		"expression": js,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	var evalResult struct {
+		Result struct {
+			Value string `json:"value"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &evalResult); err != nil {
+		return err
+	}
+	var fillResult struct {
+		Ok    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(evalResult.Result.Value), &fillResult); err != nil {
+		return err
+	}
+	if fillResult.Error != "" {
+		return fmt.Errorf("fill: %s", fillResult.Error)
+	}
+	return nil
 }
 
 // Evaluate runs JavaScript in the page context and returns the result.
