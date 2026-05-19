@@ -79,6 +79,9 @@ func (c *Client) NameSession(name string) error {
 
 // Navigate navigates a tab to the given URL via CDP.
 func (c *Client) Navigate(tabID, url string) error {
+	if err := validateURL(url); err != nil {
+		return err
+	}
 	id, err := strconv.Atoi(tabID)
 	if err != nil {
 		return fmt.Errorf("navigate requires numeric tab_id, got %q", tabID)
@@ -87,6 +90,18 @@ func (c *Client) Navigate(tabID, url string) error {
 		"url": url,
 	})
 	return err
+}
+
+var blockedURLSchemes = []string{"file:", "javascript:", "data:", "vbscript:"}
+
+func validateURL(rawURL string) error {
+	lower := strings.ToLower(rawURL)
+	for _, scheme := range blockedURLSchemes {
+		if strings.HasPrefix(lower, scheme) {
+			return fmt.Errorf("blocked URL scheme %q", scheme)
+		}
+	}
+	return nil
 }
 
 // NavigateBack navigates a tab back in history via CDP.

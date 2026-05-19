@@ -36,9 +36,14 @@ func TestCdpWithAttachSequence(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c, rec, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} {
 				if req.Method == "executeCdp" {
-					return map[string]interface{}{
-						"result": map[string]interface{}{"value": "ok"},
-						"data":   "iVBORw0KGgo...",
+					params, _ := req.Params.(map[string]interface{})
+					switch params["method"] {
+					case "Runtime.evaluate":
+						return map[string]interface{}{"result": map[string]interface{}{"value": "ok"}}
+					case "Page.captureScreenshot":
+						return map[string]interface{}{"data": "iVBORw0KGgo..."}
+					default:
+						return map[string]interface{}{"result": map[string]interface{}{"value": "ok"}}
 					}
 				}
 				return map[string]bool{"ok": true}
@@ -56,8 +61,14 @@ func TestCdpWithAttachSequence(t *testing.T) {
 			if calls[0].method != "detach" {
 				t.Errorf("call[0] = %q, want detach", calls[0].method)
 			}
+			if v, ok := calls[0].params["tabId"].(float64); !ok || v != 1 {
+				t.Errorf("detach tabId = %v, want 1", calls[0].params["tabId"])
+			}
 			if calls[1].method != "attach" {
 				t.Errorf("call[1] = %q, want attach", calls[1].method)
+			}
+			if v, ok := calls[1].params["tabId"].(float64); !ok || v != 1 {
+				t.Errorf("attach tabId = %v, want 1", calls[1].params["tabId"])
 			}
 			if calls[2].method != "executeCdp" {
 				t.Errorf("call[2] = %q, want executeCdp", calls[2].method)
