@@ -291,3 +291,43 @@ func TestSendNotificationFrame(t *testing.T) {
 		t.Errorf("params[hello] = %v, want \"world\"", paramsMap["hello"])
 	}
 }
+
+// TestSendRequestReturnsErrorOnConnectionClose verifies that a SendRequest
+// in-flight returns an error (not hangs) when the server-side connection is
+// closed while waiting for a response. Exercises the ctx.Done() path.
+func TestSendRequestReturnsErrorOnConnectionClose(t *testing.T) {
+	start := make(chan struct{})
+	ready := make(chan struct{})
+
+	c, srv := newPipedClient(t, func(req protocol.Request) (interface{}, *protocol.ErrorObject) {
+		close(ready)
+		<-start
+		return map[string]bool{"ok": true}, nil
+	})
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := c.SendRequest("ping", nil)
+		errCh <- err
+	}()
+
+	<-ready        // wait until handler is invoked (request is in-flight)
+	srv.conn.Close() // close server-side connection while request is waiting
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected error after server close, got nil")
+		}
+		if err.Error() == "" {
+			t.Error("error message should not be empty")
+		}
+		t.Logf("connection close error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("SendRequest did not return after server close (hung)")
+	}
+
+	close(start)   // unblock handler goroutine
+	srv.close()    // wait for handler goroutine to exit
+	c.Close()
+}
