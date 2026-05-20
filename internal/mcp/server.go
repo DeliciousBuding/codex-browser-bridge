@@ -108,7 +108,7 @@ func (s *MCPServer) registerTools() {
 		{Name: "codex_dom_snapshot", Description: "Get accessibility tree DOM snapshot of a tab",
 			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"}},"required":["tab_id"]}`),
 			Handler:     s.handleDOMSnapshot},
-		{Name: "codex_screenshot", Description: "Capture a screenshot. Returns image content viewable by the agent.",
+		{Name: "codex_screenshot", Description: "Capture a screenshot. fullPage parameter is reserved (not yet implemented — always captures viewport). Returns image content viewable by the agent.",
 			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"},"fullPage":{"type":"boolean"}},"required":["tab_id"]}`),
 			Handler:     s.handleScreenshot},
 		{Name: "codex_click", Description: "Click an element via Playwright selector",

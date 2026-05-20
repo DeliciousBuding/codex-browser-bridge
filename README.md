@@ -75,7 +75,7 @@ The current version is designed for local Windows environments where Codex Deskt
 - Chrome
 - Codex Desktop running
 - Codex Chrome Extension installed and enabled
-- Go 1.26+ if building from source
+- Go 1.23+ if building from source
 
 > The bridge connects to local named pipes created by Codex Desktop. If no pipe is found, start Codex Desktop first and make sure the extension is active.
 
@@ -253,9 +253,9 @@ quit
 
 | Tool                    | Description                                  |
 | ----------------------- | -------------------------------------------- |
-| `codex_screenshot`      | Capture a screenshot (returns MCP image)     |
+| `codex_screenshot`      | Capture a screenshot (returns MCP image). `fullPage` parameter is reserved for future implementation — currently always captures the viewport. |
 | `codex_dom_snapshot`    | Get an accessibility tree snapshot           |
-| `codex_dom_get_visible` | Get a simplified visible DOM tree            |
+| `codex_dom_get_visible` | Get a simplified visible DOM tree (human-readable; use codex_dom_snapshot for node IDs usable with codex_dom_click) |
 | `codex_evaluate`        | Evaluate JavaScript in the page context      |
 | `codex_get_info`        | Get backend information from the extension   |
 
@@ -265,7 +265,7 @@ quit
 | -------------------- | -------------------------------- |
 | `codex_click`        | Click an element by CSS selector |
 | `codex_fill`         | Fill an input by CSS selector    |
-| `codex_dom_click`    | Click a DOM node by node ID      |
+| `codex_dom_click`    | Click a DOM node by accessibility node ID from codex_dom_snapshot |
 | `codex_cua_click`    | Click by screen coordinates      |
 | `codex_cua_type`     | Type text at the current focus   |
 | `codex_cua_keypress` | Press keyboard keys              |
