@@ -364,6 +364,37 @@ func TestHandlerPropagatesRPCError(t *testing.T) {
 	}
 }
 
+func TestPingHandler(t *testing.T) {
+	in := `{"jsonrpc":"2.0","id":7,"method":"ping"}` + "\n"
+	s, out := newTestServer(in)
+	if err := s.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	resps := decodeResponses(t, out)
+	if len(resps) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(resps))
+	}
+	resp := resps[0]
+	if resp["jsonrpc"] != "2.0" {
+		t.Errorf("jsonrpc = %v, want \"2.0\"", resp["jsonrpc"])
+	}
+	id, ok := resp["id"].(float64)
+	if !ok || int(id) != 7 {
+		t.Errorf("id = %v, want 7", resp["id"])
+	}
+	result, hasResult := resp["result"]
+	if !hasResult {
+		t.Fatal("expected result field to be present, got nil")
+	}
+	resultMap, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("result is %T, want map[string]interface{}", result)
+	}
+	if len(resultMap) != 0 {
+		t.Errorf("expected empty result, got %v", resultMap)
+	}
+}
+
 func TestHandleCloseTabRejectsNonNumeric(t *testing.T) {
 	srv, _, cleanup := newServerWithPipe(t, func(req protocol.Request) (interface{}, *protocol.ErrorObject) {
 		return map[string]bool{"ok": true}, nil

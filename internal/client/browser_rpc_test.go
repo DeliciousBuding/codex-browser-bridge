@@ -696,3 +696,37 @@ func TestGetVisibleDOMReturnsValue(t *testing.T) {
 		t.Errorf("dom = %q", dom)
 	}
 }
+
+// TestWaitForLoadPollsMultipleTimes exercises the polling loop: the mock
+// returns "loading" twice, then "complete" on the third executeCdp call.
+func TestWaitForLoadPollsMultipleTimes(t *testing.T) {
+	var execCalls int
+	var mu sync.Mutex
+	c, _, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} {
+		if req.Method != "executeCdp" {
+			return map[string]bool{"ok": true}
+		}
+		mu.Lock()
+		execCalls++
+		state := "loading"
+		if execCalls >= 3 {
+			state = "complete"
+		}
+		mu.Unlock()
+		return map[string]interface{}{"result": map[string]interface{}{"value": state}}
+	})
+	defer cleanup()
+
+	state, err := c.WaitForLoad("3", 5000)
+	if err != nil {
+		t.Fatalf("WaitForLoad: %v", err)
+	}
+	if state != "complete" {
+		t.Errorf("final state = %q, want complete", state)
+	}
+	mu.Lock()
+	if execCalls != 3 {
+		t.Errorf("expected 3 executeCdp polls, got %d", execCalls)
+	}
+	mu.Unlock()
+}
