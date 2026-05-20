@@ -92,10 +92,10 @@ func (c *Client) Navigate(tabID, url string) error {
 	return err
 }
 
-var blockedURLSchemes = []string{"file:", "javascript:", "data:", "vbscript:"}
+var blockedURLSchemes = []string{"file:", "javascript:", "data:", "vbscript:", "about:", "chrome:", "edge:"}
 
 func validateURL(rawURL string) error {
-	lower := strings.ToLower(rawURL)
+	lower := strings.ToLower(strings.TrimSpace(rawURL))
 	for _, scheme := range blockedURLSchemes {
 		if strings.HasPrefix(lower, scheme) {
 			return fmt.Errorf("blocked URL scheme %q", scheme)
@@ -333,7 +333,7 @@ func (c *Client) Screenshot(tabID string, fullPage bool) (string, error) {
 		Data string `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return string(raw), nil
+		return "", fmt.Errorf("parse screenshot response: %w", err)
 	}
 	return result.Data, nil
 }
