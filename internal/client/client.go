@@ -209,7 +209,7 @@ func (c *Client) SendRequest(method string, params map[string]interface{}) (json
 	select {
 	case resp := <-ch:
 		if resp.Error != nil {
-			return nil, fmt.Errorf("rpc error in %s: %s", method, resp.Error.Message)
+			return nil, fmt.Errorf("rpc error in %s: %s", method, resp.Error.Error())
 		}
 		return resp.Result, nil
 	case <-c.ctx.Done():
