@@ -27,6 +27,17 @@ This project bridges your existing Chrome browser session to MCP-compatible agen
 - Issues with the npm install pipeline (checksum verification, post-install script)
 - Issues that leak sensitive data (cookies, tokens, page contents) beyond the MCP transport
 
+### Built-in protections
+
+The bridge applies these safeguards at runtime:
+
+- **URL scheme filtering**: `codex_navigate` blocks `file:`, `javascript:`, `data:`, and `vbscript:` URLs (see `internal/client/browser.go:validateURL`)
+- **Pipe spoofing detection**: warns to stderr when multiple `codex-browser-use-*` pipes are found, as this could indicate a hostile process impersonating Codex Desktop
+- **Log sanitization**: error messages are stripped of newline characters before writing to the debug log, preventing log injection via crafted error responses
+- **JSON safety**: the `jsonEscaped` helper always produces valid JSON strings for JavaScript embedding, with a safe `""` fallback on error instead of propagating corrupted values
+
+These are defense-in-depth measures, not a complete security boundary. The bridge's primary security model is that it runs locally and is only connected to trusted MCP clients on the same machine.
+
 Out of scope:
 
 - The fact that the bridge gives an MCP client access to your active browser session — this is the project's stated purpose. See the README's "Security Notes" section for the threat model.

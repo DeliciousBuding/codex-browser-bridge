@@ -41,6 +41,20 @@ All notable changes to this project will be documented in this file.
 - `WaitForLoadTimeout` test: `strings.HasPrefix` replaces fragile `[:7]` slice
 - E2E Screenshot test now validates non-empty base64 return value
 
+### Security
+
+- URL validation blocks dangerous schemes (`file:`, `javascript:`, `data:`, `vbscript:`) in `codex_navigate`
+- Named pipe spoofing warning when multiple `codex-browser-use-*` pipes exist (unexpected state could indicate a hostile process)
+- `ErrorObject` log injection sanitization: newline characters stripped from error messages before logging
+- `jsonEscaped` error fallback: returns `""` instead of propagating nil/invalid JSON into JavaScript evaluation strings
+- Missing MCP `ping` handler added (returns empty result per JSON-RPC 2.0)
+- Test mock fidelity improvements: recording server enforces exact method match, duplicate response detection
+
+### Changed
+
+- `codex_dom_get_visible` description clarified: returns human-readable DOM tree (not node IDs); use `codex_dom_snapshot` for accessibility node IDs usable with `codex_dom_click`
+- `codex_screenshot` `fullPage` parameter documented as reserved (not yet implemented — always captures viewport)
+
 ## [0.2.0] - 2026-05-16
 
 ### Added

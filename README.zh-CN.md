@@ -75,7 +75,7 @@ Agent 因此可以：
 - Chrome
 - Codex Desktop 正在运行
 - Codex Chrome 扩展已安装并启用
-- Go 1.26+（仅从源码构建时需要）
+- Go 1.23+（仅从源码构建时需要）
 
 > 桥接器连接 Codex Desktop 创建的本地 named pipe。如果找不到 pipe，请先启动 Codex Desktop 并确保扩展已激活。
 
@@ -233,9 +233,9 @@ info          ping          try <method> [json]   quit
 
 | 工具 | 说明 |
 |------|------|
-| `codex_screenshot` | 截取页面截图（返回 MCP image 内容） |
+| `codex_screenshot` | 截取页面截图（返回 MCP image 内容）。`fullPage` 参数保留供未来实现——当前始终截取视口。 |
 | `codex_dom_snapshot` | 获取无障碍树快照 |
-| `codex_dom_get_visible` | 获取简化版可见 DOM 树 |
+| `codex_dom_get_visible` | 获取简化版可见 DOM 树（人类可读；如需可用于 codex_dom_click 的节点 ID，请使用 codex_dom_snapshot） |
 | `codex_evaluate` | 在页面上下文中执行 JavaScript |
 | `codex_get_info` | 获取扩展后端信息 |
 
@@ -245,7 +245,7 @@ info          ping          try <method> [json]   quit
 |------|------|
 | `codex_click` | 通过 CSS 选择器点击元素 |
 | `codex_fill` | 通过 CSS 选择器填充表单输入 |
-| `codex_dom_click` | 通过节点 ID 点击 DOM 节点 |
+| `codex_dom_click` | 通过来自 codex_dom_snapshot 的无障碍节点 ID 点击 DOM 节点 |
 | `codex_cua_click` | 通过屏幕坐标点击 |
 | `codex_cua_type` | 在当前焦点处输入文本 |
 | `codex_cua_keypress` | 按下键盘按键 |

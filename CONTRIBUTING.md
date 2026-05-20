@@ -19,7 +19,7 @@ See [SECURITY.md](SECURITY.md) — please don't file these as public issues.
 
 Requirements:
 
-- Go 1.26+
+- Go 1.23+
 - Windows (the bridge depends on Windows named pipes via `go-winio`)
 - Codex Desktop and the Codex Chrome Extension running, if you want to test against a real pipe
 
