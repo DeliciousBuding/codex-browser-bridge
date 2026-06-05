@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0] - 2026-06-05
+
+### Fixed
+
+- **Pipe discovery broken after Codex Desktop 26.602+**: Newer Codex versions create pipe names with backslash separators (`codex-browser-use\<uuid>`) which PowerShell's `Get-ChildItem` treats as directories and skips. Switched to `[System.IO.Directory]::GetFileSystemEntries` and manual prefix stripping to discover both formats.
+- **`extractUUID` updated** to strip both `-` and `\` separators after the `codex-browser-use` prefix.
+- **Pipe warning threshold** raised from >1 to >2, since old-format and new-format pipes legitimately coexist during Codex upgrades.
+
 ## [0.3.0] - 2026-05-19
 
 ### Fixed

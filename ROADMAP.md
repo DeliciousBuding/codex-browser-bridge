@@ -1,5 +1,21 @@
 # ROADMAP
 
+## v1.5.0 — Codex 26.602+ Pipe Discovery Fix (2026-06-05)
+
+Codex Desktop 26.602+ changed pipe naming from `codex-browser-use-<uuid>` to `codex-browser-use\<uuid>`. The old PowerShell `Get-ChildItem` discovery treated `\` as a directory separator and missed new-format pipes entirely.
+
+### Fixed
+- [x] **DISC-01** `discovery.go` — `Get-ChildItem` → `[System.IO.Directory]::GetFileSystemEntries` + substring extraction
+- [x] **DISC-02** `discovery.go` — `extractUUID` handles both `-` and `\` separators
+- [x] **DISC-03** `client.go` — Warning threshold `> 1` → `> 2` (old + new pipes coexist normally)
+
+### Verified
+- Smoke test: `get_info` ✅ `create_tab` ✅ `navigate` ✅ `screenshot` ✅ `close_tab` ✅
+- All existing unit tests pass (`go test ./...`)
+- go vet clean
+
+---
+
 ## v0.3.0 — Bug Fixes from Cross-Audit (2026-05-19)
 
 30 bugs found by parallel audit. Fixed in 4 batches.
