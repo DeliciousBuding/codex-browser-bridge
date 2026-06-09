@@ -10,13 +10,15 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -57,6 +59,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -67,10 +71,13 @@ jobs:
   release:
     needs: [test, lint]
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - uses: actions/setup-go@v6
         with:
@@ -86,6 +93,24 @@ jobs:
             exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release contents
+        shell: bash
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${TAG#v}"
+          git fetch origin main --depth=1
+          git rev-parse "$TAG^{commit}" >/dev/null
+          git merge-base --is-ancestor "$TAG^{commit}" origin/main
+          PACKAGE_VERSION="$(grep -m1 '"version"' npm/package.json | sed -E 's/.*"version": "([^"]+)".*/\1/')"
+          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
+            echo "npm package version $PACKAGE_VERSION does not match release tag $TAG" >&2
+            exit 1
+          fi
+          if ! grep -Fq "## [$VERSION]" CHANGELOG.md; then
+            echo "CHANGELOG.md is missing ## [$VERSION]" >&2
+            exit 1
+          fi
 
       - name: Build
         shell: bash
@@ -124,3 +149,84 @@ jobs:
             codex-browser-bridge.exe \
             codex-browser-bridge-arm64.exe \
             checksums.txt
+
+  publish-npm:
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Verify npm version matches tag
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          PACKAGE_VERSION="$(node -p 'require("./npm/package.json").version')"
+          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
+            echo "npm package version $PACKAGE_VERSION does not match release tag $TAG" >&2
+            exit 1
+          fi
+
+      - name: Embed release checksums
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          rm -f npm/checksums.txt npm/checksums.json
+          gh release download "$TAG" --pattern checksums.txt --dir npm
+          node - <<'NODE'
+          const fs = require("fs");
+          const path = require("path");
+          const text = fs.readFileSync(path.join("npm", "checksums.txt"), "utf8");
+          const files = {};
+          for (const line of text.split(/\r?\n/)) {
+            const match = line.trim().match(/^([a-fA-F0-9]{64})\s+[*]?(.+)$/);
+            if (match) files[match[2].trim()] = match[1].toLowerCase();
+          }
+          for (const required of ["codex-browser-bridge.exe", "codex-browser-bridge-arm64.exe"]) {
+            if (!files[required]) throw new Error(`missing checksum for ${required}`);
+          }
+          fs.writeFileSync(path.join("npm", "checksums.json"), `${JSON.stringify({ version: process.env.TAG_VERSION, files }, null, 2)}\n`);
+          NODE
+
+      - name: Test npm installer helpers
+        shell: bash
+        run: |
+          cd npm
+          npm test
+
+      - name: Check npm package contents
+        shell: bash
+        run: |
+          cd npm
+          npm pack --dry-run --json > pack.json
+          node - <<'NODE'
+          const fs = require("fs");
+          const pack = JSON.parse(fs.readFileSync("pack.json", "utf8"))[0];
+          const files = new Set(pack.files.map((f) => f.path));
+          for (const required of ["package.json", "checksums.json", "scripts/install.js", "bin/codex-browser-bridge.js"]) {
+            if (!files.has(required)) {
+              throw new Error(`npm package is missing ${required}`);
+            }
+          }
+          NODE
+
+      - name: Publish npm package
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd npm
+          npm publish --provenance --access public

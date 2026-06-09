@@ -54,7 +54,7 @@ Useful when an agent needs to work with pages that require a real browser sessio
 
 ## Status
 
-Version 1.5.2 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
+Version 1.5.3 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
 
 - `codex-browser-use-<uuid>`
 - `codex-browser-use\<uuid>`
@@ -230,6 +230,8 @@ try <method> [json_params]
 quit
 ```
 
+CLI output can include pipe IDs, tab titles, full URLs, screenshots, and page text from logged-in tabs. Redact that output before posting bug reports or feature requests.
+
 ## MCP Tools
 
 ### Tab management
@@ -327,6 +329,7 @@ Use it with the same caution you would apply to browser automation tools:
 - review agent actions before allowing sensitive operations
 - avoid using it on pages containing passwords, payment details, private tokens, or production admin consoles
 - remember that claimed tabs may already be logged in
+- redact tab titles, URLs, DOM text, screenshots, pipe IDs, and debug logs before sharing output
 
 The project is intended for local development and controlled automation.
 

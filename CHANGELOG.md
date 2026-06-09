@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.3] - 2026-06-09
+
+### Fixed
+
+- Release workflow now publishes the npm package after GitHub Release assets are created.
+- Manual release runs now checkout the requested tag before test, lint, asset build, and npm publish jobs.
+- npm publish now verifies that `npm/package.json` matches the release tag before publishing.
+- npm installer now prefers package-embedded binary checksums, with the release checksum file kept as a fallback for older packages and development overrides.
+- CUA click, type, and keypress actions now keep each high-level input sequence under one tab lock and retry debugger detach errors inside the sequence.
+- `codex_wait_for_load` now bounds each CDP request by the caller's timeout.
+- CDP tab locks are retired after successful tab close and session finalization.
+- README, SECURITY, and issue templates now name the local browser data that must be redacted before sharing output.
+
 ## [1.5.2] - 2026-06-09
 
 ### Fixed

@@ -15,6 +15,15 @@ coverage
 *.coverprofile
 npm/pack.json
 npm/*.tgz
+npm/checksums.json
+
+# Local private files
+.env
+.env.*
+*.local
+*.log
+debug/
+bridge-debug*.txt
 
 # IDE
 .idea/

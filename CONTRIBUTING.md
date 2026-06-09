@@ -75,5 +75,4 @@ Maintainer-only:
 2. Move `## [Unreleased]` notes in `CHANGELOG.md` to the new version section.
 3. Open a `release/vX.Y.Z` PR and merge it.
 4. Tag from `main`: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
-5. The release workflow builds Windows binaries (amd64 + arm64), generates checksums, and publishes a GitHub Release.
-6. Publish to npm from the `npm/` subdirectory: `cd npm && npm publish --access public`.
+5. The release workflow builds Windows binaries (amd64 + arm64), generates checksums, publishes a GitHub Release, embeds those checksums into the npm package, and publishes npm with provenance.

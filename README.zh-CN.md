@@ -54,7 +54,7 @@ Agent 可以：
 
 ## 状态
 
-v1.5.2 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome 扩展已安装并运行。当前版本支持两种已知的 Codex 浏览器 pipe 名称格式：
+v1.5.3 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome 扩展已安装并运行。当前版本支持两种已知的 Codex 浏览器 pipe 名称格式：
 
 - `codex-browser-use-<uuid>`
 - `codex-browser-use\<uuid>`
@@ -210,6 +210,8 @@ nav <id> <url>   snapshot <id>   screenshot <id>
 info          ping          try <method> [json]   quit
 ```
 
+CLI 输出可能包含 pipe ID、标签页标题、完整 URL、截图，以及已登录页面的文本。提交公开 issue 或 feature request 前先删掉这些内容。
+
 ## MCP 工具
 
 ### 标签页管理
@@ -307,6 +309,7 @@ Chrome 标签页
 - 在允许敏感操作前检查 Agent 的行为
 - 避免在包含密码、支付信息、私有令牌或生产管理后台的页面上使用
 - 被接管的标签页可能已经登录，请按已登录会话处理
+- 公开分享输出前删掉标签页标题、URL、DOM 文本、截图、pipe ID 和 debug 日志
 
 本项目仅用于本地开发和受控自动化。
 
