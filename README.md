@@ -54,7 +54,7 @@ Useful when an agent needs to work with pages that require a real browser sessio
 
 ## Status
 
-Version 1.5.3 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
+Version 1.5.4 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
 
 - `codex-browser-use-<uuid>`
 - `codex-browser-use\<uuid>`

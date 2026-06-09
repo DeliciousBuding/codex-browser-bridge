@@ -831,6 +831,34 @@ func TestCDPLocksRetiredOnCloseAndFinalize(t *testing.T) {
 	}
 }
 
+func TestCDPLockRetiredWhenCloseFindsTabAlreadyGone(t *testing.T) {
+	c, srv := newPipedClient(t, func(req protocol.Request) (interface{}, *protocol.ErrorObject) {
+		if req.Method != "executeCdp" {
+			return map[string]bool{"ok": true}, nil
+		}
+		params, _ := req.Params.(map[string]interface{})
+		if params["method"] == "Page.close" {
+			return nil, &protocol.ErrorObject{Code: -32000, Message: "Target closed"}
+		}
+		return map[string]bool{"ok": true}, nil
+	})
+	defer srv.close()
+	defer c.Close()
+
+	if err := c.CUAClick("3", 100, 200); err != nil {
+		t.Fatalf("CUAClick: %v", err)
+	}
+	if got := len(c.cdpLocks); got != 1 {
+		t.Fatalf("cdpLocks after click = %d, want 1", got)
+	}
+	if err := c.CloseTab("3"); err == nil {
+		t.Fatal("expected close error for already closed tab, got nil")
+	}
+	if got := len(c.cdpLocks); got != 0 {
+		t.Fatalf("cdpLocks after already-gone close = %d, want 0", got)
+	}
+}
+
 func TestCUAScrollSendsWheelDelta(t *testing.T) {
 	c, rec, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} { return map[string]bool{"ok": true} })
 	defer cleanup()
