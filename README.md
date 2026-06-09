@@ -30,7 +30,7 @@
 
 ---
 
-`codex-browser-bridge` is a small Go binary that exposes Codex Desktop's Chrome browser bridge as an MCP server.
+`codex-browser-bridge` exposes Codex Desktop's Chrome browser bridge as an MCP server.
 
 It connects to the local Codex browser named pipe, speaks the same length-prefixed JSON-RPC protocol, and provides browser-control tools to Claude Code or any MCP-compatible agent.
 
@@ -54,17 +54,19 @@ Useful when an agent needs to work with pages that require a real browser sessio
 
 ## Status
 
-Version 1.5.4 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
+Version 1.6.0 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
 
 - `codex-browser-use-<uuid>`
 - `codex-browser-use\<uuid>`
 
-The bridge is still intended for local development and controlled automation, not remote or multi-user deployment.
+Run the bridge for local development and controlled automation on a single trusted machine.
+
+The 1.6.x line moves the bridge binary to Rust. Tagged releases through v1.5.4 use Go-built Windows binaries; 1.6.x builds Rust x64 and arm64 release assets after CI and tag validation.
 
 ## Features
 
 - MCP server over stdio
-- Single Go binary
+- Single Windows binary
 - No browser profile copying
 - Uses your existing Chrome session
 - Auto-discovers `codex-browser-use-*` named pipes
@@ -79,6 +81,7 @@ The bridge is still intended for local development and controlled automation, no
 - Codex Desktop running
 - Codex Chrome Extension installed and enabled
 - Go 1.23+ if building from source
+- Rust 1.85+ if building the `rewrite/rust-full` branch
 
 > The bridge connects to local named pipes created by Codex Desktop. If no pipe is found, start Codex Desktop first and make sure the extension is active.
 
@@ -110,6 +113,8 @@ Then place `codex-browser-bridge.exe` somewhere in your `PATH`.
 
 ### Option 4: Build from source
 
+Current release build:
+
 ```bash
 git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
 cd codex-browser-bridge
@@ -120,6 +125,21 @@ The binary will be generated at:
 
 ```text
 bin/codex-browser-bridge.exe
+```
+
+Rust rewrite branch build:
+
+```bash
+git checkout rewrite/rust-full
+cargo check --locked
+cargo test --locked
+cargo build --locked --release
+```
+
+The Rust binary will be generated at:
+
+```text
+target/release/codex-browser-bridge.exe
 ```
 
 ## Quick Start with Claude Code
@@ -377,7 +397,12 @@ Common commands:
 make build         # build binary
 make test          # go vet ./... && go test ./...
 make clean         # remove build output
+cargo check --locked
+cargo test --locked
+cargo build --locked --release
 ```
+
+See `docs/rust-rewrite/npm-ci-plan.md` for the Rust rewrite npm and CI plan.
 
 ## Roadmap
 
