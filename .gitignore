@@ -1,6 +1,9 @@
 # Binaries
 *.exe
 bin/
+!npm/bin/
+!npm/bin/codex-browser-bridge.js
+npm/bin/codex-browser-bridge
 /bridge
 /codex-browser-bridge
 

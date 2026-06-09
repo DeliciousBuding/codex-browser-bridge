@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/DeliciousBuding/codex-browser-bridge/internal/protocol"
 )
@@ -255,6 +256,39 @@ func TestWaitForLoadReturnsOnComplete(t *testing.T) {
 	}
 }
 
+func TestWaitForLoadRetriesTransientNavigationError(t *testing.T) {
+	var execCalls int
+	var mu sync.Mutex
+	c, srv := newPipedClient(t, func(req protocol.Request) (interface{}, *protocol.ErrorObject) {
+		if req.Method != "executeCdp" {
+			return map[string]bool{"ok": true}, nil
+		}
+		mu.Lock()
+		execCalls++
+		call := execCalls
+		mu.Unlock()
+		if call == 1 {
+			return nil, &protocol.ErrorObject{Code: -32000, Message: "Execution context destroyed."}
+		}
+		return map[string]interface{}{"result": map[string]interface{}{"value": "complete"}}, nil
+	})
+	defer srv.close()
+	defer c.Close()
+
+	state, err := c.WaitForLoad("3", 1000)
+	if err != nil {
+		t.Fatalf("WaitForLoad: %v", err)
+	}
+	if state != "complete" {
+		t.Errorf("final state = %q, want complete", state)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if execCalls != 2 {
+		t.Errorf("executeCdp calls = %d, want 2", execCalls)
+	}
+}
+
 func TestWaitForLoadTimesOut(t *testing.T) {
 	c, _, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} {
 		if req.Method != "executeCdp" {
@@ -305,6 +339,51 @@ func TestEvaluateForwardsExpression(t *testing.T) {
 		}
 		if cmd["returnByValue"] != true {
 			t.Errorf("returnByValue = %v, want true", cmd["returnByValue"])
+		}
+	}
+}
+
+func TestCdpWithAttachSerializesSameTab(t *testing.T) {
+	c, rec, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} {
+		if req.Method == "attach" {
+			time.Sleep(20 * time.Millisecond)
+		}
+		if req.Method == "executeCdp" {
+			return map[string]interface{}{"result": map[string]interface{}{"value": "ok"}}
+		}
+		return map[string]bool{"ok": true}
+	})
+	defer cleanup()
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := c.Evaluate("1", "document.title")
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("Evaluate: %v", err)
+		}
+	}
+
+	methods := []string{}
+	for _, call := range rec.snapshot() {
+		methods = append(methods, call.method)
+	}
+	if len(methods) != 6 {
+		t.Fatalf("methods = %v, want two detach/attach/execute groups", methods)
+	}
+	for i := 0; i < len(methods); i += 3 {
+		group := methods[i : i+3]
+		if strings.Join(group, ",") != "detach,attach,executeCdp" {
+			t.Fatalf("CDP calls interleaved: %v", methods)
 		}
 	}
 }
@@ -476,7 +555,17 @@ func TestNavigateForwardErrorsAtHistoryEnd(t *testing.T) {
 }
 
 func TestClickEscapesSelector(t *testing.T) {
-	c, rec, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} { return map[string]bool{"ok": true} })
+	c, rec, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} {
+		if req.Method == "executeCdp" {
+			return map[string]interface{}{
+				"result": map[string]interface{}{
+					"value": `{"ok":true}`,
+					"type":  "string",
+				},
+			}
+		}
+		return map[string]bool{"ok": true}
+	})
 	defer cleanup()
 
 	selector := `button[data-id="x\"y"]`
@@ -499,6 +588,38 @@ func TestClickEscapesSelector(t *testing.T) {
 	}
 	if strings.Contains(expr, "x\"y") {
 		t.Errorf("selector quotes not escaped — would break JS: %s", expr)
+	}
+	for _, call := range rec.snapshot() {
+		if call.method != "executeCdp" {
+			continue
+		}
+		cmd, _ := call.params["commandParams"].(map[string]interface{})
+		if cmd["returnByValue"] != true {
+			t.Errorf("returnByValue = %v, want true", cmd["returnByValue"])
+		}
+	}
+}
+
+func TestClickReturnsErrorWhenSelectorMissing(t *testing.T) {
+	c, _, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} {
+		if req.Method == "executeCdp" {
+			return map[string]interface{}{
+				"result": map[string]interface{}{
+					"value": `{"error":"element not found: #missing"}`,
+					"type":  "string",
+				},
+			}
+		}
+		return map[string]bool{"ok": true}
+	})
+	defer cleanup()
+
+	err := c.Click("3", "#missing")
+	if err == nil {
+		t.Fatal("expected missing selector error, got nil")
+	}
+	if !strings.Contains(err.Error(), "element not found") {
+		t.Errorf("error = %q, want element not found", err.Error())
 	}
 }
 
@@ -664,6 +785,32 @@ func TestDomCUAClickRejectsNonNumericNodeID(t *testing.T) {
 	defer cleanup()
 	if err := c.DomCUAClick("3", "not-a-number"); err == nil {
 		t.Fatal("expected error for non-numeric node id, got nil")
+	}
+}
+
+func TestDomCUAClickRejectsShortBoxModel(t *testing.T) {
+	c, _, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} {
+		if req.Method != "executeCdp" {
+			return map[string]bool{"ok": true}
+		}
+		params, _ := req.Params.(map[string]interface{})
+		if params["method"] == "DOM.getBoxModel" {
+			return map[string]interface{}{
+				"model": map[string]interface{}{
+					"content": []float64{10, 20, 30, 20, 30, 40},
+				},
+			}
+		}
+		return map[string]bool{"ok": true}
+	})
+	defer cleanup()
+
+	err := c.DomCUAClick("3", "42")
+	if err == nil {
+		t.Fatal("expected short box model error, got nil")
+	}
+	if !strings.Contains(err.Error(), "insufficient content quads") {
+		t.Errorf("error = %q, want insufficient content quads", err.Error())
 	}
 }
 

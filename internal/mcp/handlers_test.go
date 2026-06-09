@@ -407,3 +407,87 @@ func TestHandleCloseTabRejectsNonNumeric(t *testing.T) {
 		t.Fatal("expected error for non-numeric tab id, got nil")
 	}
 }
+
+func TestHandlersRejectMissingRequiredArgumentsBeforePipeCall(t *testing.T) {
+	tests := []struct {
+		tool string
+		args map[string]interface{}
+		want string
+	}{
+		{"codex_navigate", map[string]interface{}{"tab_id": "1"}, "url"},
+		{"codex_click", map[string]interface{}{"tab_id": "1"}, "selector"},
+		{"codex_fill", map[string]interface{}{"tab_id": "1", "selector": "#x"}, "value"},
+		{"codex_evaluate", map[string]interface{}{"tab_id": "1"}, "expression"},
+		{"codex_cua_type", map[string]interface{}{"tab_id": "1"}, "text"},
+		{"codex_cua_keypress", map[string]interface{}{"tab_id": "1"}, "keys"},
+		{"codex_cua_click", map[string]interface{}{"tab_id": "1", "x": 0}, "y"},
+		{"codex_cua_scroll", map[string]interface{}{"tab_id": "1", "x": 0, "y": 0, "scroll_x": 0}, "scroll_y"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tool, func(t *testing.T) {
+			srv, pipe, cleanup := newServerWithPipe(t, func(req protocol.Request) (interface{}, *protocol.ErrorObject) {
+				return map[string]bool{"ok": true}, nil
+			})
+			defer cleanup()
+
+			out, ok := callTool(t, srv, tt.tool, tt.args)
+			if ok {
+				t.Fatalf("expected handler error, got success: %s", out)
+			}
+			if !strings.Contains(out, tt.want) {
+				t.Fatalf("error %q should mention %q", out, tt.want)
+			}
+			if methods := pipe.recordedMethods(); len(methods) != 0 {
+				t.Fatalf("expected no pipe calls, got %v", methods)
+			}
+		})
+	}
+}
+
+func TestHandleFillAllowsEmptyValueWhenProvided(t *testing.T) {
+	srv, pipe, cleanup := newServerWithPipe(t, func(req protocol.Request) (interface{}, *protocol.ErrorObject) {
+		if req.Method == "executeCdp" {
+			return map[string]interface{}{
+				"result": map[string]interface{}{
+					"value": `{"ok":true}`,
+					"type":  "string",
+				},
+			}, nil
+		}
+		return map[string]bool{"ok": true}, nil
+	})
+	defer cleanup()
+
+	out, ok := callTool(t, srv, "codex_fill", map[string]interface{}{
+		"tab_id":   "1",
+		"selector": "#x",
+		"value":    "",
+	})
+	if !ok {
+		t.Fatalf("expected empty fill value to be accepted, got: %s", out)
+	}
+	if methods := pipe.recordedMethods(); len(methods) == 0 {
+		t.Fatal("expected pipe calls for provided empty value")
+	}
+}
+
+func TestCUASchemasUseIntegerCoordinates(t *testing.T) {
+	srv, _ := newTestServer("")
+	for _, name := range []string{"codex_cua_click", "codex_cua_scroll"} {
+		tool := srv.toolMap[name]
+		var schema map[string]interface{}
+		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+			t.Fatalf("schema %s: %v", name, err)
+		}
+		props, _ := schema["properties"].(map[string]interface{})
+		for _, field := range []string{"x", "y", "scroll_x", "scroll_y"} {
+			prop, ok := props[field].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if prop["type"] != "integer" {
+				t.Errorf("%s.%s schema type = %v, want integer", name, field, prop["type"])
+			}
+		}
+	}
+}

@@ -8,6 +8,7 @@ const https = require("https");
 
 const repo = process.env.CODEX_BRIDGE_REPO || "DeliciousBuding/codex-browser-bridge";
 const binDir = path.join(__dirname, "..", "bin");
+const packageJson = require("../package.json");
 
 function requestBuffer(url) {
   return new Promise((resolve, reject) => {
@@ -38,20 +39,36 @@ async function main() {
     process.exit(1);
   }
 
-  const arch = process.arch === "arm64" ? "arm64" : "amd64";
+  let arch;
+  switch (process.arch) {
+    case "x64":
+      arch = "amd64";
+      break;
+    case "arm64":
+      arch = "arm64";
+      break;
+    default:
+      console.error(`codex-browser-bridge does not ship a Windows binary for ${process.arch}.`);
+      process.exit(1);
+  }
+
+  const tag = process.env.CODEX_BRIDGE_TAG || `v${packageJson.version}`;
   const exeName = "codex-browser-bridge.exe";
   const asset = arch === "arm64" ? "codex-browser-bridge-arm64.exe" : "codex-browser-bridge.exe";
 
-  const base = `https://github.com/${repo}/releases/latest/download`;
+  const base = `https://github.com/${repo}/releases/download/${tag}`;
 
   // Download checksums
-  const checksums = await requestBuffer(`${base}/checksums.txt`);
+  const checksumsURL = `${base}/checksums.txt`;
+  const checksums = await requestBuffer(checksumsURL).catch((err) => {
+    throw new Error(`could not download checksums for ${tag}: ${err.message}`);
+  });
   const line = checksums.toString("utf8").split(/\r?\n/).find((l) => l.endsWith(`  ${asset}`));
-  if (!line) throw new Error(`checksum not found for ${asset}`);
+  if (!line) throw new Error(`checksum not found for ${asset} in ${checksumsURL}`);
   const expected = line.split(/\s+/)[0].toLowerCase();
 
   // Download binary
-  console.log(`Downloading codex-browser-bridge (${arch})...`);
+  console.log(`Downloading codex-browser-bridge ${tag} (${arch})...`);
   const binary = await requestBuffer(`${base}/${asset}`);
 
   // Verify checksum

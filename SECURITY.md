@@ -40,5 +40,5 @@ These are defense-in-depth measures, not a complete security boundary. The bridg
 
 Out of scope:
 
-- The fact that the bridge gives an MCP client access to your active browser session — this is the project's stated purpose. See the README's "Security Notes" section for the threat model.
-- Issues in Codex Desktop, the Codex Chrome Extension, or Chrome itself — please report those upstream.
+- MCP client access to your active browser session. This is the project's stated purpose. See the README's "Security Notes" section for the threat model.
+- Issues in Codex Desktop, the Codex Chrome Extension, or Chrome itself. Please report those upstream.

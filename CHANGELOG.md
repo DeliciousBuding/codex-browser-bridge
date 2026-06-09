@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.1] - 2026-06-09
+
+### Fixed
+
+- Serialized per-tab CDP detach, attach, and execute sequences to prevent concurrent actions on the same tab from detaching each other.
+- `codex_click` now returns an error when the selector is missing instead of reporting success after a JavaScript exception.
+- `codex_dom_click` now rejects short `DOM.getBoxModel` content arrays instead of panicking.
+- `codex_wait_for_load` now retries transient navigation-time CDP errors until the timeout.
+- Pipe discovery now ignores the bare `codex-browser-use` namespace entry and only returns concrete pipe names.
+- MCP JSON-RPC handling now ignores notifications, rejects malformed request envelopes, rejects zero-length frames, and validates required tool arguments before opening pipe calls.
+- The npm package now uses a committed JavaScript command wrapper, downloads release assets for the package version instead of `latest`, rejects unsupported CPU architectures, and checks package contents in CI.
+- Manual release workflow runs now require a valid `v*` release tag.
+
 ## [1.5.0] - 2026-06-05
 
 ### Fixed
@@ -61,13 +74,13 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - `codex_dom_get_visible` description clarified: returns human-readable DOM tree (not node IDs); use `codex_dom_snapshot` for accessibility node IDs usable with `codex_dom_click`
-- `codex_screenshot` `fullPage` parameter documented as reserved (not yet implemented — always captures viewport)
+- `codex_screenshot` `fullPage` parameter documented as reserved (not yet implemented, always captures viewport)
 
 ## [0.2.0] - 2026-05-16
 
 ### Added
 - `codex_navigate_back` and `codex_navigate_forward` MCP tools (history navigation was already in the client; now exposed)
-- `codex_wait_for_load` MCP tool — polls `document.readyState` until `complete` or timeout
+- `codex_wait_for_load` MCP tool: polls `document.readyState` until `complete` or timeout
 - `codex_screenshot` now returns MCP `image` content so agents can view the screenshot directly (previously only base64 text)
 - `MCPServer.SetVersion` so the build version flows into the MCP `initialize` handshake (`serverInfo.version`)
 - Unit tests across `protocol`, `client`, `discovery`, and `mcp` packages

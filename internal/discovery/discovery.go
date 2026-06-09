@@ -39,7 +39,11 @@ func parsePipeList(output string) []PipeInfo {
 		if !strings.HasPrefix(name, codexPipePrefix) {
 			continue
 		}
-		pipes = append(pipes, PipeInfo{Name: name, UUID: extractUUID(name)})
+		uuid := extractUUID(name)
+		if uuid == "" {
+			continue
+		}
+		pipes = append(pipes, PipeInfo{Name: name, UUID: uuid})
 	}
 	return pipes
 }
