@@ -10,6 +10,7 @@ npm/bin/codex-browser-bridge
 # Test artifacts
 test_*.txt
 cover.out
+coverage
 *.coverprofile
 
 # IDE
