@@ -30,7 +30,7 @@
 
 ---
 
-`codex-browser-bridge` is a small Go binary that exposes Codex Desktop's Chrome browser bridge as an MCP server.
+`codex-browser-bridge` exposes Codex Desktop's Chrome browser bridge as an MCP server.
 
 It connects to the local Codex browser named pipe, speaks the same length-prefixed JSON-RPC protocol, and provides browser-control tools to Claude Code or any MCP-compatible agent.
 
@@ -54,19 +54,19 @@ Useful when an agent needs to work with pages that require a real browser sessio
 
 ## Status
 
-Version 1.5.4 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
+Version 1.6.0 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
 
 - `codex-browser-use-<uuid>`
 - `codex-browser-use\<uuid>`
 
-The bridge is still intended for local development and controlled automation, not remote or multi-user deployment.
+Run the bridge for local development and controlled automation on a single trusted machine.
 
-The `rewrite/rust-full` branch is an active Rust rewrite. The npm package and current releases still use the Go-built Windows binaries until Rust parity is complete.
+The 1.6.x line moves the bridge binary to Rust. Tagged releases through v1.5.4 use Go-built Windows binaries; 1.6.x builds Rust x64 and arm64 release assets after CI and tag validation.
 
 ## Features
 
 - MCP server over stdio
-- Single Go binary
+- Single Windows binary
 - No browser profile copying
 - Uses your existing Chrome session
 - Auto-discovers `codex-browser-use-*` named pipes

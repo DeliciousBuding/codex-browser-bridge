@@ -1,60 +1,11 @@
-mod error {
-    use thiserror::Error;
-
-    #[derive(Debug, Error)]
-    pub enum BridgeError {
-        #[error("protocol: {0}")]
-        Protocol(String),
-
-        #[error("rpc error in {method}: {message}")]
-        Rpc { method: String, message: String },
-
-        #[error("timeout waiting for {0} response")]
-        Timeout(String),
-
-        #[error("{0}")]
-        User(String),
-    }
-
-    pub type Result<T> = std::result::Result<T, BridgeError>;
-}
-
-mod client {
-    use serde_json::{value::RawValue, Value};
-
-    use crate::error::Result;
-
-    #[derive(Clone)]
-    pub struct Client;
-
-    impl Client {
-        pub async fn send_request(
-            &self,
-            _method: &str,
-            _params: Option<Value>,
-        ) -> Result<Box<RawValue>> {
-            unimplemented!("browser_api tests exercise pure helpers only")
-        }
-
-        pub async fn execute_cdp(
-            &self,
-            _tab_id: i64,
-            _method: &str,
-            _params: Option<Value>,
-        ) -> Result<Box<RawValue>> {
-            unimplemented!("browser_api tests exercise pure helpers only")
-        }
-    }
-}
-
-#[path = "../src/browser.rs"]
-mod browser;
-
-use browser::{
-    build_click_script, build_fill_script, decode_tabs, decode_user_tabs, is_tab_gone_error,
-    is_transient_load_error, json_escaped, parse_tab_id, validate_url,
+use codex_browser_bridge::{
+    browser::{
+        build_click_script, build_fill_script, decode_tabs, decode_user_tabs, json_escaped,
+        parse_tab_id, validate_url,
+    },
+    browser_test_support::{is_tab_gone_error, is_transient_load_error},
+    error::BridgeError,
 };
-use error::BridgeError;
 use serde_json::value::RawValue;
 
 #[test]

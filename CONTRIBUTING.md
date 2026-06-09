@@ -15,7 +15,7 @@ Public issues must not include screenshots, DOM snapshots, tab titles, full priv
 
 ## Reporting security issues
 
-See [SECURITY.md](SECURITY.md). Please don't file these as public issues.
+See [SECURITY.md](SECURITY.md) and use the private reporting path there.
 
 ## Development setup
 
@@ -35,7 +35,7 @@ make build
 make test
 ```
 
-The full test suite is hermetic. It uses `net.Pipe` to simulate the Codex pipe, so you don't need Codex Desktop running to run `go test ./...`.
+The full test suite is hermetic. It uses `net.Pipe` to simulate the Codex pipe, so `go test ./...` runs without Codex Desktop.
 
 Rust rewrite branch checks:
 
@@ -64,7 +64,7 @@ The Rust binary is written to `target/release/codex-browser-bridge.exe`. Use the
 
 - Branch from `main`.
 - Reference the related issue in the PR description, if any.
-- Add or update tests for behavior changes. The wire-format invariants in `internal/client/browser_rpc_test.go` exist because previous regressions were hard to diagnose. Please don't break them silently.
+- Add or update tests for behavior changes. The wire-format invariants in `internal/client/browser_rpc_test.go` document regressions that were hard to diagnose.
 - Update `CHANGELOG.md` under `## [Unreleased]`.
 - Update both `README.md` and `README.zh-CN.md` if you add or remove tools.
 

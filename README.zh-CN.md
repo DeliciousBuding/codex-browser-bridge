@@ -30,7 +30,7 @@
 
 ---
 
-`codex-browser-bridge` 是一个小巧的 Go 二进制文件，将 Codex Desktop 的 Chrome 浏览器桥接层作为 MCP 服务器暴露出来。
+`codex-browser-bridge` 将 Codex Desktop 的 Chrome 浏览器桥接层作为 MCP 服务器暴露出来。
 
 它连接本地 Codex 浏览器的 named pipe，使用相同的 length-prefixed JSON-RPC 协议，为 Claude Code 或任何兼容 MCP 的 Agent 提供浏览器控制工具。
 
@@ -54,19 +54,19 @@ Agent 可以：
 
 ## 状态
 
-v1.5.4 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome 扩展已安装并运行。当前版本支持两种已知的 Codex 浏览器 pipe 名称格式：
+v1.6.0 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome 扩展已安装并运行。当前版本支持两种已知的 Codex 浏览器 pipe 名称格式：
 
 - `codex-browser-use-<uuid>`
 - `codex-browser-use\<uuid>`
 
-桥接器仍然只适合本地开发和受控自动化，不适合作为远程服务或多人共享服务部署。
+桥接器仅用于单台可信机器上的本地开发和受控自动化。
 
-`rewrite/rust-full` 分支正在进行 Rust 重写。npm 包和当前 release 仍使用 Go 构建的 Windows 二进制，直到 Rust 版本完成兼容性验证。
+1.6.x 版本线将桥接器二进制切到 Rust。v1.5.4 及更早的已发布版本使用 Go 构建的 Windows 二进制；1.6.x 在 CI 和 tag 校验通过后构建 Rust x64 和 arm64 release 资产。
 
 ## 特性
 
 - stdio 上的 MCP 服务器
-- 单个 Go 二进制文件
+- 单个 Windows 二进制文件
 - 无需复制浏览器配置文件
 - 使用你现有的 Chrome 会话
 - 自动发现 `codex-browser-use-*` named pipes

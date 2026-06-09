@@ -4,9 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-06-09
+
 ### Added
 
-- CI now has a Windows Rust rewrite job for `cargo check`, `cargo test`, and release-mode build.
+- Rebuilt the bridge binary in Rust with parity coverage for the extension wire protocol, pipe discovery, MCP tools, CLI commands, and browser helpers.
+- CI now has a Windows Rust rewrite job for `cargo check`, `cargo test`, and x64/arm64 release-mode builds.
+- Release validation now checks `Cargo.toml` against the release tag and extracts notes from the tagged changelog section.
 - Rust rewrite docs now describe the npm compatibility plan and local build commands.
 
 ## [1.5.4] - 2026-06-09

@@ -1,16 +1,16 @@
 # npm and CI Plan
 
-This branch keeps the npm package compatible with the current Go releases while the Rust rewrite reaches parity.
+This branch keeps the npm package asset names unchanged while the release workflow moves to Rust-built binaries.
 
 ## Current npm Behavior
 
-`npm/scripts/install.js` still downloads the release assets used by the published package:
+`npm/scripts/install.js` downloads the release assets used by the published package:
 
 - `codex-browser-bridge.exe` for Windows x64
 - `codex-browser-bridge-arm64.exe` for Windows arm64
 - `checksums.json` from the package, with `checksums.txt` from the GitHub Release as fallback
 
-Do not change `npm/package.json` version during rewrite work. Do not publish from this branch until Rust release assets are built and verified.
+Keep `npm/package.json` version unchanged during rewrite work. Publish after the Rust release assets are built and verified from a tag.
 
 ## Local Rust Build
 
@@ -19,7 +19,8 @@ Use these commands from the repository root:
 ```bash
 cargo check --locked
 cargo test --locked
-cargo build --locked --release
+cargo build --locked --release --target x86_64-pc-windows-msvc
+cargo build --locked --release --target aarch64-pc-windows-msvc
 ```
 
 The Rust binary is generated at:
@@ -44,7 +45,7 @@ For local MCP testing, point the client at that absolute path and keep the same 
 
 ## CI Draft
 
-The `ci.yml` workflow now has a `rust` job on `windows-latest`:
+The `ci.yml` workflow has a `rust` job on `windows-latest`:
 
 ```bash
 cargo check --locked
@@ -52,14 +53,15 @@ cargo test --locked
 cargo build --locked --release
 ```
 
-The existing Go and npm jobs remain in place. Go is still the release baseline until parity is complete.
+The existing Go and npm jobs remain in place during the rewrite branch.
 
-## Release Switch Criteria
+## Release Checks
 
-Switch npm release assets to Rust only after all items are true:
+Release and npm publish require these checks:
 
-- Rust tests cover the wire-format, browser API, MCP, and pipe discovery cases listed in `design.md`.
+- Rust tests cover the wire-format, browser API, MCP, CLI compatibility, and pipe discovery cases listed in `design.md`.
 - CI builds Windows x64 and arm64 Rust binaries.
 - GitHub Release uploads Rust binaries with the same asset names npm already expects.
+- Release validation checks that `Cargo.toml` and `npm/package.json` match the tag.
 - `npm test` passes with embedded checksums for both asset names.
 - A manual install from a draft release validates checksum download, binary placement, and `--version`.
