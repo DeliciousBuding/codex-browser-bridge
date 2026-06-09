@@ -33,6 +33,15 @@ function sha256(buf) {
   return crypto.createHash("sha256").update(buf).digest("hex");
 }
 
+function parseChecksumLine(line) {
+  const match = line.trim().match(/^([a-fA-F0-9]{64})\s+[*]?(.+)$/);
+  if (!match) return null;
+  return {
+    hash: match[1].toLowerCase(),
+    file: match[2].trim(),
+  };
+}
+
 async function main() {
   if (process.platform !== "win32") {
     console.error("codex-browser-bridge only supports Windows (requires named pipes).");
@@ -63,9 +72,11 @@ async function main() {
   const checksums = await requestBuffer(checksumsURL).catch((err) => {
     throw new Error(`could not download checksums for ${tag}: ${err.message}`);
   });
-  const line = checksums.toString("utf8").split(/\r?\n/).find((l) => l.endsWith(`  ${asset}`));
-  if (!line) throw new Error(`checksum not found for ${asset} in ${checksumsURL}`);
-  const expected = line.split(/\s+/)[0].toLowerCase();
+  const checksum = checksums.toString("utf8")
+    .split(/\r?\n/)
+    .map(parseChecksumLine)
+    .find((entry) => entry && entry.file === asset);
+  if (!checksum) throw new Error(`checksum not found for ${asset} in ${checksumsURL}`);
 
   // Download binary
   console.log(`Downloading codex-browser-bridge ${tag} (${arch})...`);
@@ -73,7 +84,7 @@ async function main() {
 
   // Verify checksum
   const actual = sha256(binary);
-  if (actual !== expected) throw new Error(`checksum mismatch: expected ${expected}, got ${actual}`);
+  if (actual !== checksum.hash) throw new Error(`checksum mismatch: expected ${checksum.hash}, got ${actual}`);
 
   // Install
   fs.mkdirSync(binDir, { recursive: true });
