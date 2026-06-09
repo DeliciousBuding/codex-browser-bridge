@@ -10,8 +10,11 @@ npm/bin/codex-browser-bridge
 # Test artifacts
 test_*.txt
 cover.out
+coverage.out
 coverage
 *.coverprofile
+npm/pack.json
+npm/*.tgz
 
 # IDE
 .idea/
