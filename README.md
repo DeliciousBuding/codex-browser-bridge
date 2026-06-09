@@ -54,7 +54,7 @@ Useful when an agent needs to work with pages that require a real browser sessio
 
 ## Status
 
-Version 1.5.1 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
+Version 1.5.2 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
 
 - `codex-browser-use-<uuid>`
 - `codex-browser-use\<uuid>`
@@ -391,9 +391,9 @@ Planned or open work:
 
 MIT License.
 
-## Disclaimer
+## Project Relationship
 
-This is an independent third-party project. It is not affiliated with, endorsed by, or connected to OpenAI, Codex Desktop, Anthropic, Claude Code, Google, or Chrome.
+Maintained independently from OpenAI, Codex Desktop, Anthropic, Claude Code, Google, and Chrome.
 
 ## Acknowledgments
 

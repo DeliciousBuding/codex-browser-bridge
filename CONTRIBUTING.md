@@ -7,9 +7,11 @@ Thanks for taking the time to contribute. This is a small project, and issues an
 Please open an issue using the bug report template. Include:
 
 - The output of `codex-browser-bridge --version`
-- The output of `codex-browser-bridge -mode discover`
+- The output of `codex-browser-bridge -mode discover`, with local identifiers redacted
 - Codex Desktop version, Chrome version, Windows version
 - A minimal reproduction (which tool you called, what arguments, what response)
+
+Public issues must not include screenshots, DOM snapshots, tab titles, full private URLs, logged-in page content, tokens, account IDs, or production admin pages. Use GitHub private vulnerability reporting for sensitive repros.
 
 ## Reporting security issues
 

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.2] - 2026-06-09
+
+### Fixed
+
+- Release tags now run test and lint jobs before GitHub Release assets are created.
+- CI now runs Node tests for installer checksum parsing.
+- Public issue and contributing docs now ask reporters to redact browser-local data before posting.
+- Ignore rules now cover generated coverage files, npm pack output, and package archives.
+- npm installer downloads from the project release for the package version by default. Development download overrides require `CODEX_BRIDGE_ALLOW_DEV_DOWNLOADS=1`.
+- README wording now states project relationships and browser-session permissions directly.
+
 ## [1.5.1] - 2026-06-09
 
 ### Fixed

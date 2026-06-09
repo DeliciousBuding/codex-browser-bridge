@@ -13,7 +13,59 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Vet
+        shell: bash
+        run: go vet ./...
+      - name: Test with coverage
+        shell: bash
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+      - name: Build
+        shell: bash
+        run: go build -trimpath -ldflags "-s -w" -o bin/codex-browser-bridge.exe ./cmd/bridge
+      - name: Test npm installer helpers
+        shell: bash
+        run: |
+          cd npm
+          npm test
+      - name: Check npm package contents
+        shell: bash
+        run: |
+          cd npm
+          npm pack --dry-run --json > pack.json
+          node - <<'NODE'
+          const fs = require("fs");
+          const pack = JSON.parse(fs.readFileSync("pack.json", "utf8"))[0];
+          const files = new Set(pack.files.map((f) => f.path));
+          for (const required of ["package.json", "scripts/install.js", "bin/codex-browser-bridge.js"]) {
+            if (!files.has(required)) {
+              throw new Error(`npm package is missing ${required}`);
+            }
+          }
+          NODE
+
+  lint:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
   release:
+    needs: [test, lint]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6

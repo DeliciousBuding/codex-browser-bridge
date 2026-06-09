@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const https = require("https");
 
-const repo = process.env.CODEX_BRIDGE_REPO || "DeliciousBuding/codex-browser-bridge";
+const defaultRepo = "DeliciousBuding/codex-browser-bridge";
 const binDir = path.join(__dirname, "..", "bin");
 const packageJson = require("../package.json");
 
@@ -61,7 +60,9 @@ async function main() {
       process.exit(1);
   }
 
-  const tag = process.env.CODEX_BRIDGE_TAG || `v${packageJson.version}`;
+  const devDownloads = process.env.CODEX_BRIDGE_ALLOW_DEV_DOWNLOADS === "1";
+  const repo = devDownloads && process.env.CODEX_BRIDGE_REPO ? process.env.CODEX_BRIDGE_REPO : defaultRepo;
+  const tag = devDownloads && process.env.CODEX_BRIDGE_TAG ? process.env.CODEX_BRIDGE_TAG : `v${packageJson.version}`;
   const exeName = "codex-browser-bridge.exe";
   const asset = arch === "arm64" ? "codex-browser-bridge-arm64.exe" : "codex-browser-bridge.exe";
 
@@ -93,7 +94,14 @@ async function main() {
   console.log(`Installed: ${target}`);
 }
 
-main().catch((err) => {
-  console.error(`install failed: ${err.message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(`install failed: ${err.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  parseChecksumLine,
+  sha256,
+};
