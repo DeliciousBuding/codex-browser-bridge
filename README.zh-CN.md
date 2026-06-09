@@ -81,7 +81,7 @@ v1.5.4 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome
 - Codex Desktop 正在运行
 - Codex Chrome 扩展已安装并启用
 - Go 1.23+（仅从源码构建时需要）
-- Rust 1.82+（仅构建 `rewrite/rust-full` 分支时需要）
+- Rust 1.85+（仅构建 `rewrite/rust-full` 分支时需要）
 
 > 桥接器连接 Codex Desktop 创建的本地 named pipe。如果找不到 pipe，请先启动 Codex Desktop 并确保扩展已激活。
 

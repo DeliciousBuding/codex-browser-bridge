@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT"
 description = "MCP server that exposes Codex Desktop's Chrome browser bridge."
 repository = "https://github.com/DeliciousBuding/codex-browser-bridge"
-rust-version = "1.82"
+rust-version = "1.85"
 
 [[bin]]
 name = "codex-browser-bridge"

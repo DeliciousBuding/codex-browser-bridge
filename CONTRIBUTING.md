@@ -22,7 +22,7 @@ See [SECURITY.md](SECURITY.md). Please don't file these as public issues.
 Requirements:
 
 - Go 1.23+
-- Rust 1.82+ for the `rewrite/rust-full` branch
+- Rust 1.85+ for the `rewrite/rust-full` branch
 - Windows (the bridge depends on Windows named pipes via `go-winio`)
 - Codex Desktop and the Codex Chrome Extension running, if you want to test against a real pipe
 

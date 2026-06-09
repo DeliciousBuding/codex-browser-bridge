@@ -81,7 +81,7 @@ The `rewrite/rust-full` branch is an active Rust rewrite. The npm package and cu
 - Codex Desktop running
 - Codex Chrome Extension installed and enabled
 - Go 1.23+ if building from source
-- Rust 1.82+ if building the `rewrite/rust-full` branch
+- Rust 1.85+ if building the `rewrite/rust-full` branch
 
 > The bridge connects to local named pipes created by Codex Desktop. If no pipe is found, start Codex Desktop first and make sure the extension is active.
 
