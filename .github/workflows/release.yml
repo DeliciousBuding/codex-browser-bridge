@@ -25,15 +25,27 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
       - name: Vet
         shell: bash
         run: go vet ./...
       - name: Test with coverage
         shell: bash
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
-      - name: Build
+      - name: Check Rust rewrite
         shell: bash
-        run: go build -trimpath -ldflags "-s -w" -o bin/codex-browser-bridge.exe ./cmd/bridge
+        run: cargo check --locked
+      - name: Test Rust rewrite
+        shell: bash
+        run: cargo test --locked
+      - name: Build Rust rewrite x64
+        shell: bash
+        run: cargo build --locked --release --target x86_64-pc-windows-msvc
+      - name: Build Rust rewrite arm64
+        shell: bash
+        run: cargo build --locked --release --target aarch64-pc-windows-msvc
       - name: Test npm installer helpers
         shell: bash
         run: |
@@ -82,6 +94,9 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
 
       - name: Get version
         id: version
@@ -107,6 +122,11 @@ jobs:
             echo "npm package version $PACKAGE_VERSION does not match release tag $TAG" >&2
             exit 1
           fi
+          CARGO_VERSION="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')"
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "Cargo.toml version $CARGO_VERSION does not match release tag $TAG" >&2
+            exit 1
+          fi
           if ! grep -Fq "## [$VERSION]" CHANGELOG.md; then
             echo "CHANGELOG.md is missing ## [$VERSION]" >&2
             exit 1
@@ -115,13 +135,11 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          VERSION="${{ steps.version.outputs.tag }}"
-          GOOS=windows GOARCH=amd64 go build -trimpath \
-            -ldflags "-s -w -X main.version=$VERSION" \
-            -o "codex-browser-bridge.exe" ./cmd/bridge
-          GOOS=windows GOARCH=arm64 go build -trimpath \
-            -ldflags "-s -w -X main.version=$VERSION" \
-            -o "codex-browser-bridge-arm64.exe" ./cmd/bridge
+          cargo build --locked --release --target x86_64-pc-windows-msvc
+          cargo build --locked --release --target aarch64-pc-windows-msvc
+          cp target/x86_64-pc-windows-msvc/release/codex-browser-bridge.exe codex-browser-bridge.exe
+          cp target/aarch64-pc-windows-msvc/release/codex-browser-bridge.exe codex-browser-bridge-arm64.exe
+          ./codex-browser-bridge.exe --version
 
       - name: Generate checksums
         shell: bash
@@ -131,7 +149,14 @@ jobs:
         shell: bash
         run: |
           if [ -f CHANGELOG.md ]; then
-            awk '/^## \[/{if(found) exit; found=1; next} found{print}' CHANGELOG.md > release_notes.txt
+            VERSION="${{ steps.version.outputs.tag }}"
+            VERSION="${VERSION#v}"
+            HEADING="## [$VERSION]"
+            awk -v heading="$HEADING" '
+              index($0, heading) == 1 { found=1; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md > release_notes.txt
           fi
           if [ ! -s release_notes.txt ]; then
             prev=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || git rev-list --max-parents=0 HEAD)
