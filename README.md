@@ -61,6 +61,8 @@ Version 1.5.4 is a local Windows tool for Codex Desktop and the Codex Chrome Ext
 
 The bridge is still intended for local development and controlled automation, not remote or multi-user deployment.
 
+The `rewrite/rust-full` branch is an active Rust rewrite. The npm package and current releases still use the Go-built Windows binaries until Rust parity is complete.
+
 ## Features
 
 - MCP server over stdio
@@ -79,6 +81,7 @@ The bridge is still intended for local development and controlled automation, no
 - Codex Desktop running
 - Codex Chrome Extension installed and enabled
 - Go 1.23+ if building from source
+- Rust 1.82+ if building the `rewrite/rust-full` branch
 
 > The bridge connects to local named pipes created by Codex Desktop. If no pipe is found, start Codex Desktop first and make sure the extension is active.
 
@@ -110,6 +113,8 @@ Then place `codex-browser-bridge.exe` somewhere in your `PATH`.
 
 ### Option 4: Build from source
 
+Current release build:
+
 ```bash
 git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
 cd codex-browser-bridge
@@ -120,6 +125,21 @@ The binary will be generated at:
 
 ```text
 bin/codex-browser-bridge.exe
+```
+
+Rust rewrite branch build:
+
+```bash
+git checkout rewrite/rust-full
+cargo check --locked
+cargo test --locked
+cargo build --locked --release
+```
+
+The Rust binary will be generated at:
+
+```text
+target/release/codex-browser-bridge.exe
 ```
 
 ## Quick Start with Claude Code
@@ -377,7 +397,12 @@ Common commands:
 make build         # build binary
 make test          # go vet ./... && go test ./...
 make clean         # remove build output
+cargo check --locked
+cargo test --locked
+cargo build --locked --release
 ```
+
+See `docs/rust-rewrite/npm-ci-plan.md` for the Rust rewrite npm and CI plan.
 
 ## Roadmap
 

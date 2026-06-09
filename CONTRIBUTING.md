@@ -22,6 +22,7 @@ See [SECURITY.md](SECURITY.md). Please don't file these as public issues.
 Requirements:
 
 - Go 1.23+
+- Rust 1.82+ for the `rewrite/rust-full` branch
 - Windows (the bridge depends on Windows named pipes via `go-winio`)
 - Codex Desktop and the Codex Chrome Extension running, if you want to test against a real pipe
 
@@ -36,10 +37,21 @@ make test
 
 The full test suite is hermetic. It uses `net.Pipe` to simulate the Codex pipe, so you don't need Codex Desktop running to run `go test ./...`.
 
+Rust rewrite branch checks:
+
+```bash
+cargo check --locked
+cargo test --locked
+cargo build --locked --release
+```
+
+The Rust binary is written to `target/release/codex-browser-bridge.exe`. Use the same MCP config and pass `--mode mcp` when testing that binary locally.
+
 ## Code style
 
 - Run `gofmt`/`goimports` before committing. CI enforces this.
 - `make test` runs `go vet ./...` and `go test -race -cover ./...`.
+- Run `cargo fmt`, `cargo check --locked`, and `cargo test --locked` for Rust rewrite changes.
 - `golangci-lint run` is wired into CI; install it locally with [the official instructions](https://golangci-lint.run/usage/install/) and run it before pushing.
 
 ## Commits

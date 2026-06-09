@@ -61,6 +61,8 @@ v1.5.4 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome
 
 桥接器仍然只适合本地开发和受控自动化，不适合作为远程服务或多人共享服务部署。
 
+`rewrite/rust-full` 分支正在进行 Rust 重写。npm 包和当前 release 仍使用 Go 构建的 Windows 二进制，直到 Rust 版本完成兼容性验证。
+
 ## 特性
 
 - stdio 上的 MCP 服务器
@@ -79,6 +81,7 @@ v1.5.4 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome
 - Codex Desktop 正在运行
 - Codex Chrome 扩展已安装并启用
 - Go 1.23+（仅从源码构建时需要）
+- Rust 1.82+（仅构建 `rewrite/rust-full` 分支时需要）
 
 > 桥接器连接 Codex Desktop 创建的本地 named pipe。如果找不到 pipe，请先启动 Codex Desktop 并确保扩展已激活。
 
@@ -110,6 +113,8 @@ https://github.com/DeliciousBuding/codex-browser-bridge/releases
 
 ### 方式四：从源码构建
 
+当前 release 构建：
+
 ```bash
 git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
 cd codex-browser-bridge
@@ -120,6 +125,21 @@ make build
 
 ```text
 bin/codex-browser-bridge.exe
+```
+
+Rust 重写分支构建：
+
+```bash
+git checkout rewrite/rust-full
+cargo check --locked
+cargo test --locked
+cargo build --locked --release
+```
+
+Rust 二进制文件位于：
+
+```text
+target/release/codex-browser-bridge.exe
 ```
 
 ## Claude Code 快速上手
@@ -346,7 +366,12 @@ git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
 cd codex-browser-bridge
 make test
 make build
+cargo check --locked
+cargo test --locked
+cargo build --locked --release
 ```
+
+Rust 重写的 npm 和 CI 计划见 `docs/rust-rewrite/npm-ci-plan.md`。
 
 ## 路线图
 

@@ -37,3 +37,6 @@ Thumbs.db
 
 # Go
 vendor/
+
+# Rust
+target/

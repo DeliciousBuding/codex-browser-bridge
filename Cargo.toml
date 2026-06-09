@@ -1,0 +1,29 @@
+[package]
+name = "codex-browser-bridge"
+version = "1.5.4"
+edition = "2021"
+license = "MIT"
+description = "MCP server that exposes Codex Desktop's Chrome browser bridge."
+repository = "https://github.com/DeliciousBuding/codex-browser-bridge"
+rust-version = "1.82"
+
+[[bin]]
+name = "codex-browser-bridge"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["raw_value"] }
+thiserror = "2.0"
+tokio = { version = "1.48", features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+uuid = { version = "1.11", features = ["v4"] }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.14"

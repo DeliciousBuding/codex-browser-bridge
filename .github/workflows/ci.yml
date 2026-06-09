@@ -7,6 +7,21 @@ on:
     branches: [main]
 
 jobs:
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.82.0
+      - name: Check Rust rewrite
+        shell: bash
+        run: cargo check --locked
+      - name: Test Rust rewrite
+        shell: bash
+        run: cargo test --locked
+      - name: Build Rust rewrite
+        shell: bash
+        run: cargo build --locked --release
+
   test:
     runs-on: windows-latest
     steps:

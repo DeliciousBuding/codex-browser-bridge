@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- CI now has a Windows Rust rewrite job for `cargo check`, `cargo test`, and release-mode build.
+- Rust rewrite docs now describe the npm compatibility plan and local build commands.
+
 ## [1.5.4] - 2026-06-09
 
 ### Fixed
