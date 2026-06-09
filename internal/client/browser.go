@@ -66,7 +66,7 @@ func (c *Client) CloseTab(tabID string) error {
 		return fmt.Errorf("close_tab requires numeric tab_id, got %q", tabID)
 	}
 	_, err = c.cdpWithAttach(id, "Page.close", nil)
-	if err == nil {
+	if err == nil || isTabGoneError(err) {
 		c.retireTabCDPLock(id)
 	}
 	return err
@@ -342,6 +342,26 @@ func sleepUntil(deadline time.Time, max time.Duration) {
 
 func isDebuggerError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "not attached")
+}
+
+func isTabGoneError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	tabGone := []string{
+		"target closed",
+		"no target",
+		"target does not exist",
+		"cannot find target",
+		"tab closed",
+	}
+	for _, s := range tabGone {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func isTransientLoadError(err error) bool {

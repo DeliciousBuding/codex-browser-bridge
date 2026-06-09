@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.4] - 2026-06-09
+
+### Fixed
+
+- `codex_close_tab` now retires the tab CDP lock when Chrome reports that the target is already gone.
+
 ## [1.5.3] - 2026-06-09
 
 ### Fixed
