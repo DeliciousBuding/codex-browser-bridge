@@ -224,10 +224,6 @@ func (c *Client) WaitForLoad(tabID string, timeoutMs int) (string, error) {
 
 // --- CDP helper ---
 
-func (c *Client) executeCdp(tabID int, method string, params map[string]interface{}) (json.RawMessage, error) {
-	return c.executeCdpWithTimeout(tabID, method, params, defaultRequestTimeout)
-}
-
 func (c *Client) executeCdpWithTimeout(tabID int, method string, params map[string]interface{}, timeout time.Duration) (json.RawMessage, error) {
 	if params == nil {
 		params = map[string]interface{}{}
@@ -278,10 +274,6 @@ func (c *Client) cdpWithAttachUntil(tabID int, method string, params map[string]
 	unlock := c.lockTabCDP(tabID)
 	defer unlock()
 	return c.cdpWithAttachLockedUntil(tabID, method, params, deadline)
-}
-
-func (c *Client) cdpWithAttachLocked(tabID int, method string, params map[string]interface{}) (json.RawMessage, error) {
-	return c.cdpWithAttachLockedUntil(tabID, method, params, time.Time{})
 }
 
 func (c *Client) cdpWithAttachLockedUntil(tabID int, method string, params map[string]interface{}, deadline time.Time) (json.RawMessage, error) {
