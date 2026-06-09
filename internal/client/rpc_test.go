@@ -311,7 +311,7 @@ func TestSendRequestReturnsErrorOnConnectionClose(t *testing.T) {
 		errCh <- err
 	}()
 
-	<-ready        // wait until handler is invoked (request is in-flight)
+	<-ready          // wait until handler is invoked (request is in-flight)
 	srv.conn.Close() // close server-side connection while request is waiting
 
 	select {
@@ -327,7 +327,7 @@ func TestSendRequestReturnsErrorOnConnectionClose(t *testing.T) {
 		t.Fatal("SendRequest did not return after server close (hung)")
 	}
 
-	close(start)   // unblock handler goroutine
-	srv.close()    // wait for handler goroutine to exit
+	close(start) // unblock handler goroutine
+	srv.close()  // wait for handler goroutine to exit
 	c.Close()
 }
