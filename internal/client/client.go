@@ -29,6 +29,9 @@ type Client struct {
 	pendingMu sync.Mutex
 	pending   map[int]chan *protocol.Response
 
+	cdpMu    sync.Mutex
+	cdpLocks map[int]*sync.Mutex
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	log    *log.Logger
@@ -146,10 +149,11 @@ func NewFromConn(conn net.Conn, logger *log.Logger) *Client {
 			SessionID: sessionID,
 			TurnID:    turnID,
 		},
-		pending: make(map[int]chan *protocol.Response),
-		ctx:     ctx,
-		cancel:  cancel,
-		log:     logger,
+		pending:  make(map[int]chan *protocol.Response),
+		cdpLocks: make(map[int]*sync.Mutex),
+		ctx:      ctx,
+		cancel:   cancel,
+		log:      logger,
 	}
 	go c.readLoop()
 	return c
@@ -270,6 +274,19 @@ func (c *Client) readLoop() {
 			c.log.Printf("← notification: %s", truncate(string(raw), 200))
 		}
 	}
+}
+
+func (c *Client) lockTabCDP(tabID int) func() {
+	c.cdpMu.Lock()
+	mu, ok := c.cdpLocks[tabID]
+	if !ok {
+		mu = &sync.Mutex{}
+		c.cdpLocks[tabID] = mu
+	}
+	c.cdpMu.Unlock()
+
+	mu.Lock()
+	return mu.Unlock
 }
 
 func truncate(s string, n int) string {

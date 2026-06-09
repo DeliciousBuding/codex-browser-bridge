@@ -192,6 +192,10 @@ func (c *Client) WaitForLoad(tabID string, timeoutMs int) (string, error) {
 			"returnByValue": true,
 		})
 		if err != nil {
+			if isTransientLoadError(err) && time.Now().Before(deadline) {
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
 			return last, err
 		}
 		var result struct {
@@ -247,6 +251,12 @@ func (c *Client) detachTab(tabID int) error {
 // It first tries to detach (to clear any stale attachment state), then attach
 // fresh, then execute. If execute fails with "not attached", it retries once.
 func (c *Client) cdpWithAttach(tabID int, method string, params map[string]interface{}) (json.RawMessage, error) {
+	unlock := c.lockTabCDP(tabID)
+	defer unlock()
+	return c.cdpWithAttachLocked(tabID, method, params)
+}
+
+func (c *Client) cdpWithAttachLocked(tabID int, method string, params map[string]interface{}) (json.RawMessage, error) {
 	// Detach first to clear any stale debugger state from Chrome
 	_ = c.detachTab(tabID)
 	if err := c.attachTab(tabID); err != nil {
@@ -269,6 +279,26 @@ func (c *Client) cdpWithAttach(tabID int, method string, params map[string]inter
 
 func isDebuggerError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "not attached")
+}
+
+func isTransientLoadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	transient := []string{
+		"execution context destroyed",
+		"cannot find context with specified id",
+		"inspected target navigated",
+		"target closed",
+		"frame was detached",
+	}
+	for _, s := range transient {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // jsonEscaped returns a JSON-escaped representation of s suitable for embedding
@@ -364,6 +394,8 @@ func (c *Client) CUAType(tabID, text string) error {
 	if err != nil {
 		return err
 	}
+	unlock := c.lockTabCDP(id)
+	defer unlock()
 	// Ensure debugger is attached once before the key sequence
 	_ = c.detachTab(id)
 	if err := c.attachTab(id); err != nil {
@@ -465,10 +497,10 @@ func (c *Client) DomCUAClick(tabID, nodeID string) error {
 	if err := json.Unmarshal(raw, &box); err != nil {
 		return fmt.Errorf("parse box model: %w", err)
 	}
-	if len(box.Model.Content) < 5 {
+	if len(box.Model.Content) < 8 {
 		return fmt.Errorf("box model has insufficient content quads: got %d elements", len(box.Model.Content))
 	}
-	// Content quad: [x1,y1, x2,y2, x3,y3, x4,y4] — center is average
+	// Content quad: [x1,y1, x2,y2, x3,y3, x4,y4]. Center is average.
 	cx := (box.Model.Content[0] + box.Model.Content[2] + box.Model.Content[4] + box.Model.Content[6]) / 4
 	cy := (box.Model.Content[1] + box.Model.Content[3] + box.Model.Content[5] + box.Model.Content[7]) / 4
 	return c.CUAClick(tabID, int(cx), int(cy))
@@ -529,11 +561,34 @@ func (c *Client) Click(tabID, selector string) error {
 	if err != nil {
 		return err
 	}
-	js := fmt.Sprintf(`document.querySelector(%s).click()`, jsonEscaped(selector))
-	_, err = c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
-		"expression": js,
+	s := jsonEscaped(selector)
+	js := fmt.Sprintf(`(function(){try{var el=document.querySelector(%s);if(!el)return JSON.stringify({error:'element not found: '+%s});el.click();return JSON.stringify({ok:true})}catch(e){return JSON.stringify({error:String(e&&e.message||e)})}})()`, s, s)
+	raw, err := c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
+		"expression":    js,
+		"returnByValue": true,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	var evalResult struct {
+		Result struct {
+			Value string `json:"value"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &evalResult); err != nil {
+		return err
+	}
+	var clickResult struct {
+		Ok    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(evalResult.Result.Value), &clickResult); err != nil {
+		return err
+	}
+	if clickResult.Error != "" {
+		return fmt.Errorf("click: %s", clickResult.Error)
+	}
+	return nil
 }
 
 // Fill fills a form input by CSS selector via CDP.

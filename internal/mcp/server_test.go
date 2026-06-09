@@ -130,6 +130,52 @@ func TestUnknownMethodReturnsError(t *testing.T) {
 	}
 }
 
+func TestNotificationsDoNotReturnResponses(t *testing.T) {
+	in := strings.Join([]string{
+		`{"jsonrpc":"2.0","method":"ping"}`,
+		`{"jsonrpc":"2.0","method":"tools/list"}`,
+		`{"jsonrpc":"2.0","method":"tools/call","params":{"name":"codex_get_info","arguments":{}}}`,
+	}, "\n") + "\n"
+	s, out := newTestServer(in)
+	if err := s.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := strings.TrimSpace(out.String()); got != "" {
+		t.Fatalf("expected no responses for notifications, got: %s", got)
+	}
+}
+
+func TestInvalidRequestEnvelopeReturnsError(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{"missing jsonrpc", `{"id":1,"method":"ping"}`},
+		{"bad jsonrpc", `{"jsonrpc":"1.0","id":1,"method":"ping"}`},
+		{"missing method", `{"jsonrpc":"2.0","id":1}`},
+		{"batch array", `[{"jsonrpc":"2.0","id":1,"method":"ping"}]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, out := newTestServer(tt.in + "\n")
+			if err := s.Run(); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			resps := decodeResponses(t, out)
+			if len(resps) != 1 {
+				t.Fatalf("expected 1 response, got %d", len(resps))
+			}
+			errObj, ok := resps[0]["error"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("expected error object, got: %+v", resps[0])
+			}
+			if int(errObj["code"].(float64)) != -32600 {
+				t.Errorf("error code = %v, want -32600", errObj["code"])
+			}
+		})
+	}
+}
+
 func TestParseErrorOnInvalidJSON(t *testing.T) {
 	in := "not valid json\n"
 	s, out := newTestServer(in)

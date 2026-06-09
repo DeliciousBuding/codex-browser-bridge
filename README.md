@@ -54,9 +54,12 @@ Useful when an agent needs to work with pages that require a real browser sessio
 
 ## Status
 
-Experimental.
+Version 1.5.1 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
 
-The current version is designed for local Windows environments where Codex Desktop and the Codex Chrome Extension are already installed and running.
+- `codex-browser-use-<uuid>`
+- `codex-browser-use\<uuid>`
+
+The bridge is still intended for local development and controlled automation, not remote or multi-user deployment.
 
 ## Features
 
@@ -116,7 +119,7 @@ make build
 The binary will be generated at:
 
 ```text
-bin/codex-browser-bridge
+bin/codex-browser-bridge.exe
 ```
 
 ## Quick Start with Claude Code
@@ -253,7 +256,7 @@ quit
 
 | Tool                    | Description                                  |
 | ----------------------- | -------------------------------------------- |
-| `codex_screenshot`      | Capture a screenshot (returns MCP image). `fullPage` parameter is reserved for future implementation — currently always captures the viewport. |
+| `codex_screenshot`      | Capture a screenshot (returns MCP image). `fullPage` is reserved for a future release. The current implementation captures the viewport. |
 | `codex_dom_snapshot`    | Get an accessibility tree snapshot           |
 | `codex_dom_get_visible` | Get a simplified visible DOM tree (human-readable; use codex_dom_snapshot for node IDs usable with codex_dom_click) |
 | `codex_evaluate`        | Evaluate JavaScript in the page context      |
@@ -375,11 +378,11 @@ make clean         # remove build output
 
 ## Roadmap
 
-Possible next steps:
+Planned or open work:
 
-- richer error messages for common pipe / extension failures
+- clearer error messages for common pipe / extension failures
 - non-Windows fallback or explicit platform guards
-- better screenshot output handling for MCP clients
+- screenshot output handling across MCP clients
 - typed tool result schemas
 - optional allowlist / confirmation layer for sensitive domains
 - examples for Claude Code, Cursor, Codex CLI, and other MCP clients

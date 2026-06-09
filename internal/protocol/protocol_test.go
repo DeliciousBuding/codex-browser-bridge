@@ -50,6 +50,14 @@ func TestDecodeFrameRejectsOversize(t *testing.T) {
 	}
 }
 
+func TestDecodeFrameRejectsZeroLength(t *testing.T) {
+	var hdr [4]byte
+	r := bytes.NewReader(hdr[:])
+	if _, err := DecodeFrame(r); err == nil {
+		t.Fatal("expected error for zero-length frame, got nil")
+	}
+}
+
 func TestDecodeFrameTruncatedHeader(t *testing.T) {
 	r := bytes.NewReader([]byte{0x01, 0x02})
 	if _, err := DecodeFrame(r); err == nil {

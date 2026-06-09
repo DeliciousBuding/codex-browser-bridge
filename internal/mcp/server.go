@@ -37,6 +37,13 @@ type Content struct {
 	MimeType string `json:"mimeType,omitempty"`
 }
 
+type rpcRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params"`
+}
+
 func textContent(s string) []Content {
 	return []Content{{Type: "text", Text: s}}
 }
@@ -123,7 +130,7 @@ func (s *MCPServer) registerTools() {
 
 		// CUA (coordinate-based)
 		{Name: "codex_cua_click", Description: "Click at screen coordinates (CUA)",
-			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"},"x":{"type":"number"},"y":{"type":"number"}},"required":["tab_id","x","y"]}`),
+			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"},"x":{"type":"integer"},"y":{"type":"integer"}},"required":["tab_id","x","y"]}`),
 			Handler:     s.handleCUAClick},
 		{Name: "codex_cua_type", Description: "Type text at current focus (CUA)",
 			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"},"text":{"type":"string"}},"required":["tab_id","text"]}`),
@@ -132,7 +139,7 @@ func (s *MCPServer) registerTools() {
 			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"},"keys":{"type":"array","items":{"type":"string"}}},"required":["tab_id","keys"]}`),
 			Handler:     s.handleCUAKeypress},
 		{Name: "codex_cua_scroll", Description: "Scroll at coordinates (CUA)",
-			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"},"x":{"type":"number"},"y":{"type":"number"},"scroll_x":{"type":"number"},"scroll_y":{"type":"number"}},"required":["tab_id","x","y","scroll_x","scroll_y"]}`),
+			InputSchema: schema(`{"type":"object","properties":{"tab_id":{"type":"string"},"x":{"type":"integer"},"y":{"type":"integer"},"scroll_x":{"type":"integer"},"scroll_y":{"type":"integer"}},"required":["tab_id","x","y","scroll_x","scroll_y"]}`),
 			Handler:     s.handleCUAScroll},
 
 		// DOM CUA
@@ -176,14 +183,13 @@ func (s *MCPServer) Run() error {
 			continue
 		}
 
-		var req struct {
-			JSONRPC string          `json:"jsonrpc"`
-			ID      json.RawMessage `json:"id"`
-			Method  string          `json:"method"`
-			Params  json.RawMessage `json:"params"`
-		}
+		var req rpcRequest
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
-			s.writeError(nil, -32700, "Parse error")
+			if json.Valid([]byte(line)) {
+				s.writeError(nil, -32600, "Invalid Request")
+			} else {
+				s.writeError(nil, -32700, "Parse error")
+			}
 			continue
 		}
 
@@ -191,12 +197,15 @@ func (s *MCPServer) Run() error {
 	}
 }
 
-func (s *MCPServer) handleMessage(req struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params"`
-}) {
+func (s *MCPServer) handleMessage(req rpcRequest) {
+	if req.JSONRPC != "2.0" || req.Method == "" {
+		s.writeError(req.ID, -32600, "Invalid Request")
+		return
+	}
+	if !hasRequestID(req.ID) {
+		return
+	}
+
 	switch req.Method {
 	case "initialize":
 		s.writeResult(req.ID, map[string]interface{}{
@@ -221,10 +230,45 @@ func (s *MCPServer) handleMessage(req struct {
 	case "notifications/initialized":
 		// Notification — no response per JSON-RPC 2.0 Section 4.1
 	default:
-		if len(req.ID) > 0 && string(req.ID) != "null" {
-			s.writeError(req.ID, -32601, "Unknown method: "+req.Method)
+		s.writeError(req.ID, -32601, "Unknown method: "+req.Method)
+	}
+}
+
+func hasRequestID(id json.RawMessage) bool {
+	return len(id) > 0 && string(id) != "null"
+}
+
+func requireString(name, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("missing required argument: %s", name)
+	}
+	return nil
+}
+
+func requireStringSlice(name string, value []string) error {
+	if len(value) == 0 {
+		return fmt.Errorf("missing required argument: %s", name)
+	}
+	for i, item := range value {
+		if strings.TrimSpace(item) == "" {
+			return fmt.Errorf("%s[%d] must not be empty", name, i)
 		}
 	}
+	return nil
+}
+
+func requireStringValue(name string, value *string) (string, error) {
+	if value == nil {
+		return "", fmt.Errorf("missing required argument: %s", name)
+	}
+	return *value, nil
+}
+
+func requireInt(name string, value *int) (int, error) {
+	if value == nil {
+		return 0, fmt.Errorf("missing required argument: %s", name)
+	}
+	return *value, nil
 }
 
 func (s *MCPServer) handleToolCall(id json.RawMessage, params json.RawMessage) {
@@ -312,6 +356,9 @@ func (s *MCPServer) handleCloseTab(args json.RawMessage) ([]Content, error) {
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
+	}
 	if err := s.client.CloseTab(p.TabID); err != nil {
 		return nil, err
 	}
@@ -337,6 +384,9 @@ func (s *MCPServer) handleClaimTab(args json.RawMessage) ([]Content, error) {
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
+	}
 	tab, err := s.client.ClaimUserTab(p.TabID)
 	if err != nil {
 		return nil, err
@@ -356,6 +406,12 @@ func (s *MCPServer) handleNavigate(args json.RawMessage) ([]Content, error) {
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
+	}
+	if err := requireString("url", p.URL); err != nil {
+		return nil, err
+	}
 	if err := s.client.Navigate(p.TabID, p.URL); err != nil {
 		return nil, err
 	}
@@ -368,6 +424,9 @@ func (s *MCPServer) handleReload(args json.RawMessage) ([]Content, error) {
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
 	}
 	if err := s.client.Reload(p.TabID); err != nil {
 		return nil, err
@@ -382,6 +441,9 @@ func (s *MCPServer) handleNavigateBack(args json.RawMessage) ([]Content, error) 
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
+	}
 	if err := s.client.NavigateBack(p.TabID); err != nil {
 		return nil, err
 	}
@@ -394,6 +456,9 @@ func (s *MCPServer) handleNavigateForward(args json.RawMessage) ([]Content, erro
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
 	}
 	if err := s.client.NavigateForward(p.TabID); err != nil {
 		return nil, err
@@ -409,6 +474,9 @@ func (s *MCPServer) handleWaitForLoad(args json.RawMessage) ([]Content, error) {
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
+	}
 	state, err := s.client.WaitForLoad(p.TabID, p.TimeoutMs)
 	if err != nil {
 		return nil, err
@@ -422,6 +490,9 @@ func (s *MCPServer) handleDOMSnapshot(args json.RawMessage) ([]Content, error) {
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
 	}
 	snap, err := s.client.DOMSnapshot(p.TabID)
 	if err != nil {
@@ -437,6 +508,9 @@ func (s *MCPServer) handleScreenshot(args json.RawMessage) ([]Content, error) {
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
 	}
 	b64, err := s.client.Screenshot(p.TabID, p.FullPage)
 	if err != nil {
@@ -456,6 +530,12 @@ func (s *MCPServer) handleClick(args json.RawMessage) ([]Content, error) {
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
+	}
+	if err := requireString("selector", p.Selector); err != nil {
+		return nil, err
+	}
 	if err := s.client.Click(p.TabID, p.Selector); err != nil {
 		return nil, err
 	}
@@ -464,14 +544,24 @@ func (s *MCPServer) handleClick(args json.RawMessage) ([]Content, error) {
 
 func (s *MCPServer) handleFill(args json.RawMessage) ([]Content, error) {
 	var p struct {
-		TabID    string `json:"tab_id"`
-		Selector string `json:"selector"`
-		Value    string `json:"value"`
+		TabID    string  `json:"tab_id"`
+		Selector string  `json:"selector"`
+		Value    *string `json:"value"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
-	if err := s.client.Fill(p.TabID, p.Selector, p.Value); err != nil {
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
+	}
+	if err := requireString("selector", p.Selector); err != nil {
+		return nil, err
+	}
+	value, err := requireStringValue("value", p.Value)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.client.Fill(p.TabID, p.Selector, value); err != nil {
 		return nil, err
 	}
 	return textContent(fmt.Sprintf("Filled %s in tab %s", p.Selector, p.TabID)), nil
@@ -485,6 +575,12 @@ func (s *MCPServer) handleEvaluate(args json.RawMessage) ([]Content, error) {
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
+	}
+	if err := requireString("expression", p.Expression); err != nil {
+		return nil, err
+	}
 	result, err := s.client.Evaluate(p.TabID, p.Expression)
 	if err != nil {
 		return nil, err
@@ -495,16 +591,27 @@ func (s *MCPServer) handleEvaluate(args json.RawMessage) ([]Content, error) {
 func (s *MCPServer) handleCUAClick(args json.RawMessage) ([]Content, error) {
 	var p struct {
 		TabID string `json:"tab_id"`
-		X     int    `json:"x"`
-		Y     int    `json:"y"`
+		X     *int   `json:"x"`
+		Y     *int   `json:"y"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
-	if err := s.client.CUAClick(p.TabID, p.X, p.Y); err != nil {
+	if err := requireString("tab_id", p.TabID); err != nil {
 		return nil, err
 	}
-	return textContent(fmt.Sprintf("CUA click at (%d,%d) in tab %s", p.X, p.Y, p.TabID)), nil
+	x, err := requireInt("x", p.X)
+	if err != nil {
+		return nil, err
+	}
+	y, err := requireInt("y", p.Y)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.client.CUAClick(p.TabID, x, y); err != nil {
+		return nil, err
+	}
+	return textContent(fmt.Sprintf("CUA click at (%d,%d) in tab %s", x, y, p.TabID)), nil
 }
 
 func (s *MCPServer) handleCUAType(args json.RawMessage) ([]Content, error) {
@@ -514,6 +621,12 @@ func (s *MCPServer) handleCUAType(args json.RawMessage) ([]Content, error) {
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
+	}
+	if err := requireString("text", p.Text); err != nil {
+		return nil, err
 	}
 	if err := s.client.CUAType(p.TabID, p.Text); err != nil {
 		return nil, err
@@ -529,6 +642,12 @@ func (s *MCPServer) handleCUAKeypress(args json.RawMessage) ([]Content, error) {
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
+	}
+	if err := requireStringSlice("keys", p.Keys); err != nil {
+		return nil, err
+	}
 	if err := s.client.CUAKeypress(p.TabID, p.Keys); err != nil {
 		return nil, err
 	}
@@ -538,18 +657,37 @@ func (s *MCPServer) handleCUAKeypress(args json.RawMessage) ([]Content, error) {
 func (s *MCPServer) handleCUAScroll(args json.RawMessage) ([]Content, error) {
 	var p struct {
 		TabID   string `json:"tab_id"`
-		X       int    `json:"x"`
-		Y       int    `json:"y"`
-		ScrollX int    `json:"scroll_x"`
-		ScrollY int    `json:"scroll_y"`
+		X       *int   `json:"x"`
+		Y       *int   `json:"y"`
+		ScrollX *int   `json:"scroll_x"`
+		ScrollY *int   `json:"scroll_y"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
-	if err := s.client.CUAScroll(p.TabID, p.X, p.Y, p.ScrollX, p.ScrollY); err != nil {
+	if err := requireString("tab_id", p.TabID); err != nil {
 		return nil, err
 	}
-	return textContent(fmt.Sprintf("CUA scroll at (%d,%d) delta (%d,%d) in tab %s", p.X, p.Y, p.ScrollX, p.ScrollY, p.TabID)), nil
+	x, err := requireInt("x", p.X)
+	if err != nil {
+		return nil, err
+	}
+	y, err := requireInt("y", p.Y)
+	if err != nil {
+		return nil, err
+	}
+	scrollX, err := requireInt("scroll_x", p.ScrollX)
+	if err != nil {
+		return nil, err
+	}
+	scrollY, err := requireInt("scroll_y", p.ScrollY)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.client.CUAScroll(p.TabID, x, y, scrollX, scrollY); err != nil {
+		return nil, err
+	}
+	return textContent(fmt.Sprintf("CUA scroll at (%d,%d) delta (%d,%d) in tab %s", x, y, scrollX, scrollY, p.TabID)), nil
 }
 
 func (s *MCPServer) handleGetVisibleDOM(args json.RawMessage) ([]Content, error) {
@@ -558,6 +696,9 @@ func (s *MCPServer) handleGetVisibleDOM(args json.RawMessage) ([]Content, error)
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
 	}
 	dom, err := s.client.GetVisibleDOM(p.TabID)
 	if err != nil {
@@ -574,6 +715,12 @@ func (s *MCPServer) handleDomClick(args json.RawMessage) ([]Content, error) {
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
 	}
+	if err := requireString("tab_id", p.TabID); err != nil {
+		return nil, err
+	}
+	if err := requireString("node_id", p.NodeID); err != nil {
+		return nil, err
+	}
 	if err := s.client.DomCUAClick(p.TabID, p.NodeID); err != nil {
 		return nil, err
 	}
@@ -586,6 +733,9 @@ func (s *MCPServer) handleNameSession(args json.RawMessage) ([]Content, error) {
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %v", err)
+	}
+	if err := requireString("name", p.Name); err != nil {
+		return nil, err
 	}
 	if err := s.client.NameSession(p.Name); err != nil {
 		return nil, err

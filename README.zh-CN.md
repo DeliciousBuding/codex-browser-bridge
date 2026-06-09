@@ -54,9 +54,12 @@ Agent 因此可以：
 
 ## 状态
 
-实验性。
+v1.5.1 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome 扩展已安装并运行。当前版本支持两种已知的 Codex 浏览器 pipe 名称格式：
 
-当前版本专为本地 Windows 环境设计，需要已安装并运行 Codex Desktop 和 Codex Chrome 扩展。
+- `codex-browser-use-<uuid>`
+- `codex-browser-use\<uuid>`
+
+桥接器仍然只适合本地开发和受控自动化，不适合作为远程服务或多人共享服务部署。
 
 ## 特性
 
@@ -105,7 +108,7 @@ https://github.com/DeliciousBuding/codex-browser-bridge/releases
 
 将 `codex-browser-bridge.exe` 放到 `PATH` 中的任意位置。
 
-### 方式三：从源码构建
+### 方式四：从源码构建
 
 ```bash
 git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
@@ -233,7 +236,7 @@ info          ping          try <method> [json]   quit
 
 | 工具 | 说明 |
 |------|------|
-| `codex_screenshot` | 截取页面截图（返回 MCP image 内容）。`fullPage` 参数保留供未来实现——当前始终截取视口。 |
+| `codex_screenshot` | 截取页面截图（返回 MCP image 内容）。`fullPage` 参数保留给后续版本，当前实现截取视口。 |
 | `codex_dom_snapshot` | 获取无障碍树快照 |
 | `codex_dom_get_visible` | 获取简化版可见 DOM 树（人类可读；如需可用于 codex_dom_click 的节点 ID，请使用 codex_dom_snapshot） |
 | `codex_evaluate` | 在页面上下文中执行 JavaScript |
@@ -303,7 +306,7 @@ Chrome 标签页
 - 不要为不受信任的 MCP 客户端运行
 - 在允许敏感操作前检查 Agent 的行为
 - 避免在包含密码、支付信息、私有令牌或生产管理后台的页面上使用
-- 请记住被接管的标签页可能已经登录
+- 被接管的标签页可能已经登录，请按已登录会话处理
 
 本项目仅用于本地开发和受控自动化。
 
@@ -344,11 +347,11 @@ make build
 
 ## 路线图
 
-可能的下一步：
+计划或待处理工作：
 
-- 更丰富的错误信息（pipe / 扩展常见故障）
+- 更清晰的错误信息（pipe / 扩展常见故障）
 - 非 Windows 平台的回退或明确平台限制
-- 更好的截图输出处理
+- 面向不同 MCP 客户端的截图输出处理
 - 类型化的工具结果 schema
 - 敏感域名的可选白名单 / 确认层
 - Claude Code、Cursor、Codex CLI 等 MCP 客户端的使用示例

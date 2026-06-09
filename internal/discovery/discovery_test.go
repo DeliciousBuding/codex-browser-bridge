@@ -24,20 +24,25 @@ func TestExtractUUID(t *testing.T) {
 
 func TestParsePipeList(t *testing.T) {
 	output := "InputPipe_1\r\n" +
+		"codex-browser-use\r\n" +
 		"codex-browser-use-abc12345-6789-4def-9abc-123456789abc\r\n" +
 		"   codex-browser-use-second-pipe   \r\n" +
+		"codex-browser-use\\third-pipe\r\n" +
 		"unrelated-pipe\r\n" +
 		"codex-browser-extra-foo\r\n"
 
 	got := parsePipeList(output)
-	if len(got) != 2 {
-		t.Fatalf("expected 2 pipes, got %d: %+v", len(got), got)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 pipes, got %d: %+v", len(got), got)
 	}
 	if got[0].UUID != "abc12345-6789-4def-9abc-123456789abc" {
 		t.Errorf("first pipe UUID = %q", got[0].UUID)
 	}
 	if got[1].Name != "codex-browser-use-second-pipe" {
 		t.Errorf("second pipe name = %q (whitespace not trimmed)", got[1].Name)
+	}
+	if got[2].UUID != "third-pipe" {
+		t.Errorf("third pipe UUID = %q", got[2].UUID)
 	}
 }
 

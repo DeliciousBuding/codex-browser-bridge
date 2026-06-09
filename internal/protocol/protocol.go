@@ -68,6 +68,9 @@ func DecodeFrame(r io.Reader) (json.RawMessage, error) {
 		return nil, fmt.Errorf("read frame length: %w", err)
 	}
 	length := binary.LittleEndian.Uint32(lenBuf[:])
+	if length == 0 {
+		return nil, fmt.Errorf("empty frame")
+	}
 	if length > 10*1024*1024 { // 10MB safety limit
 		return nil, fmt.Errorf("frame too large: %d bytes", length)
 	}
