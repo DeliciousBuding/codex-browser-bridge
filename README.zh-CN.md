@@ -54,7 +54,7 @@ Agent 可以：
 
 ## 状态
 
-v1.5.3 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome 扩展已安装并运行。当前版本支持两种已知的 Codex 浏览器 pipe 名称格式：
+v1.5.4 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome 扩展已安装并运行。当前版本支持两种已知的 Codex 浏览器 pipe 名称格式：
 
 - `codex-browser-use-<uuid>`
 - `codex-browser-use\<uuid>`
