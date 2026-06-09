@@ -307,6 +307,27 @@ func TestWaitForLoadTimesOut(t *testing.T) {
 	}
 }
 
+func TestWaitForLoadUsesCallerDeadlineForHungCDP(t *testing.T) {
+	c, _, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} {
+		if req.Method == "executeCdp" {
+			time.Sleep(200 * time.Millisecond)
+			return map[string]interface{}{"result": map[string]interface{}{"value": "loading"}}
+		}
+		return map[string]bool{"ok": true}
+	})
+	defer cleanup()
+
+	start := time.Now()
+	_, err := c.WaitForLoad("3", 50)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if elapsed > 150*time.Millisecond {
+		t.Fatalf("WaitForLoad took %s, want near caller timeout", elapsed)
+	}
+}
+
 func TestWaitForLoadRejectsNonNumeric(t *testing.T) {
 	c, _, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} { return map[string]bool{} })
 	defer cleanup()
@@ -679,7 +700,7 @@ func TestCUAClickSendsPressAndRelease(t *testing.T) {
 	}
 }
 
-func TestCUATypeSendsCharPerRune(t *testing.T) {
+func TestCUATypeUsesInsertText(t *testing.T) {
 	c, rec, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} { return map[string]bool{"ok": true} })
 	defer cleanup()
 
@@ -687,17 +708,49 @@ func TestCUATypeSendsCharPerRune(t *testing.T) {
 		t.Fatalf("CUAType: %v", err)
 	}
 
-	chars := []string{}
+	var methods []string
+	var text string
 	for _, call := range rec.snapshot() {
 		if call.method == "executeCdp" {
+			methods = append(methods, call.params["method"].(string))
 			cmd, _ := call.params["commandParams"].(map[string]interface{})
-			if cmd["type"] == "char" {
-				chars = append(chars, cmd["text"].(string))
-			}
+			text, _ = cmd["text"].(string)
 		}
 	}
-	if strings.Join(chars, "") != "abc" {
-		t.Errorf("typed chars = %v, want a,b,c", chars)
+	if len(methods) != 1 || methods[0] != "Input.insertText" {
+		t.Fatalf("CDP methods = %v, want Input.insertText", methods)
+	}
+	if text != "abc" {
+		t.Errorf("inserted text = %q, want abc", text)
+	}
+}
+
+func TestCUATypeRetriesDebuggerDetachRaw(t *testing.T) {
+	var execCalls int
+	var mu sync.Mutex
+	c, srv := newPipedClient(t, func(req protocol.Request) (interface{}, *protocol.ErrorObject) {
+		if req.Method != "executeCdp" {
+			return map[string]bool{"ok": true}, nil
+		}
+		mu.Lock()
+		execCalls++
+		call := execCalls
+		mu.Unlock()
+		if call == 1 {
+			return nil, &protocol.ErrorObject{Code: -32000, Message: "Debugger is not attached"}
+		}
+		return map[string]bool{"ok": true}, nil
+	})
+	defer srv.close()
+	defer c.Close()
+
+	if err := c.CUAType("3", "abc"); err != nil {
+		t.Fatalf("CUAType: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if execCalls != 2 {
+		t.Fatalf("executeCdp calls = %d, want retry to make 2", execCalls)
 	}
 }
 
@@ -720,6 +773,61 @@ func TestCUAKeypressSendsDownThenUp(t *testing.T) {
 	}
 	if len(types) != 2 || types[0] != "keyDown" || types[1] != "keyUp" {
 		t.Errorf("expected keyDown then keyUp, got %v", types)
+	}
+}
+
+func TestCUAKeypressUsesSingleAttachForSequence(t *testing.T) {
+	c, rec, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} { return map[string]bool{"ok": true} })
+	defer cleanup()
+
+	if err := c.CUAKeypress("3", []string{"Control", "L"}); err != nil {
+		t.Fatalf("CUAKeypress: %v", err)
+	}
+
+	var attachCalls, detachCalls, execCalls int
+	for _, call := range rec.snapshot() {
+		switch call.method {
+		case "attach":
+			attachCalls++
+		case "detach":
+			detachCalls++
+		case "executeCdp":
+			execCalls++
+		}
+	}
+	if attachCalls != 1 || detachCalls != 1 || execCalls != 4 {
+		t.Fatalf("detach/attach/executeCdp = %d/%d/%d, want 1/1/4", detachCalls, attachCalls, execCalls)
+	}
+}
+
+func TestCDPLocksRetiredOnCloseAndFinalize(t *testing.T) {
+	c, _, cleanup := withRecordingServer(t, func(req protocol.Request) interface{} { return map[string]bool{"ok": true} })
+	defer cleanup()
+
+	if err := c.CUAClick("3", 100, 200); err != nil {
+		t.Fatalf("CUAClick: %v", err)
+	}
+	if got := len(c.cdpLocks); got != 1 {
+		t.Fatalf("cdpLocks after click = %d, want 1", got)
+	}
+	if err := c.CloseTab("3"); err != nil {
+		t.Fatalf("CloseTab: %v", err)
+	}
+	if got := len(c.cdpLocks); got != 0 {
+		t.Fatalf("cdpLocks after close = %d, want 0", got)
+	}
+
+	if err := c.CUAClick("4", 100, 200); err != nil {
+		t.Fatalf("CUAClick second tab: %v", err)
+	}
+	if got := len(c.cdpLocks); got != 1 {
+		t.Fatalf("cdpLocks after second click = %d, want 1", got)
+	}
+	if err := c.FinalizeTabs(nil); err != nil {
+		t.Fatalf("FinalizeTabs: %v", err)
+	}
+	if got := len(c.cdpLocks); got != 0 {
+		t.Fatalf("cdpLocks after finalize = %d, want 0", got)
 	}
 }
 

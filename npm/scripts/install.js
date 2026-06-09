@@ -41,6 +41,26 @@ function parseChecksumLine(line) {
   };
 }
 
+function findChecksum(text, asset) {
+  return text
+    .split(/\r?\n/)
+    .map(parseChecksumLine)
+    .find((entry) => entry && entry.file === asset);
+}
+
+function embeddedChecksum(asset) {
+  const file = path.join(__dirname, "..", "checksums.json");
+  if (!fs.existsSync(file)) return null;
+  const checksums = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (!checksums || !checksums.files || typeof checksums.files[asset] !== "string") {
+    return null;
+  }
+  return {
+    hash: checksums.files[asset].toLowerCase(),
+    file: asset,
+  };
+}
+
 async function main() {
   if (process.platform !== "win32") {
     console.error("codex-browser-bridge only supports Windows (requires named pipes).");
@@ -68,16 +88,15 @@ async function main() {
 
   const base = `https://github.com/${repo}/releases/download/${tag}`;
 
-  // Download checksums
-  const checksumsURL = `${base}/checksums.txt`;
-  const checksums = await requestBuffer(checksumsURL).catch((err) => {
-    throw new Error(`could not download checksums for ${tag}: ${err.message}`);
-  });
-  const checksum = checksums.toString("utf8")
-    .split(/\r?\n/)
-    .map(parseChecksumLine)
-    .find((entry) => entry && entry.file === asset);
-  if (!checksum) throw new Error(`checksum not found for ${asset} in ${checksumsURL}`);
+  let checksum = embeddedChecksum(asset);
+  if (!checksum) {
+    const checksumsURL = `${base}/checksums.txt`;
+    const checksums = await requestBuffer(checksumsURL).catch((err) => {
+      throw new Error(`could not download checksums for ${tag}: ${err.message}`);
+    });
+    checksum = findChecksum(checksums.toString("utf8"), asset);
+    if (!checksum) throw new Error(`checksum not found for ${asset} in ${checksumsURL}`);
+  }
 
   // Download binary
   console.log(`Downloading codex-browser-bridge ${tag} (${arch})...`);
@@ -102,6 +121,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  embeddedChecksum,
+  findChecksum,
   parseChecksumLine,
   sha256,
 };

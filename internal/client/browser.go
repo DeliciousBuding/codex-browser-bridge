@@ -66,6 +66,9 @@ func (c *Client) CloseTab(tabID string) error {
 		return fmt.Errorf("close_tab requires numeric tab_id, got %q", tabID)
 	}
 	_, err = c.cdpWithAttach(id, "Page.close", nil)
+	if err == nil {
+		c.retireTabCDPLock(id)
+	}
 	return err
 }
 
@@ -187,13 +190,16 @@ func (c *Client) WaitForLoad(tabID string, timeoutMs int) (string, error) {
 	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
 	last := ""
 	for {
-		raw, err := c.cdpWithAttach(id, "Runtime.evaluate", map[string]interface{}{
+		if !time.Now().Before(deadline) {
+			return last, fmt.Errorf("timed out after %dms waiting for readyState=complete (last=%q)", timeoutMs, last)
+		}
+		raw, err := c.cdpWithAttachUntil(id, "Runtime.evaluate", map[string]interface{}{
 			"expression":    "document.readyState",
 			"returnByValue": true,
-		})
+		}, deadline)
 		if err != nil {
 			if isTransientLoadError(err) && time.Now().Before(deadline) {
-				time.Sleep(100 * time.Millisecond)
+				sleepUntil(deadline, 100*time.Millisecond)
 				continue
 			}
 			return last, err
@@ -212,38 +218,50 @@ func (c *Client) WaitForLoad(tabID string, timeoutMs int) (string, error) {
 		if time.Now().After(deadline) {
 			return last, fmt.Errorf("timed out after %dms waiting for readyState=complete (last=%q)", timeoutMs, last)
 		}
-		time.Sleep(100 * time.Millisecond)
+		sleepUntil(deadline, 100*time.Millisecond)
 	}
 }
 
 // --- CDP helper ---
 
 func (c *Client) executeCdp(tabID int, method string, params map[string]interface{}) (json.RawMessage, error) {
+	return c.executeCdpWithTimeout(tabID, method, params, defaultRequestTimeout)
+}
+
+func (c *Client) executeCdpWithTimeout(tabID int, method string, params map[string]interface{}, timeout time.Duration) (json.RawMessage, error) {
 	if params == nil {
 		params = map[string]interface{}{}
 	}
-	return c.SendRequest("executeCdp", map[string]interface{}{
+	return c.SendRequestWithTimeout("executeCdp", map[string]interface{}{
 		"target": map[string]interface{}{
 			"tabId": tabID,
 		},
 		"method":        method,
 		"commandParams": params,
-	})
+	}, timeout)
 }
 
 // attachTab attaches the debugger to a tab (required before CDP calls).
 func (c *Client) attachTab(tabID int) error {
-	_, err := c.SendRequest("attach", map[string]interface{}{
+	return c.attachTabWithTimeout(tabID, defaultRequestTimeout)
+}
+
+func (c *Client) attachTabWithTimeout(tabID int, timeout time.Duration) error {
+	_, err := c.SendRequestWithTimeout("attach", map[string]interface{}{
 		"tabId": tabID,
-	})
+	}, timeout)
 	return err
 }
 
 // detachTab detaches the debugger from a tab.
 func (c *Client) detachTab(tabID int) error {
-	_, err := c.SendRequest("detach", map[string]interface{}{
+	return c.detachTabWithTimeout(tabID, defaultRequestTimeout)
+}
+
+func (c *Client) detachTabWithTimeout(tabID int, timeout time.Duration) error {
+	_, err := c.SendRequestWithTimeout("detach", map[string]interface{}{
 		"tabId": tabID,
-	})
+	}, timeout)
 	return err
 }
 
@@ -253,28 +271,81 @@ func (c *Client) detachTab(tabID int) error {
 func (c *Client) cdpWithAttach(tabID int, method string, params map[string]interface{}) (json.RawMessage, error) {
 	unlock := c.lockTabCDP(tabID)
 	defer unlock()
-	return c.cdpWithAttachLocked(tabID, method, params)
+	return c.cdpWithAttachLockedUntil(tabID, method, params, time.Time{})
+}
+
+func (c *Client) cdpWithAttachUntil(tabID int, method string, params map[string]interface{}, deadline time.Time) (json.RawMessage, error) {
+	unlock := c.lockTabCDP(tabID)
+	defer unlock()
+	return c.cdpWithAttachLockedUntil(tabID, method, params, deadline)
 }
 
 func (c *Client) cdpWithAttachLocked(tabID int, method string, params map[string]interface{}) (json.RawMessage, error) {
+	return c.cdpWithAttachLockedUntil(tabID, method, params, time.Time{})
+}
+
+func (c *Client) cdpWithAttachLockedUntil(tabID int, method string, params map[string]interface{}, deadline time.Time) (json.RawMessage, error) {
 	// Detach first to clear any stale debugger state from Chrome
-	_ = c.detachTab(tabID)
-	if err := c.attachTab(tabID); err != nil {
+	_ = c.detachTabWithTimeout(tabID, requestTimeoutUntil(deadline))
+	if err := c.attachTabWithTimeout(tabID, requestTimeoutUntil(deadline)); err != nil {
 		return nil, fmt.Errorf("attach failed for tab %d: %w", tabID, err)
 	}
-	raw, err := c.executeCdp(tabID, method, params)
+	return c.executeCdpWithDebuggerRetryLockedUntil(tabID, method, params, deadline)
+}
+
+func (c *Client) executeCdpWithDebuggerRetryLockedUntil(tabID int, method string, params map[string]interface{}, deadline time.Time) (json.RawMessage, error) {
+	raw, err := c.executeCdpWithTimeout(tabID, method, params, requestTimeoutUntil(deadline))
 	if err != nil {
 		// If attach didn't take, try one more detach+attach+retry cycle
 		if isDebuggerError(err) {
-			_ = c.detachTab(tabID)
-			if err2 := c.attachTab(tabID); err2 != nil {
+			_ = c.detachTabWithTimeout(tabID, requestTimeoutUntil(deadline))
+			if err2 := c.attachTabWithTimeout(tabID, requestTimeoutUntil(deadline)); err2 != nil {
 				return nil, fmt.Errorf("retry attach failed for tab %d: %w", tabID, err2)
 			}
-			return c.executeCdp(tabID, method, params)
+			return c.executeCdpWithTimeout(tabID, method, params, requestTimeoutUntil(deadline))
 		}
 		return nil, err
 	}
 	return raw, nil
+}
+
+type cdpExecutor func(method string, params map[string]interface{}) (json.RawMessage, error)
+
+func (c *Client) withAttachedCDP(tabID int, run func(cdpExecutor) error) error {
+	unlock := c.lockTabCDP(tabID)
+	defer unlock()
+
+	_ = c.detachTab(tabID)
+	if err := c.attachTab(tabID); err != nil {
+		return fmt.Errorf("attach failed for tab %d: %w", tabID, err)
+	}
+	exec := func(method string, params map[string]interface{}) (json.RawMessage, error) {
+		return c.executeCdpWithDebuggerRetryLockedUntil(tabID, method, params, time.Time{})
+	}
+	return run(exec)
+}
+
+func requestTimeoutUntil(deadline time.Time) time.Duration {
+	if deadline.IsZero() {
+		return defaultRequestTimeout
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return time.Nanosecond
+	}
+	return remaining
+}
+
+func sleepUntil(deadline time.Time, max time.Duration) {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return
+	}
+	if remaining < max {
+		time.Sleep(remaining)
+		return
+	}
+	time.Sleep(max)
 }
 
 func isDebuggerError(err error) bool {
@@ -376,55 +447,33 @@ func (c *Client) CUAClick(tabID string, x, y int) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.cdpWithAttach(id, "Input.dispatchMouseEvent", map[string]interface{}{
-		"type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 1,
-	})
-	if err != nil {
+	return c.withAttachedCDP(id, func(exec cdpExecutor) error {
+		_, err := exec("Input.dispatchMouseEvent", map[string]interface{}{
+			"type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 1,
+		})
+		if err != nil {
+			return err
+		}
+		_, err = exec("Input.dispatchMouseEvent", map[string]interface{}{
+			"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1,
+		})
 		return err
-	}
-	_, err = c.cdpWithAttach(id, "Input.dispatchMouseEvent", map[string]interface{}{
-		"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1,
 	})
-	return err
 }
 
-// CUAType types text via CDP Input.dispatchKeyEvent.
+// CUAType types text via CDP Input.insertText.
 func (c *Client) CUAType(tabID, text string) error {
 	id, err := strconv.Atoi(tabID)
 	if err != nil {
 		return err
 	}
-	unlock := c.lockTabCDP(id)
-	defer unlock()
-	// Ensure debugger is attached once before the key sequence
-	_ = c.detachTab(id)
-	if err := c.attachTab(id); err != nil {
-		return fmt.Errorf("attach failed for tab %d: %w", id, err)
+	if text == "" {
+		return nil
 	}
-	for _, ch := range text {
-		// keyDown
-		_, err = c.executeCdp(id, "Input.dispatchKeyEvent", map[string]interface{}{
-			"type": "keyDown", "key": string(ch), "text": string(ch),
-		})
-		if err != nil {
-			return err
-		}
-		// char
-		_, err = c.executeCdp(id, "Input.dispatchKeyEvent", map[string]interface{}{
-			"type": "char", "text": string(ch),
-		})
-		if err != nil {
-			return err
-		}
-		// keyUp
-		_, err = c.executeCdp(id, "Input.dispatchKeyEvent", map[string]interface{}{
-			"type": "keyUp", "key": string(ch), "text": string(ch),
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return c.withAttachedCDP(id, func(exec cdpExecutor) error {
+		_, err := exec("Input.insertText", map[string]interface{}{"text": text})
+		return err
+	})
 }
 
 // CUAKeypress presses keyboard keys via CDP Input.dispatchKeyEvent.
@@ -433,21 +482,23 @@ func (c *Client) CUAKeypress(tabID string, keys []string) error {
 	if err != nil {
 		return err
 	}
-	for _, key := range keys {
-		_, err = c.cdpWithAttach(id, "Input.dispatchKeyEvent", map[string]interface{}{
-			"type": "keyDown", "key": key,
-		})
-		if err != nil {
-			return err
+	return c.withAttachedCDP(id, func(exec cdpExecutor) error {
+		for _, key := range keys {
+			_, err := exec("Input.dispatchKeyEvent", map[string]interface{}{
+				"type": "keyDown", "key": key,
+			})
+			if err != nil {
+				return err
+			}
+			_, err = exec("Input.dispatchKeyEvent", map[string]interface{}{
+				"type": "keyUp", "key": key,
+			})
+			if err != nil {
+				return err
+			}
 		}
-		_, err = c.cdpWithAttach(id, "Input.dispatchKeyEvent", map[string]interface{}{
-			"type": "keyUp", "key": key,
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // CUAScroll scrolls at coordinates via CDP Input.dispatchMouseEvent.
@@ -722,6 +773,9 @@ func (c *Client) FinalizeTabs(keep []map[string]interface{}) error {
 		params["keep"] = keep
 	}
 	_, err := c.SendRequest("finalizeTabs", params)
+	if err == nil {
+		c.retireAllCDPLocks()
+	}
 	return err
 }
 

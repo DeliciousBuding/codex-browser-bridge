@@ -40,13 +40,13 @@ The cross-audit tracked 30 bugs. Fixes landed in 4 batches.
 - [x] **BUG-11** `discovery.go:19-26`: PowerShell subprocess now has a 15s timeout via `context.WithTimeout`
 - [x] **BUG-12** `client.go:216`: `readLoop` send is non-blocking with `select { case ch <- resp: default: }`
 
-### Medium: 4/8 fixed
+### Medium: 6/8 fixed
 
-- [ ] **BUG-13** `browser.go:236`: global CDP detach+attach optimization (deferred: performance, not crash)
-- [x] **BUG-14** `browser.go:341-348`: CUAType attaches once and calls executeCdp directly, with no detach between chars
-- [ ] **BUG-15** `browser.go:358-372`: CUAKeypress still has per-key attach cycles (deferred: performance)
-- [x] **BUG-16** `browser.go:342-343`: CUAType sends keyDown, char, and keyUp per character
-- [ ] **BUG-17** `browser.go:179-181`: WaitForLoad transient error retry (deferred: edge case)
+- [ ] **BUG-13** `browser.go:236`: global CDP detach+attach optimization (performance follow-up)
+- [x] **BUG-14** `browser.go:341-348`: CUAType uses one attached CDP sequence
+- [x] **BUG-15** `browser.go:358-372`: CUAKeypress now uses one attached CDP sequence for the full key list
+- [x] **BUG-16** `browser.go:342-343`: CUAType uses `Input.insertText` for text while CUAKeypress handles key events
+- [x] **BUG-17** `browser.go:179-181`: WaitForLoad retries transient navigation errors and bounds CDP requests by the caller timeout
 - [x] **BUG-18** `client.go:67`: health check uses a 5s goroutine timeout wrapper
 - [ ] **BUG-19** `browser.go:255-257`: isDebuggerError match expansion (deferred: future extension)
 - [x] **BUG-20** `main.go:212-213`: CLI try command uses `args[2:]` instead of byte offset
@@ -72,11 +72,11 @@ The cross-audit tracked 30 bugs. Fixes landed in 4 batches.
 |----------|-------|-------|---|
 | CRITICAL | 5 | 5 | 100% |
 | HIGH | 7 | 7 | 100% |
-| MEDIUM | 4 | 8 | 50% |
+| MEDIUM | 6 | 8 | 75% |
 | LOW | 10 | 10 | 100% |
-| **Total** | **26** | **30** | **87%** |
+| **Total** | **28** | **30** | **93%** |
 
-Deferred: BUG-13 and BUG-15 for CDP attach performance, BUG-17 for WaitForLoad transient retry, and BUG-19 for debugger error matching.
+Deferred: BUG-13 for broader CDP attach optimization and BUG-19 for future debugger error wording changes.
 
 ### Audit
 

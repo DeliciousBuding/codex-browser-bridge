@@ -2,6 +2,10 @@ name: Feature request
 description: Suggest a new tool, capability, or improvement.
 labels: [enhancement]
 body:
+  - type: markdown
+    attributes:
+      value: Keep site names, account IDs, private URLs, screenshots, tab titles, and logged-in page content out of public requests.
+
   - type: textarea
     id: problem
     attributes:

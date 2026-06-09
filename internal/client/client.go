@@ -30,12 +30,20 @@ type Client struct {
 	pending   map[int]chan *protocol.Response
 
 	cdpMu    sync.Mutex
-	cdpLocks map[int]*sync.Mutex
+	cdpLocks map[int]*cdpLock
 
 	ctx    context.Context
 	cancel context.CancelFunc
 	log    *log.Logger
 }
+
+type cdpLock struct {
+	mu      sync.Mutex
+	refs    int
+	retired bool
+}
+
+const defaultRequestTimeout = 60 * time.Second
 
 // Connect dials a named pipe and returns a ready-to-use Client.
 // If pipeName is empty, auto-discovers codex-browser-use-* pipes and tries each
@@ -150,7 +158,7 @@ func NewFromConn(conn net.Conn, logger *log.Logger) *Client {
 			TurnID:    turnID,
 		},
 		pending:  make(map[int]chan *protocol.Response),
-		cdpLocks: make(map[int]*sync.Mutex),
+		cdpLocks: make(map[int]*cdpLock),
 		ctx:      ctx,
 		cancel:   cancel,
 		log:      logger,
@@ -167,6 +175,14 @@ func (c *Client) Close() error {
 
 // SendRequest sends a JSON-RPC request and waits for the response.
 func (c *Client) SendRequest(method string, params map[string]interface{}) (json.RawMessage, error) {
+	return c.SendRequestWithTimeout(method, params, defaultRequestTimeout)
+}
+
+// SendRequestWithTimeout sends a JSON-RPC request and waits up to timeout.
+func (c *Client) SendRequestWithTimeout(method string, params map[string]interface{}, timeout time.Duration) (json.RawMessage, error) {
+	if timeout <= 0 {
+		timeout = defaultRequestTimeout
+	}
 	id := int(c.nextID.Add(1))
 
 	// Merge session params into the request params
@@ -207,7 +223,7 @@ func (c *Client) SendRequest(method string, params map[string]interface{}) (json
 		c.log.Printf("→ %s (id=%d)", method, id)
 	}
 
-	timer := time.NewTimer(60 * time.Second)
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
 	select {
@@ -278,15 +294,50 @@ func (c *Client) readLoop() {
 
 func (c *Client) lockTabCDP(tabID int) func() {
 	c.cdpMu.Lock()
-	mu, ok := c.cdpLocks[tabID]
+	lock, ok := c.cdpLocks[tabID]
 	if !ok {
-		mu = &sync.Mutex{}
-		c.cdpLocks[tabID] = mu
+		lock = &cdpLock{}
+		c.cdpLocks[tabID] = lock
 	}
+	lock.refs++
 	c.cdpMu.Unlock()
 
-	mu.Lock()
-	return mu.Unlock
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		c.cdpMu.Lock()
+		lock.refs--
+		if lock.refs == 0 && lock.retired {
+			delete(c.cdpLocks, tabID)
+		}
+		c.cdpMu.Unlock()
+	}
+}
+
+func (c *Client) retireTabCDPLock(tabID int) {
+	c.cdpMu.Lock()
+	defer c.cdpMu.Unlock()
+	lock, ok := c.cdpLocks[tabID]
+	if !ok {
+		return
+	}
+	if lock.refs == 0 {
+		delete(c.cdpLocks, tabID)
+		return
+	}
+	lock.retired = true
+}
+
+func (c *Client) retireAllCDPLocks() {
+	c.cdpMu.Lock()
+	defer c.cdpMu.Unlock()
+	for tabID, lock := range c.cdpLocks {
+		if lock.refs == 0 {
+			delete(c.cdpLocks, tabID)
+			continue
+		}
+		lock.retired = true
+	}
 }
 
 func truncate(s string, n int) string {
