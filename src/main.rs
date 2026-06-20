@@ -1,6 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
-use codex_browser_bridge::{browser, client, discovery, logging, mcp};
+use codex_browser_bridge::{cli, client, discovery, logging, mcp};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Mode {
@@ -44,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
             let client = client::Client::connect(args.pipe.as_deref())
                 .await
                 .context("failed to connect to Codex browser pipe")?;
-            browser::run_cli(client).await?;
+            cli::run_cli(client).await?;
         }
     }
 

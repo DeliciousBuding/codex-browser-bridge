@@ -1,4 +1,5 @@
 pub mod browser;
+pub mod cli;
 pub mod client;
 pub mod discovery;
 pub mod error;
