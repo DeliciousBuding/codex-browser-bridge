@@ -390,6 +390,7 @@ impl Server {
         self.client
             .send_request("finalizeTabs", Some(json!({ "keep": [] })))
             .await?;
+        self.client.clear_attachments().await;
         Ok(vec![Content::text("Tabs finalized".to_string())])
     }
 
