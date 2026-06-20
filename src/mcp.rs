@@ -45,6 +45,10 @@ enum ToolHandler {
     NameSession,
     Finalize,
     GetInfo,
+    ExecuteCdp,
+    PageAssets,
+    NetworkCookies,
+    NetworkSetCookie,
 }
 
 #[derive(Debug, Deserialize)]
@@ -181,6 +185,10 @@ impl Server {
             ToolHandler::NameSession => self.handle_name_session(args).await,
             ToolHandler::Finalize => self.handle_finalize().await,
             ToolHandler::GetInfo => self.handle_get_info().await,
+            ToolHandler::ExecuteCdp => self.handle_execute_cdp(args).await,
+            ToolHandler::PageAssets => self.handle_page_assets(args).await,
+            ToolHandler::NetworkCookies => self.handle_network_cookies(args).await,
+            ToolHandler::NetworkSetCookie => self.handle_network_set_cookie(args).await,
         };
 
         match result {
@@ -380,6 +388,119 @@ impl Server {
         Ok(vec![Content::text(raw.get().to_string())])
     }
 
+    async fn handle_execute_cdp(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let method = required_str(&args, "method")?;
+        let params = args.get("params").cloned();
+        let raw: Box<RawValue> =
+            browser::execute_cdp_generic(&self.client, tab_id, method, params).await?;
+        Ok(vec![Content::text(raw.get().to_string())])
+    }
+
+    async fn handle_page_assets(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let include_content = optional_bool(&args, "include_content")?.unwrap_or(false);
+        let types: Option<Vec<String>> = optional_str_array(&args, "types");
+
+        let mut resources = browser::get_resource_tree(&self.client, tab_id).await?;
+
+        if let Some(ref types) = types {
+            resources.retain(|resource| {
+                types
+                    .iter()
+                    .any(|type_filter| resource.resource_type.eq_ignore_ascii_case(type_filter))
+            });
+        }
+
+        if include_content {
+            for resource in resources.iter_mut() {
+                let frame_id = resource.frame_id.clone();
+                match browser::get_resource_content(
+                    &self.client,
+                    tab_id,
+                    &frame_id,
+                    &resource.url,
+                )
+                .await
+                {
+                    Ok(content) => {
+                        resource.content = Some(content);
+                    }
+                    Err(err) => {
+                        resource.failed = Some(true);
+                        tracing::debug!(
+                            "resource content fetch failed for {} (frame={}): {err}",
+                            sanitize_for_log(&resource.url),
+                            sanitize_for_log(&frame_id),
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(vec![Content::text(
+            serde_json::to_string_pretty(&resources)?,
+        )])
+    }
+
+    async fn handle_network_cookies(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let urls: Option<Vec<String>> = optional_str_array(&args, "urls");
+        let redact = optional_bool(&args, "redact_values")?.unwrap_or(true);
+
+        let mut cookies =
+            browser::get_cookies(&self.client, tab_id, urls.as_deref()).await?;
+
+        if redact {
+            for cookie in cookies.iter_mut() {
+                cookie.value = "[redacted]".to_string();
+            }
+        }
+
+        Ok(vec![Content::text(serde_json::to_string_pretty(&cookies)?)])
+    }
+
+    async fn handle_network_set_cookie(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let name = required_str(&args, "name")?;
+        let value = required_str(&args, "value")?;
+
+        if let Some(url) = args.get("url").and_then(Value::as_str) {
+            browser::validate_url(url)?;
+        }
+
+        let mut cookie_params = json!({
+            "name": name,
+            "value": value,
+        });
+
+        if let Some(obj) = cookie_params.as_object_mut() {
+            if let Some(url) = args.get("url").and_then(Value::as_str) {
+                obj.insert("url".into(), json!(url));
+            }
+            if let Some(domain) = args.get("domain").and_then(Value::as_str) {
+                obj.insert("domain".into(), json!(domain));
+            }
+            if let Some(path) = args.get("path").and_then(Value::as_str) {
+                obj.insert("path".into(), json!(path));
+            }
+            if let Some(http_only) = args.get("httpOnly").and_then(Value::as_bool) {
+                obj.insert("httpOnly".into(), json!(http_only));
+            }
+            if let Some(secure) = args.get("secure").and_then(Value::as_bool) {
+                obj.insert("secure".into(), json!(secure));
+            }
+            if let Some(same_site) = args.get("sameSite").and_then(Value::as_str) {
+                obj.insert("sameSite".into(), json!(same_site));
+            }
+        }
+
+        browser::set_cookie(&self.client, tab_id, cookie_params).await?;
+        Ok(vec![Content::text(format!(
+            "Cookie '{name}' set successfully"
+        ))])
+    }
+
     pub fn tool_list(&self) -> Vec<Value> {
         tools_to_values(&self.tools)
     }
@@ -447,6 +568,10 @@ fn registered_tools() -> Vec<Tool> {
         Tool::new("codex_name_session", "Name the browser automation session", schema_value(r#"{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}"#), ToolHandler::NameSession),
         Tool::new("codex_finalize", "Finalize and clean up tabs after session", object_schema(), ToolHandler::Finalize),
         Tool::new("codex_get_info", "Get backend info from the Codex extension", object_schema(), ToolHandler::GetInfo),
+        Tool::new("codex_execute_cdp", "Execute a raw Chrome DevTools Protocol command. Pass method (e.g. \"Page.navigate\", \"Runtime.evaluate\", \"Network.getCookies\", \"DOM.getDocument\") and optional params object. Use this to access any CDP domain not covered by dedicated codex_* tools.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID to execute on"},"method":{"type":"string","description":"CDP method name, e.g. Page.captureScreenshot, Network.getCookies, DOM.getDocument"},"params":{"type":"object","description":"CDP method parameters as a JSON object"}},"required":["tab_id","method"]}"#), ToolHandler::ExecuteCdp),
+        Tool::new("codex_page_assets", "List all page resources (images, fonts, CSS, JS, etc.) observed by the browser. Optionally fetch resource content as base64. Filter by resource type. Uses the Codex extension's pageAssets capability.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID to inspect"},"include_content":{"type":"boolean","description":"Also fetch each resource's content as base64. Defaults to false."},"types":{"type":"array","items":{"type":"string"},"description":"Filter by resource type. Common values: Image, Stylesheet, Script, Font, Document, Media, Manifest, Fetch, Other."}},"required":["tab_id"]}"#), ToolHandler::PageAssets),
+        Tool::new("codex_network_cookies", "Get cookies for the current page URL or specific URLs. Uses CDP Network.getCookies. Cookie values are redacted by default; use redact_values: false to see raw values.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID"},"urls":{"type":"array","items":{"type":"string"},"description":"Optional list of URLs to filter cookies by"},"redact_values":{"type":"boolean","description":"Redact cookie values. Defaults to true for security."}},"required":["tab_id"]}"#), ToolHandler::NetworkCookies),
+        Tool::new("codex_network_set_cookie", "Set a browser cookie on the current page. Uses CDP Network.setCookie.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID"},"name":{"type":"string","description":"Cookie name"},"value":{"type":"string","description":"Cookie value"},"url":{"type":"string","description":"URL to associate the cookie with. Optional."},"domain":{"type":"string","description":"Cookie domain. Optional."},"path":{"type":"string","description":"Cookie path. Optional."},"httpOnly":{"type":"boolean","description":"HttpOnly flag. Optional."},"secure":{"type":"boolean","description":"Secure flag. Optional."},"sameSite":{"type":"string","description":"SameSite value: Strict, Lax, or None. Optional."}},"required":["tab_id","name","value"]}"#), ToolHandler::NetworkSetCookie),
     ]
 }
 
@@ -545,6 +670,16 @@ fn optional_bool(args: &Value, name: &str) -> anyhow::Result<Option<bool>> {
     }
 }
 
+fn optional_str_array(args: &Value, name: &str) -> Option<Vec<String>> {
+    args.get(name)
+        .and_then(|value| value.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+}
+
 fn required_string_vec(args: &Value, name: &str) -> anyhow::Result<Vec<String>> {
     let values = args
         .get(name)
@@ -564,6 +699,10 @@ fn required_string_vec(args: &Value, name: &str) -> anyhow::Result<Vec<String>> 
 
 fn object_schema() -> Value {
     json!({"type":"object","properties":{}})
+}
+
+fn sanitize_for_log(s: &str) -> String {
+    s.replace('\n', "\\n").replace('\r', "\\r")
 }
 
 fn schema_value(raw: &str) -> Value {
@@ -598,7 +737,67 @@ mod tests {
             .map(|tool| tool.name)
             .collect();
         assert_eq!(names.first(), Some(&"codex_list_tabs"));
-        assert_eq!(names.last(), Some(&"codex_get_info"));
-        assert_eq!(names.len(), 24);
+        assert_eq!(names.last(), Some(&"codex_network_set_cookie"));
+        assert_eq!(names.len(), 28);
+    }
+
+    #[test]
+    fn execute_cdp_schema_requires_tab_id_and_method() {
+        let tools = registered_tools();
+        let cdp = tools.iter().find(|t| t.name == "codex_execute_cdp").unwrap();
+        assert_eq!(cdp.input_schema["type"], "object");
+        let required: Vec<_> = cdp.input_schema["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+        assert!(required.contains(&"tab_id"), "required should contain tab_id");
+        assert!(required.contains(&"method"), "required should contain method");
+    }
+
+    #[test]
+    fn page_assets_schema_requires_tab_id() {
+        let tools = registered_tools();
+        let pa = tools.iter().find(|t| t.name == "codex_page_assets").unwrap();
+        assert_eq!(pa.input_schema["type"], "object");
+        let required = pa.input_schema["required"].as_array().unwrap();
+        assert_eq!(required[0], "tab_id");
+    }
+
+    #[test]
+    fn network_cookies_schema_requires_tab_id() {
+        let tools = registered_tools();
+        let nc = tools.iter().find(|t| t.name == "codex_network_cookies").unwrap();
+        assert_eq!(nc.input_schema["type"], "object");
+        let required = nc.input_schema["required"].as_array().unwrap();
+        assert_eq!(required[0], "tab_id");
+    }
+
+    #[test]
+    fn network_set_cookie_schema_requires_name_value() {
+        let tools = registered_tools();
+        let nsc = tools.iter().find(|t| t.name == "codex_network_set_cookie").unwrap();
+        assert_eq!(nsc.input_schema["type"], "object");
+        let required: Vec<_> = nsc.input_schema["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+        assert!(required.contains(&"tab_id"));
+        assert!(required.contains(&"name"));
+        assert!(required.contains(&"value"));
+    }
+
+    #[test]
+    fn required_str_rejects_empty() {
+        assert!(required_str(&json!({"x": ""}), "x").is_err());
+        assert!(required_str(&json!({"x": "  "}), "x").is_err());
+        assert!(required_str(&json!({"x": "ok"}), "x").is_ok());
+    }
+
+    #[test]
+    fn required_string_vec_rejects_empty_items() {
+        assert!(required_string_vec(&json!({"keys": ["a", ""]}), "keys").is_err());
+        assert!(required_string_vec(&json!({"keys": ["a", "b"]}), "keys").is_ok());
+    }
+
+    #[test]
+    fn all_tool_schemas_are_valid() {
+        for tool in registered_tools() {
+            assert_eq!(tool.input_schema["type"], "object",
+                "tool {} schema must be object type", tool.name);
+        }
     }
 }

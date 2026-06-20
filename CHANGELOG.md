@@ -2,7 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.7.0] - 2026-06-20
+
+### Added
+
+- `codex_execute_cdp` — generic CDP executor. Pass any Chrome DevTools Protocol method name and params. Universal escape hatch for all CDP domains (Network, Performance, Storage, Emulation, etc.).
+- `codex_page_assets` — exposes the Codex extension's `pageAssets` capability. Lists all page resources (images, fonts, CSS, JS) via `Page.getResourceTree`. Optional content fetch via `Page.getResourceContent` with base64 return.
+- `codex_network_cookies` — get cookies via `Network.getCookies`. Supports URL filtering.
+- `codex_network_set_cookie` — set a cookie via `Network.setCookie`. Supports all standard cookie attributes.
+
+### Changed
+
+- MCP tool count: 24 → 28
+- Browser helpers now include: `execute_cdp_generic`, `get_resource_tree`, `get_resource_content`, `get_cookies`, `set_cookie`
+
+### Tests
+
+- New e2e integration test suite (`tests/cdp_tools_e2e.rs`) with mock pipe infrastructure
+- 7 new e2e tests: CDP roundtrip, resource tree parsing, cookie parsing, error propagation
+- 4 new schema validation tests for new tools
+- Total test count: 85 → 92 (all passing)
+
+### Governance
+
+- AGENTS.md now documents MCP tool design patterns and security rules
+- Public repo security audit: no secrets, tokens, or sensitive data found
 
 ## [1.6.0] - 2026-06-09
 

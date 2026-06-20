@@ -374,6 +374,219 @@ pub async fn dom_cua_type(client: &Client, tab_id: &str, text: &str) -> Result<(
     cua_type(client, tab_id, text).await
 }
 
+// ── Generic CDP ──────────────────────────────────────────────
+
+/// CDP domains blocked from codex_execute_cdp for security.
+const BLOCKED_CDP_DOMAINS: &[&str] = &[
+    "Browser.",
+    "Debugger.",
+    "Profiler.",
+    "Emulation.",
+    "Security.",
+    "Target.",
+    "Tracing.",
+    "Page.addScriptToEvaluateOnNewDocument",
+    "Page.setDownloadBehavior",
+    "Page.setWebLifecycleState",
+    "Network.setRequestInterception",
+    "Network.continueInterceptedRequest",
+    "Storage.clearDataForOrigin",
+];
+
+/// Execute any CDP method with arbitrary params. The universal CDP escape hatch.
+/// Blocks dangerous CDP domains (Browser, Debugger, Target, etc.) for security.
+pub async fn execute_cdp_generic(
+    client: &Client,
+    tab_id: &str,
+    method: &str,
+    params: Option<Value>,
+) -> Result<Box<RawValue>> {
+    for blocked in BLOCKED_CDP_DOMAINS {
+        if method.starts_with(blocked) || method == blocked.trim_end_matches('.') {
+            return Err(BridgeError::User(format!(
+                "blocked CDP method: {method} ({}is not allowed for security)",
+                if blocked.ends_with('.') { "domain " } else { "" }
+            )));
+        }
+    }
+    let id = parse_tab_id("execute_cdp", tab_id)?;
+    client.execute_cdp(id, method, params).await
+}
+
+// ── Page Assets (extension capability: pageAssets) ────────────
+
+#[derive(Debug, Serialize)]
+pub struct PageResource {
+    pub url: String,
+    #[serde(rename = "type")]
+    pub resource_type: String,
+    #[serde(rename = "mimeType")]
+    pub mime_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed: Option<bool>,
+    #[serde(skip_serializing)]
+    pub frame_id: String,
+}
+
+pub async fn get_resource_tree(client: &Client, tab_id: &str) -> Result<Vec<PageResource>> {
+    let id = parse_tab_id("page_assets", tab_id)?;
+    let raw = client
+        .execute_cdp(id, "Page.getResourceTree", None)
+        .await?;
+    parse_resource_tree(&raw)
+}
+
+pub async fn get_resource_content(
+    client: &Client,
+    tab_id: &str,
+    frame_id: &str,
+    url: &str,
+) -> Result<String> {
+    let id = parse_tab_id("page_assets", tab_id)?;
+    let raw = client
+        .execute_cdp(
+            id,
+            "Page.getResourceContent",
+            Some(json!({ "frameId": frame_id, "url": url })),
+        )
+        .await?;
+    resource_content_base64(&raw)
+}
+
+// ── Network Cookies ───────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Cookie {
+    pub name: String,
+    pub value: String,
+    pub domain: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires: Option<f64>,
+    #[serde(rename = "httpOnly")]
+    pub http_only: bool,
+    pub secure: bool,
+    #[serde(rename = "sameSite", skip_serializing_if = "Option::is_none")]
+    pub same_site: Option<String>,
+}
+
+pub async fn get_cookies(
+    client: &Client,
+    tab_id: &str,
+    urls: Option<&[String]>,
+) -> Result<Vec<Cookie>> {
+    let id = parse_tab_id("network_cookies", tab_id)?;
+    let params = if let Some(url_list) = urls.filter(|list| !list.is_empty()) {
+        json!({ "urls": url_list })
+    } else {
+        json!({})
+    };
+    let raw = client
+        .execute_cdp(id, "Network.getCookies", Some(params))
+        .await?;
+    parse_cookies(&raw)
+}
+
+pub async fn set_cookie(
+    client: &Client,
+    tab_id: &str,
+    params: Value,
+) -> Result<()> {
+    let id = parse_tab_id("network_set_cookie", tab_id)?;
+    client
+        .execute_cdp(id, "Network.setCookie", Some(params))
+        .await
+        .map(|_| ())
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct FrameTree {
+    frame: Frame,
+    #[serde(default)]
+    #[serde(rename = "childFrames")]
+    child_frames: Vec<FrameTree>,
+    #[serde(default)]
+    resources: Vec<ResourceEntry>,
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct Frame {
+    id: String,
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct ResourceEntry {
+    url: String,
+    #[serde(rename = "type")]
+    resource_type: String,
+    #[serde(rename = "mimeType")]
+    mime_type: String,
+    #[serde(default, rename = "contentSize")]
+    content_size: Option<f64>,
+}
+
+fn parse_resource_tree(raw: &RawValue) -> Result<Vec<PageResource>> {
+    let tree: FrameTree = serde_json::from_str(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("parse resource tree: {err}")))?;
+
+    let mut resources = Vec::new();
+    collect_resources(&tree, &mut resources);
+    Ok(resources)
+}
+
+fn collect_resources(tree: &FrameTree, out: &mut Vec<PageResource>) {
+    let frame_id = tree.frame.id.clone();
+    for r in &tree.resources {
+        out.push(PageResource {
+            url: r.url.clone(),
+            resource_type: r.resource_type.clone(),
+            mime_type: r.mime_type.clone(),
+            content: None,
+            size: r.content_size.map(|size| size as u64),
+            failed: None,
+            frame_id: frame_id.clone(),
+        });
+    }
+    for child in &tree.child_frames {
+        collect_resources(child, out);
+    }
+}
+
+fn resource_content_base64(raw: &RawValue) -> Result<String> {
+    #[derive(Deserialize)]
+    struct ResourceContent {
+        #[serde(default)]
+        content: String,
+    }
+
+    let result: ResourceContent = serde_json::from_str(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("parse resource content: {err}")))?;
+
+    if result.content.is_empty() {
+        return Err(BridgeError::Protocol("resource content is empty".into()));
+    }
+    Ok(result.content)
+}
+
+fn parse_cookies(raw: &RawValue) -> Result<Vec<Cookie>> {
+    #[derive(Deserialize)]
+    struct CookiesResult {
+        cookies: Vec<Cookie>,
+    }
+
+    let result: CookiesResult = serde_json::from_str(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("parse cookies: {err}")))?;
+
+    Ok(result.cookies)
+}
+
 pub fn decode_tabs(raw: &RawValue) -> Result<Vec<Tab>> {
     let tabs: Vec<Tab> =
         serde_json::from_str(raw.get()).map_err(|err| BridgeError::Protocol(err.to_string()))?;
@@ -839,5 +1052,71 @@ mod tests {
             split_args(r#"nav 1 "https://example.com/a b""#),
             vec!["nav", "1", "https://example.com/a b"]
         );
+    }
+
+    #[test]
+    fn parses_resource_tree() {
+        let raw = RawValue::from_string(
+            r#"{"frame":{"id":"F1","url":"https://example.com"},"resources":[{"url":"https://example.com/a.png","type":"Image","mimeType":"image/png","contentSize":1234.0},{"url":"https://example.com/style.css","type":"Stylesheet","mimeType":"text/css"}],"childFrames":[{"frame":{"id":"F2","url":"about:blank"},"resources":[{"url":"https://cdn.example.com/font.woff2","type":"Font","mimeType":"font/woff2"}]}]}"#.into()
+        ).unwrap();
+        let resources = parse_resource_tree(&raw).unwrap();
+        assert_eq!(resources.len(), 3);
+        assert_eq!(resources[0].url, "https://example.com/a.png");
+        assert_eq!(resources[0].resource_type, "Image");
+        assert_eq!(resources[0].size, Some(1234));
+        assert_eq!(resources[2].resource_type, "Font");
+        assert_eq!(resources[2].url, "https://cdn.example.com/font.woff2");
+    }
+
+    #[test]
+    fn parses_cookies() {
+        let raw = RawValue::from_string(
+            r#"{"cookies":[{"name":"session","value":"abc123","domain":".example.com","path":"/","httpOnly":true,"secure":true,"sameSite":"Lax"},{"name":"theme","value":"dark","domain":"example.com","path":"/","httpOnly":false,"secure":false}]}"#.into()
+        ).unwrap();
+        let cookies = parse_cookies(&raw).unwrap();
+        assert_eq!(cookies.len(), 2);
+        assert_eq!(cookies[0].name, "session");
+        assert_eq!(cookies[0].http_only, true);
+        assert_eq!(cookies[0].same_site.as_deref(), Some("Lax"));
+        assert_eq!(cookies[1].name, "theme");
+        assert_eq!(cookies[1].secure, false);
+    }
+
+    #[test]
+    fn parses_resource_content() {
+        let raw = RawValue::from_string(
+            r#"{"content":"body { color: red; }","base64Encoded":false}"#.into()
+        ).unwrap();
+        let content = resource_content_base64(&raw).unwrap();
+        assert_eq!(content, "body { color: red; }");
+    }
+
+    #[test]
+    fn resource_content_empty_is_error() {
+        let raw = RawValue::from_string(
+            r#"{"content":"","base64Encoded":false}"#.into()
+        ).unwrap();
+        assert!(resource_content_base64(&raw).is_err());
+    }
+
+    #[test]
+    fn execute_cdp_blocks_dangerous_domains() {
+        let blocked = ["Browser.grantPermissions", "Debugger.enable", "Target.createTarget", "Page.addScriptToEvaluateOnNewDocument"];
+        for method in blocked {
+            assert!(execute_cdp_generic_block_check(method));
+        }
+        let allowed = ["Runtime.evaluate", "Page.navigate", "Network.getCookies", "DOM.getDocument"];
+        for method in allowed {
+            assert!(!execute_cdp_generic_block_check(method));
+        }
+    }
+
+    fn execute_cdp_generic_block_check(method: &str) -> bool {
+        for blocked in BLOCKED_CDP_DOMAINS {
+            if method.starts_with(blocked) || method == blocked.trim_end_matches('.') {
+                return true;
+            }
+        }
+        false
     }
 }
