@@ -84,8 +84,14 @@ pub async fn claim_user_tab(client: &Client, tab_id: &str) -> Result<Tab> {
 pub async fn close_tab(client: &Client, tab_id: &str) -> Result<()> {
     let id = parse_tab_id("close_tab", tab_id)?;
     match client.execute_cdp(id, "Page.close", None).await {
-        Ok(_) => Ok(()),
-        Err(err) if is_tab_gone_error(&err) => Ok(()),
+        Ok(_) => {
+            client.invalidate_attachment(id).await;
+            Ok(())
+        }
+        Err(err) if is_tab_gone_error(&err) => {
+            client.invalidate_attachment(id).await;
+            Ok(())
+        }
         Err(err) => Err(err),
     }
 }
