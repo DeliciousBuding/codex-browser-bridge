@@ -58,6 +58,10 @@ fn tools_list_matches_go_mcp_registry_names_and_order() {
             "codex_name_session",
             "codex_finalize",
             "codex_get_info",
+            "codex_execute_cdp",
+            "codex_page_assets",
+            "codex_network_cookies",
+            "codex_network_set_cookie",
         ]
     );
 }
