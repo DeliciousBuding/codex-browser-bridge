@@ -2,7 +2,7 @@
   "mcpServers": {
     "codex-browser": {
       "command": "codex-browser-bridge",
-      "args": ["-mode", "mcp"],
+      "args": ["--mode", "mcp"],
       "transport": "stdio"
     }
   }

@@ -23,7 +23,7 @@ body:
       label: Steps to reproduce
       placeholder: |
         1. Start Codex Desktop and Chrome
-        2. Run `codex-browser-bridge -mode cli`
+        2. Run `codex-browser-bridge --mode cli`
         3. Type `tabs`
         4. ...
     validations:
@@ -70,7 +70,7 @@ body:
   - type: textarea
     id: discover-output
     attributes:
-      label: Output of `codex-browser-bridge -mode discover`
+      label: Output of `codex-browser-bridge --mode discover`
       description: Redact private pipe names or local identifiers before posting.
       render: text
     validations:
