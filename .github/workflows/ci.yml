@@ -24,6 +24,18 @@ jobs:
       - name: Test
         shell: bash
         run: cargo test --locked
+      - name: Coverage
+        shell: bash
+        run: |
+          rustup component add llvm-tools-preview
+          cargo install cargo-llvm-cov --locked
+          cargo llvm-cov --locked --lcov --output-path lcov.info
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
+        continue-on-error: true
       - name: Build x64
         shell: bash
         run: cargo build --locked --release --target x86_64-pc-windows-msvc

@@ -19,12 +19,6 @@
   <a href="https://github.com/DeliciousBuding/codex-browser-bridge/actions">
     <img src="https://img.shields.io/github/actions/workflow/status/DeliciousBuding/codex-browser-bridge/ci.yml?style=flat-square" alt="CI">
   </a>
-  <a href="https://codecov.io/gh/DeliciousBuding/codex-browser-bridge">
-    <img src="https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square" alt="Coverage">
-  </a>
-  <a href="https://goreportcard.com/report/github.com/DeliciousBuding/codex-browser-bridge">
-    <img src="https://goreportcard.com/badge/github.com/DeliciousBuding/codex-browser-bridge?style=flat-square" alt="Go Report Card">
-  </a>
   <a href="README.md">English</a>
 </p>
 
@@ -54,14 +48,14 @@ Agent 可以：
 
 ## 状态
 
-v1.6.0 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome 扩展已安装并运行。当前版本支持两种已知的 Codex 浏览器 pipe 名称格式：
+v1.7.0 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome 扩展已安装并运行。当前版本支持两种已知的 Codex 浏览器 pipe 名称格式：
 
 - `codex-browser-use-<uuid>`
 - `codex-browser-use\<uuid>`
 
 桥接器仅用于单台可信机器上的本地开发和受控自动化。
 
-1.6.x 版本线将桥接器二进制切到 Rust。v1.5.4 及更早的已发布版本使用 Go 构建的 Windows 二进制；1.6.x 在 CI 和 tag 校验通过后构建 Rust x64 和 arm64 release 资产。
+二进制为纯 Rust 构建。已发布版本通过 CI 构建 Windows x64 和 arm64 二进制，发布到 GitHub Releases 和 npm。
 
 ## 特性
 
@@ -80,28 +74,19 @@ v1.6.0 是面向本地 Windows 的工具，需要 Codex Desktop 和 Codex Chrome
 - Chrome
 - Codex Desktop 正在运行
 - Codex Chrome 扩展已安装并启用
-- Go 1.23+（仅从源码构建时需要）
-- Rust 1.85+（仅构建 `rewrite/rust-full` 分支时需要）
+- Rust 1.85+
 
 > 桥接器连接 Codex Desktop 创建的本地 named pipe。如果找不到 pipe，请先启动 Codex Desktop 并确保扩展已激活。
 
 ## 安装
 
-### 方式一：npm install
+### 推荐：npm
 
 ```bash
 npm i -g @delicious233/codex-browser-bridge
 ```
 
-### 方式二：Go install
-
-```bash
-go install github.com/DeliciousBuding/codex-browser-bridge/cmd/bridge@latest
-```
-
-确保 Go 的 bin 路径在 `PATH` 中。
-
-### 方式三：下载 Release
+### 备选：下载 Release
 
 从以下地址下载最新二进制文件：
 
@@ -111,35 +96,12 @@ https://github.com/DeliciousBuding/codex-browser-bridge/releases
 
 将 `codex-browser-bridge.exe` 放到 `PATH` 中的任意位置。
 
-### 方式四：从源码构建
-
-当前 release 构建：
+### 备选：从源码构建
 
 ```bash
 git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
 cd codex-browser-bridge
-make build
-```
-
-生成的二进制文件位于：
-
-```text
-bin/codex-browser-bridge.exe
-```
-
-Rust 重写分支构建：
-
-```bash
-git checkout rewrite/rust-full
-cargo check --locked
-cargo test --locked
 cargo build --locked --release
-```
-
-Rust 二进制文件位于：
-
-```text
-target/release/codex-browser-bridge.exe
 ```
 
 ## Claude Code 快速上手
@@ -292,7 +254,7 @@ MCP 客户端
         │ stdio JSON-RPC
         ▼
 codex-browser-bridge
-  Go 二进制文件
+  Rust 二进制文件
         │
         │ length-prefixed JSON-RPC 帧
         ▼
@@ -312,7 +274,7 @@ Chrome 标签页
 ## 工作原理
 
 1. 桥接器搜索匹配 `codex-browser-use-*` 的本地 named pipe。
-2. 通过 `go-winio` 连接到选定的 pipe。
+2. 通过 Windows named pipe API 连接到选定的 pipe。
 3. 每个请求编码为 4 字节小端长度前缀 + JSON-RPC 载荷。
 4. 浏览器操作被发送到 Codex extension host。
 5. 页面级操作使用 Chrome DevTools Protocol 命令，如 `Page.navigate`、`Page.captureScreenshot`、`Runtime.evaluate` 和 `Input.dispatchMouseEvent`。

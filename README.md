@@ -22,9 +22,6 @@
   <a href="https://codecov.io/gh/DeliciousBuding/codex-browser-bridge">
     <img src="https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square" alt="Coverage">
   </a>
-  <a href="https://goreportcard.com/report/github.com/DeliciousBuding/codex-browser-bridge">
-    <img src="https://goreportcard.com/badge/github.com/DeliciousBuding/codex-browser-bridge?style=flat-square" alt="Go Report Card">
-  </a>
   <a href="README.zh-CN.md">中文</a>
 </p>
 
@@ -54,14 +51,14 @@ Useful when an agent needs to work with pages that require a real browser sessio
 
 ## Status
 
-Version 1.6.0 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
+Version 1.7.0 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
 
 - `codex-browser-use-<uuid>`
 - `codex-browser-use\<uuid>`
 
 Run the bridge for local development and controlled automation on a single trusted machine.
 
-The 1.7.x line adds CDP MCP tools (execute_cdp, page_assets, network_cookies, network_set_cookie), security hardening, and e2e tests. The bridge binary is pure Rust; all Go source was removed in v1.7.0.
+The bridge binary is pure Rust. Tagged releases build x64 and arm64 Windows binaries, published to GitHub Releases and npm.
 
 ## Features
 
@@ -285,7 +282,7 @@ MCP Client
         │ stdio JSON-RPC
         ▼
 codex-browser-bridge
-  Go binary
+  Rust binary
         │
         │ length-prefixed JSON-RPC frames
         ▼
@@ -305,7 +302,7 @@ Chrome tabs
 ## How It Works
 
 1. The bridge searches for local named pipes matching `codex-browser-use-*`.
-2. It connects to the selected pipe through `go-winio`.
+2. It connects to the selected pipe through the Windows named pipe API.
 3. Every request is encoded as a 4-byte little-endian length prefix followed by a JSON-RPC payload.
 4. Browser operations are sent to the Codex extension host.
 5. Page-level operations use Chrome DevTools Protocol commands such as `Page.navigate`, `Page.captureScreenshot`, `Runtime.evaluate`, and `Input.dispatchMouseEvent`.
@@ -360,33 +357,20 @@ Some browser operations require the bridge to attach to the tab before sending C
 git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
 cd codex-browser-bridge
 
-make test
-make build
+cargo check --locked          # fast check
+cargo test --locked            # run all tests
+cargo clippy --locked -- -D warnings  # lint
+cargo build --locked --release # release build → target/release/codex-browser-bridge.exe
 ```
-
-Common commands:
-
-```bash
-make build         # build binary
-make test          # go vet ./... && go test ./...
-make clean         # remove build output
-cargo check --locked
-cargo test --locked
-cargo build --locked --release
-```
-
-See `docs/rust-rewrite/npm-ci-plan.md` for the Rust rewrite npm and CI plan.
 
 ## Roadmap
 
-Planned or open work:
+See [ROADMAP.md](ROADMAP.md) for the full project roadmap. Highlights:
 
-- clearer error messages for common pipe / extension failures
-- non-Windows fallback or explicit platform guards
-- screenshot output handling across MCP clients
-- typed tool result schemas
-- optional allowlist / confirmation layer for sensitive domains
-- examples for Claude Code, Cursor, Codex CLI, and other MCP clients
+- `codex_fullpage_screenshot` — true full-page capture via CDP clip + scroll compose
+- `codex_network_monitor` — request/response inspection via `Network.enable`
+- `codex_emulate_device` — mobile viewport emulation
+- Non-Windows transport abstraction (WSL / Unix socket fallback)
 
 ## License
 
