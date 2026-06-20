@@ -67,10 +67,12 @@ where
             payload.len()
         )));
     }
-    writer
-        .write_all(&(payload.len() as u32).to_le_bytes())
-        .await?;
-    writer.write_all(&payload).await?;
+    let len_bytes = (payload.len() as u32).to_le_bytes();
+    // Combine length header + payload into single write to reduce syscalls
+    let mut frame = Vec::with_capacity(4 + payload.len());
+    frame.extend_from_slice(&len_bytes);
+    frame.extend_from_slice(&payload);
+    writer.write_all(&frame).await?;
     writer.flush().await?;
     Ok(())
 }
@@ -90,6 +92,8 @@ where
             "frame too large: {len} bytes"
         )));
     }
+    // Allocate buffer. For small frames the memset cost is negligible;
+    // for large frames the pipe I/O dominates. Safe and simple.
     let mut payload = vec![0u8; len as usize];
     reader.read_exact(&mut payload).await?;
     Ok(payload)

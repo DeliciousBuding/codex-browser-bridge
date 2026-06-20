@@ -83,10 +83,18 @@ impl Server {
     pub async fn run_stdio(self) -> anyhow::Result<()> {
         let stdin = tokio::io::stdin();
         let mut stdout = tokio::io::stdout();
-        let mut lines = BufReader::new(stdin).lines();
+        let mut reader = BufReader::new(stdin);
+        // Reusable read buffer to avoid per-line String allocations
+        let mut buf = Vec::with_capacity(8192);
 
-        while let Some(line) = lines.next_line().await? {
-            let line = line.trim();
+        loop {
+            buf.clear();
+            match reader.read_until(b'\n', &mut buf).await {
+                Ok(0) => break, // EOF
+                Ok(_) => {}
+                Err(err) => return Err(err.into()),
+            }
+            let line = std::str::from_utf8(&buf).unwrap_or("").trim();
             if line.is_empty() {
                 continue;
             }
