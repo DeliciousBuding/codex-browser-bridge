@@ -4,7 +4,7 @@
 
 ## 仓库级 Skill
 
-本仓库包含项目级 skill：`.agents/skills/codex-browser/SKILL.md`
+本仓库包含项目级 skill：`skills/codex-browser/SKILL.md`
 
 该 skill 是 LLM agent 使用全部 36 个 MCP 工具的操作手册，包含工具分组速查、常用工作流、工具选择原则。支持项目级 skill 的 MCP 客户端会自动加载。
 
