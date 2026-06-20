@@ -61,7 +61,7 @@ Version 1.6.0 is a local Windows tool for Codex Desktop and the Codex Chrome Ext
 
 Run the bridge for local development and controlled automation on a single trusted machine.
 
-The 1.6.x line moves the bridge binary to Rust. Tagged releases through v1.5.4 use Go-built Windows binaries; 1.6.x builds Rust x64 and arm64 release assets after CI and tag validation.
+The 1.7.x line adds CDP MCP tools (execute_cdp, page_assets, network_cookies, network_set_cookie), security hardening, and e2e tests. The bridge binary is pure Rust; all Go source was removed in v1.7.0.
 
 ## Features
 
@@ -80,8 +80,7 @@ The 1.6.x line moves the bridge binary to Rust. Tagged releases through v1.5.4 u
 - Chrome
 - Codex Desktop running
 - Codex Chrome Extension installed and enabled
-- Go 1.23+ if building from source
-- Rust 1.85+ if building the `rewrite/rust-full` branch
+- Rust 1.85+
 
 > The bridge connects to local named pipes created by Codex Desktop. If no pipe is found, start Codex Desktop first and make sure the extension is active.
 
@@ -93,15 +92,7 @@ The 1.6.x line moves the bridge binary to Rust. Tagged releases through v1.5.4 u
 npm i -g @delicious233/codex-browser-bridge
 ```
 
-### Option 2: Install with Go
-
-```bash
-go install github.com/DeliciousBuding/codex-browser-bridge/cmd/bridge@latest
-```
-
-Make sure your Go binary path is available in `PATH`.
-
-### Option 3: Download a release
+### Option 2: Download a release
 
 Download the latest binary from:
 
@@ -111,36 +102,15 @@ https://github.com/DeliciousBuding/codex-browser-bridge/releases
 
 Then place `codex-browser-bridge.exe` somewhere in your `PATH`.
 
-### Option 4: Build from source
-
-Current release build:
+### Option 3: Build from source
 
 ```bash
 git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
 cd codex-browser-bridge
-make build
-```
-
-The binary will be generated at:
-
-```text
-bin/codex-browser-bridge.exe
-```
-
-Rust rewrite branch build:
-
-```bash
-git checkout rewrite/rust-full
-cargo check --locked
-cargo test --locked
 cargo build --locked --release
 ```
 
-The Rust binary will be generated at:
-
-```text
-target/release/codex-browser-bridge.exe
-```
+The binary will be generated at `target/release/codex-browser-bridge.exe`.
 
 ## Quick Start with Claude Code
 
@@ -302,6 +272,15 @@ CLI output can include pipe IDs, tab titles, full URLs, screenshots, and page te
 | -------------------- | --------------------------------------------------- |
 | `codex_name_session` | Assign a human-readable name to the browser session |
 | `codex_finalize`     | Finalize the session and clean up tabs              |
+
+### CDP & Network (new in v1.7.0)
+
+| Tool                       | Description                                              |
+| -------------------------- | -------------------------------------------------------- |
+| `codex_execute_cdp`        | Execute any CDP command (allowlist-protected)            |
+| `codex_page_assets`        | List page resources (images, fonts, CSS, JS) via CDP     |
+| `codex_network_cookies`    | Get cookies (values redacted by default)                 |
+| `codex_network_set_cookie` | Set a browser cookie (URL validated)                     |
 
 ## Architecture
 

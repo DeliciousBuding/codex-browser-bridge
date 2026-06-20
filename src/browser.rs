@@ -454,7 +454,7 @@ pub async fn get_resource_content(
             Some(json!({ "frameId": frame_id, "url": url })),
         )
         .await?;
-    resource_content_base64(&raw)
+    extract_resource_content(&raw)
 }
 
 // ── Network Cookies ───────────────────────────────────────────
@@ -559,7 +559,7 @@ fn collect_resources(tree: &FrameTree, out: &mut Vec<PageResource>) {
     }
 }
 
-fn resource_content_base64(raw: &RawValue) -> Result<String> {
+fn extract_resource_content(raw: &RawValue) -> Result<String> {
     #[derive(Deserialize)]
     struct ResourceContent {
         #[serde(default)]
@@ -1087,7 +1087,7 @@ mod tests {
         let raw = RawValue::from_string(
             r#"{"content":"body { color: red; }","base64Encoded":false}"#.into()
         ).unwrap();
-        let content = resource_content_base64(&raw).unwrap();
+        let content = extract_resource_content(&raw).unwrap();
         assert_eq!(content, "body { color: red; }");
     }
 
@@ -1096,7 +1096,7 @@ mod tests {
         let raw = RawValue::from_string(
             r#"{"content":"","base64Encoded":false}"#.into()
         ).unwrap();
-        assert!(resource_content_base64(&raw).is_err());
+        assert!(extract_resource_content(&raw).is_err());
     }
 
     #[test]

@@ -14,47 +14,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.85.0
         with:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
-      - name: Check Rust rewrite
+      - name: Check
         shell: bash
         run: cargo check --locked
-      - name: Clippy lint
+      - name: Clippy
         shell: bash
         run: cargo clippy --locked -- -D warnings
-      - name: Test Rust rewrite
+      - name: Test
         shell: bash
         run: cargo test --locked
-      - name: Build Rust rewrite x64
+      - name: Build x64
         shell: bash
         run: cargo build --locked --release --target x86_64-pc-windows-msvc
-      - name: Build Rust rewrite arm64
+      - name: Build arm64
         shell: bash
         run: cargo build --locked --release --target aarch64-pc-windows-msvc
 
-  test:
+  npm:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - name: Vet
-        shell: bash
-        run: go vet ./...
-      - name: Test with coverage
-        shell: bash
-        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          files: ./coverage.out
-          fail_ci_if_error: false
-        continue-on-error: true
-      - name: Build
-        shell: bash
-        run: go build -trimpath -ldflags "-s -w" -o bin/codex-browser-bridge.exe ./cmd/bridge
       - name: Test npm installer helpers
         shell: bash
         run: |
@@ -75,14 +57,3 @@ jobs:
             }
           }
           NODE
-
-  lint:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
