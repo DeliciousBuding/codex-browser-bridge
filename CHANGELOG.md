@@ -2,6 +2,66 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.0] - 2026-06-20
+
+### Added
+
+- **CDP error normalization** (`P0-1`): CDP-level errors (Target closed, etc.) now correctly surface as `isError: true` in MCP responses. New `BridgeError::Cdp` variant with method name and code.
+- **Sticky attach** (`P0-2`): Per-tab CDP session caching. Skips redundant detach+attach round-trips for repeated CDP calls on the same tab, reducing RTT by ~50% for multi-step agent operations.
+- **`codex_network_cookies`**: Cookie values redacted by default (`redact_values: true`).
+- **`codex_network_set_cookie`**: URL validation enforced.
+- **`codex_execute_cdp`**: CDP method allowlist blocks Browser/Debugger/Target/Emulation/Security/Tracing domains.
+- **`codex_page_assets`**: Exposes Codex extension `pageAssets` capability with frameId-aware resource fetching.
+
+### Changed
+
+- **Tool descriptions unified**: All 28 tools now have group tags (`[Tabs]`, `[Navigation]`, `[DOM]`, `[Page]`, `[Input]`, `[CDP]`, `[Network]`, `[Session]`), cross-references, and clearer LLM guidance.
+- **`fullPage` → `full_page`**: Schema parameter renamed to snake_case (backward-compatible via fallback).
+- **`timeout_ms`**: Schema type `number` → `integer`.
+- **CLI extracted** (`S` principle): `browser.rs` 1100→857 lines, CLI REPL now in `src/cli.rs`.
+
+### Removed
+
+- **BridgeClient trait**: Removed as over-engineering (3/3 agent reviewers + ChatGPT agreed). No mock consumer existed. KISS principle restored — `browser.rs` uses `&Client` directly.
+- **Go legacy**: `internal/`, `cmd/`, `go.mod`, `go.sum`, `.golangci.yml` removed (−5382 lines).
+- **`is_debugger_error`**: Replaced by broader `is_session_invalid_error` with 8 patterns.
+
+### Performance
+
+- **`encode_frame`**: Length header + payload merged into single `write_all` (1 syscall vs 2).
+- **MCP stdio**: `BufReader::read_until` with reusable `Vec` buffer replaces per-line `String` allocation.
+- **Sticky attach**: Skips detach+attach when CDP session is cached (50-60% RTT reduction for repeated calls on same tab).
+
+### Security
+
+- **CDP error sanitization**: Error messages stripped of `\n` `\r` before surfacing (matching RPC error handling).
+- **Session cache cleanup**: `attached_tabs` cleared on `finalize`, populated from `claim_user_tab`, self-healing on errors.
+- **Cookie value redaction**: Default-on for `codex_network_cookies`.
+
+### Governance
+
+- **Repository SEO**: 15 GitHub topics, Discussions enabled, homepage set.
+- **npm metadata**: 15 keywords, `homepage` + `bugs` fields added.
+- **Client examples**: `examples/` (claude-code, openclaw, hermes-agent, cursor).
+- **`cargo clippy`**: Added to CI + release workflow with `-D warnings`.
+- **Go module caching**: `setup-go` cache enabled.
+- **Codecov**: Rust coverage via `cargo-llvm-cov` (replaces old Go coverage).
+- **`.gitignore`**: `docs/ask-gpt/` added (external review artifacts never committed).
+
+### Documentation
+
+- **README.zh-CN**: Synchronized with English README (Go references removed, npm recommended).
+- **CONTRIBUTING.md**: Rewritten for Rust-only development workflow.
+- **SECURITY.md**: Stale paths fixed.
+- **ROADMAP.md**: Updated with v1.7.0, v1.8.0, v1.9.0, v2.0.0 plans and SUPER scoring.
+- **ChatGPT architecture review**: External audit confirmed architecture direction, identified P0 priorities, validated BridgeClient removal.
+
+### Reviews
+
+- **SUPER multi-dimension review**: CDP error normalization + sticky attach scored PASS_WITH_FIXES (3/5), all 5 must-fix items resolved.
+- **3-agent architecture review**: Consensus on BridgeClient removal, sticky attach priority, CDP error importance.
+- **ChatGPT independent audit**: Validated architecture, recommended priorities (P0 CDP error → P0 sticky attach → P1 tool UX).
+
 ## [1.7.0] - 2026-06-20
 
 ### Added
