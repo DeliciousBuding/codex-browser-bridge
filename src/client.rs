@@ -29,6 +29,9 @@ struct ClientInner {
     session_id: String,
     turn_id: String,
     tab_locks: Mutex<HashMap<i64, Arc<Mutex<()>>>>,
+    /// Per-tab sticky attach cache: tabs known to have an active CDP debugger session.
+    /// Avoids detach+attach round-trips for repeated CDP calls on the same tab.
+    attached_tabs: Mutex<HashMap<i64, bool>>,
 }
 
 impl Client {
@@ -49,6 +52,7 @@ impl Client {
                 session_id: Uuid::new_v4().to_string(),
                 turn_id: Uuid::new_v4().to_string(),
                 tab_locks: Mutex::new(HashMap::new()),
+                attached_tabs: Mutex::new(HashMap::new()),
             }),
         };
         client.spawn_read_loop(reader);
@@ -151,19 +155,39 @@ impl Client {
         let _guard = tab_lock.lock().await;
 
         let deadline = Instant::now() + DEFAULT_REQUEST_TIMEOUT;
+        let already_attached = self.inner.attached_tabs.lock().await.get(&tab_id).copied().unwrap_or(false);
+
+        if already_attached {
+            // Sticky attach: skip detach+attach, go direct to CDP
+            match self
+                .execute_cdp_raw_until(tab_id, method, params.clone(), deadline)
+                .await
+            {
+                Ok(raw) => return Ok(raw),
+                Err(err) if is_session_invalid_error(&err) => {
+                    // Session stale — invalidate cache and fall through to full re-attach
+                    self.inner.attached_tabs.lock().await.remove(&tab_id);
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        // Full attach flow
         self.detach_tab_until(tab_id, deadline).await.ok();
         self.attach_tab_until(tab_id, deadline)
             .await
             .map_err(|err| {
                 BridgeError::Protocol(format!("attach failed for tab {tab_id}: {err}"))
             })?;
+        self.inner.attached_tabs.lock().await.insert(tab_id, true);
 
         match self
             .execute_cdp_raw_until(tab_id, method, params.clone(), deadline)
             .await
         {
             Ok(raw) => Ok(raw),
-            Err(err) if is_debugger_error(&err) => {
+            Err(err) if is_session_invalid_error(&err) => {
+                self.inner.attached_tabs.lock().await.remove(&tab_id);
                 self.detach_tab_until(tab_id, deadline).await.ok();
                 self.attach_tab_until(tab_id, deadline)
                     .await
@@ -172,11 +196,17 @@ impl Client {
                             "retry attach failed for tab {tab_id}: {err}"
                         ))
                     })?;
+                self.inner.attached_tabs.lock().await.insert(tab_id, true);
                 self.execute_cdp_raw_until(tab_id, method, params, deadline)
                     .await
             }
             Err(err) => Err(err),
         }
+    }
+
+    /// Invalidate the sticky attach cache for a tab (call on tab close or finalize).
+    pub async fn invalidate_attachment(&self, tab_id: i64) {
+        self.inner.attached_tabs.lock().await.remove(&tab_id);
     }
 
     async fn tab_lock(&self, tab_id: i64) -> Arc<Mutex<()>> {
@@ -304,8 +334,22 @@ fn remaining(deadline: Instant) -> Duration {
         .max(Duration::from_nanos(1))
 }
 
-fn is_debugger_error(err: &BridgeError) -> bool {
-    err.to_string().contains("not attached")
+/// Errors that indicate the CDP session is no longer valid and needs re-attach.
+fn is_session_invalid_error(err: &BridgeError) -> bool {
+    let msg = err.to_string().to_ascii_lowercase();
+    [
+        "target closed",
+        "detached",
+        "session not found",
+        "no target",
+        "target does not exist",
+        "cannot find target",
+        "execution context destroyed",
+        "inspected target navigated",
+        "frame was detached",
+    ]
+    .iter()
+    .any(|needle| msg.contains(needle))
 }
 
 /// Check if a CDP response contains a protocol-level error.
