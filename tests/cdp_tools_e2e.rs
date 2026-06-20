@@ -160,8 +160,8 @@ async fn e2e_network_set_cookie_roundtrip() {
 #[tokio::test]
 async fn e2e_cdp_error_propagates_to_caller() {
     let (client, server) = client_server_pair().await;
-    // Return CDP-level error: executeCdp succeeds at RPC level but result contains error
-    let cdp_error = json!({"error": "Target closed"});
+    // Return CDP-level error: executeCdp succeeds at RPC level but CDP result has error envelope
+    let cdp_error = json!({"error": {"code": -32000, "message": "Target closed"}});
     tokio::spawn(async move {
         let mut server = server;
         loop {
@@ -194,11 +194,10 @@ async fn e2e_cdp_error_propagates_to_caller() {
     )
     .await;
 
-    // CDP-level errors are returned in the Ok variant (RPC succeeded, CDP returned error content)
-    // The raw value contains the CDP error response
-    assert!(result.is_ok(), "executeCdp RPC should succeed; CDP error is in the payload");
-    let raw = result.unwrap();
-    assert!(raw.get().contains("error"), "payload should contain CDP error: {}", raw.get());
+    // NEW behavior: CDP-level errors are now detected and returned as Err(BridgeError::Cdp)
+    assert!(result.is_err(), "CDP error should now surface as Rust error (not Ok)");
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("cdp error"), "error should be Cdp variant: {err}");
 }
 
 #[tokio::test]
