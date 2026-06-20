@@ -19,6 +19,19 @@ struct Args {
 
     #[arg(long)]
     pipe: Option<String>,
+
+    #[arg(long, value_enum)]
+    profile: Option<Profile>,
+
+    #[arg(long)]
+    upload_base: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum Profile {
+    Basic,
+    Network,
+    Full,
 }
 
 #[tokio::main]
@@ -38,7 +51,20 @@ async fn main() -> anyhow::Result<()> {
             let client = client::Client::connect(args.pipe.as_deref())
                 .await
                 .context("failed to connect to Codex browser pipe")?;
-            mcp::Server::new(client).run_stdio().await?;
+            if let Some(ref base) = args.upload_base {
+                std::env::set_var("CODEX_BRIDGE_UPLOAD_BASE", base);
+            }
+            let server = if let Some(profile) = args.profile {
+                let p = match profile {
+                    Profile::Basic => codex_browser_bridge::mcp::profiles::ToolProfile::Basic,
+                    Profile::Network => codex_browser_bridge::mcp::profiles::ToolProfile::Network,
+                    Profile::Full => codex_browser_bridge::mcp::profiles::ToolProfile::Full,
+                };
+                mcp::Server::new_with_profile(client, p)
+            } else {
+                mcp::Server::new(client)
+            };
+            server.run_stdio().await?;
         }
         Mode::Cli => {
             let client = client::Client::connect(args.pipe.as_deref())
