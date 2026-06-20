@@ -25,6 +25,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.85.0
         with:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
+          components: clippy
       - name: Check Rust
         shell: bash
         run: cargo check --locked
@@ -75,6 +76,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.85.0
         with:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
+          components: clippy
 
       - name: Get version
         id: version
