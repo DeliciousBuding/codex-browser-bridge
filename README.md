@@ -86,31 +86,25 @@ The 1.7.x line adds CDP MCP tools (execute_cdp, page_assets, network_cookies, ne
 
 ## Installation
 
-### Option 1: Install with npm
+### Recommended: npm
 
 ```bash
 npm i -g @delicious233/codex-browser-bridge
 ```
 
-### Option 2: Download a release
+### Alternative: Download a release
 
-Download the latest binary from:
+<https://github.com/DeliciousBuding/codex-browser-bridge/releases>
 
-```text
-https://github.com/DeliciousBuding/codex-browser-bridge/releases
-```
+Download `codex-browser-bridge.exe` and place it somewhere in your `PATH`.
 
-Then place `codex-browser-bridge.exe` somewhere in your `PATH`.
-
-### Option 3: Build from source
+### Alternative: Build from source
 
 ```bash
 git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
 cd codex-browser-bridge
 cargo build --locked --release
 ```
-
-The binary will be generated at `target/release/codex-browser-bridge.exe`.
 
 ## Quick Start with Claude Code
 
