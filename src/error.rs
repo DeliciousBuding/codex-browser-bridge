@@ -14,6 +14,13 @@ pub enum BridgeError {
     #[error("rpc error in {method}: {message}")]
     Rpc { method: String, message: String },
 
+    #[error("cdp error in {method}: ({code}) {message}")]
+    Cdp {
+        method: String,
+        code: i64,
+        message: String,
+    },
+
     #[error("timeout waiting for {0} response")]
     Timeout(String),
 

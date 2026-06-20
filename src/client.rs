@@ -214,16 +214,19 @@ impl Client {
         params: Option<Value>,
         deadline: Instant,
     ) -> Result<Box<RawValue>> {
-        self.send_request_with_timeout(
-            "executeCdp",
-            Some(json!({
-                "target": { "tabId": tab_id },
-                "method": method,
-                "commandParams": params.unwrap_or_else(|| json!({}))
-            })),
-            remaining(deadline),
-        )
-        .await
+        let raw = self
+            .send_request_with_timeout(
+                "executeCdp",
+                Some(json!({
+                    "target": { "tabId": tab_id },
+                    "method": method,
+                    "commandParams": params.unwrap_or_else(|| json!({}))
+                })),
+                remaining(deadline),
+            )
+            .await?;
+        check_cdp_error(method, &raw)?;
+        Ok(raw)
     }
 
     #[cfg(test)]
@@ -303,4 +306,31 @@ fn remaining(deadline: Instant) -> Duration {
 
 fn is_debugger_error(err: &BridgeError) -> bool {
     err.to_string().contains("not attached")
+}
+
+/// Check if a CDP response contains a protocol-level error.
+/// CDP errors come in the envelope `{"error": {"code": ..., "message": ...}}`
+/// and must be surfaced as Rust errors so the MCP layer can set `isError: true`.
+fn check_cdp_error(method: &str, raw: &RawValue) -> Result<()> {
+    #[derive(serde::Deserialize)]
+    struct CdpError {
+        code: i64,
+        message: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct CdpErrorEnvelope {
+        error: Option<CdpError>,
+    }
+
+    if let Ok(envelope) = serde_json::from_str::<CdpErrorEnvelope>(raw.get()) {
+        if let Some(err) = envelope.error {
+            return Err(BridgeError::Cdp {
+                method: method.to_string(),
+                code: err.code,
+                message: err.message,
+            });
+        }
+    }
+    Ok(())
 }
