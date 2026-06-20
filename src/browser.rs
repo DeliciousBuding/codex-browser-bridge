@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, value::RawValue, Value};
 use tokio::time::{sleep, Duration, Instant};
 
-use crate::client::Client;
+use crate::client::BridgeClient;
 use crate::error::{BridgeError, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,24 +51,24 @@ impl UserTab {
     }
 }
 
-pub async fn list_tabs(client: &Client) -> Result<Vec<Tab>> {
+pub async fn list_tabs(client: &impl BridgeClient) -> Result<Vec<Tab>> {
     let raw = client.send_request("getTabs", None).await?;
     decode_tabs(&raw)
 }
 
-pub async fn create_tab(client: &Client) -> Result<String> {
+pub async fn create_tab(client: &impl BridgeClient) -> Result<String> {
     let raw = client.send_request("createTab", None).await?;
     let tab: Tab =
         serde_json::from_str(raw.get()).map_err(|err| BridgeError::Protocol(err.to_string()))?;
     Ok(tab.normalize().id)
 }
 
-pub async fn list_user_tabs(client: &Client) -> Result<Vec<UserTab>> {
+pub async fn list_user_tabs(client: &impl BridgeClient) -> Result<Vec<UserTab>> {
     let raw = client.send_request("getUserTabs", None).await?;
     decode_user_tabs(&raw)
 }
 
-pub async fn claim_user_tab(client: &Client, tab_id: &str) -> Result<Tab> {
+pub async fn claim_user_tab(client: &impl BridgeClient, tab_id: &str) -> Result<Tab> {
     let id = parse_tab_id("claimUserTab", tab_id)?;
     let raw = client
         .send_request("claimUserTab", Some(json!({ "tabId": id })))
@@ -81,7 +81,7 @@ pub async fn claim_user_tab(client: &Client, tab_id: &str) -> Result<Tab> {
     Ok(tab.normalize())
 }
 
-pub async fn close_tab(client: &Client, tab_id: &str) -> Result<()> {
+pub async fn close_tab(client: &impl BridgeClient, tab_id: &str) -> Result<()> {
     let id = parse_tab_id("close_tab", tab_id)?;
     match client.execute_cdp(id, "Page.close", None).await {
         Ok(_) => Ok(()),
@@ -90,7 +90,7 @@ pub async fn close_tab(client: &Client, tab_id: &str) -> Result<()> {
     }
 }
 
-pub async fn navigate(client: &Client, tab_id: &str, url: &str) -> Result<()> {
+pub async fn navigate(client: &impl BridgeClient, tab_id: &str, url: &str) -> Result<()> {
     validate_url(url)?;
     let id = parse_tab_id("navigate", tab_id)?;
     client
@@ -99,7 +99,7 @@ pub async fn navigate(client: &Client, tab_id: &str, url: &str) -> Result<()> {
         .map(|_| ())
 }
 
-pub async fn navigate_back(client: &Client, tab_id: &str) -> Result<()> {
+pub async fn navigate_back(client: &impl BridgeClient, tab_id: &str) -> Result<()> {
     let id = parse_tab_id("navigate_back", tab_id)?;
     let raw = client
         .execute_cdp(id, "Page.getNavigationHistory", None)
@@ -115,7 +115,7 @@ pub async fn navigate_back(client: &Client, tab_id: &str) -> Result<()> {
         .map(|_| ())
 }
 
-pub async fn navigate_forward(client: &Client, tab_id: &str) -> Result<()> {
+pub async fn navigate_forward(client: &impl BridgeClient, tab_id: &str) -> Result<()> {
     let id = parse_tab_id("navigate_forward", tab_id)?;
     let raw = client
         .execute_cdp(id, "Page.getNavigationHistory", None)
@@ -131,7 +131,7 @@ pub async fn navigate_forward(client: &Client, tab_id: &str) -> Result<()> {
         .map(|_| ())
 }
 
-pub async fn reload(client: &Client, tab_id: &str) -> Result<()> {
+pub async fn reload(client: &impl BridgeClient, tab_id: &str) -> Result<()> {
     let id = parse_tab_id("reload", tab_id)?;
     client
         .execute_cdp(id, "Page.reload", None)
@@ -139,7 +139,7 @@ pub async fn reload(client: &Client, tab_id: &str) -> Result<()> {
         .map(|_| ())
 }
 
-pub async fn wait_for_load(client: &Client, tab_id: &str, timeout_ms: u64) -> Result<String> {
+pub async fn wait_for_load(client: &impl BridgeClient, tab_id: &str, timeout_ms: u64) -> Result<String> {
     let id = parse_tab_id("wait_for_load", tab_id)?;
     let timeout_ms = if timeout_ms == 0 { 10_000 } else { timeout_ms };
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
@@ -179,7 +179,7 @@ pub async fn wait_for_load(client: &Client, tab_id: &str, timeout_ms: u64) -> Re
     }
 }
 
-pub async fn dom_snapshot(client: &Client, tab_id: &str) -> Result<String> {
+pub async fn dom_snapshot(client: &impl BridgeClient, tab_id: &str) -> Result<String> {
     let id = parse_tab_id("snapshot", tab_id)?;
     match client
         .execute_cdp(id, "Accessibility.getFullAXTree", None)
@@ -207,7 +207,7 @@ pub async fn dom_snapshot(client: &Client, tab_id: &str) -> Result<String> {
     }
 }
 
-pub async fn screenshot(client: &Client, tab_id: &str, full_page: bool) -> Result<String> {
+pub async fn screenshot(client: &impl BridgeClient, tab_id: &str, full_page: bool) -> Result<String> {
     let _ = full_page;
     let id = parse_tab_id("screenshot", tab_id)?;
     let raw = client
@@ -220,7 +220,7 @@ pub async fn screenshot(client: &Client, tab_id: &str, full_page: bool) -> Resul
     screenshot_data(&raw)
 }
 
-pub async fn evaluate(client: &Client, tab_id: &str, expression: &str) -> Result<Box<RawValue>> {
+pub async fn evaluate(client: &impl BridgeClient, tab_id: &str, expression: &str) -> Result<Box<RawValue>> {
     let id = parse_tab_id("evaluate", tab_id)?;
     client
         .execute_cdp(
@@ -231,7 +231,7 @@ pub async fn evaluate(client: &Client, tab_id: &str, expression: &str) -> Result
         .await
 }
 
-pub async fn click(client: &Client, tab_id: &str, selector: &str) -> Result<()> {
+pub async fn click(client: &impl BridgeClient, tab_id: &str, selector: &str) -> Result<()> {
     let id = parse_tab_id("click", tab_id)?;
     let raw = client
         .execute_cdp(
@@ -246,7 +246,7 @@ pub async fn click(client: &Client, tab_id: &str, selector: &str) -> Result<()> 
     parse_action_result(&raw, "click")
 }
 
-pub async fn fill(client: &Client, tab_id: &str, selector: &str, value: &str) -> Result<()> {
+pub async fn fill(client: &impl BridgeClient, tab_id: &str, selector: &str, value: &str) -> Result<()> {
     let id = parse_tab_id("fill", tab_id)?;
     let raw = client
         .execute_cdp(
@@ -261,7 +261,7 @@ pub async fn fill(client: &Client, tab_id: &str, selector: &str, value: &str) ->
     parse_action_result(&raw, "fill")
 }
 
-pub async fn cua_click(client: &Client, tab_id: &str, x: i64, y: i64) -> Result<()> {
+pub async fn cua_click(client: &impl BridgeClient, tab_id: &str, x: i64, y: i64) -> Result<()> {
     let id = parse_tab_id("cua_click", tab_id)?;
     for event_type in ["mousePressed", "mouseReleased"] {
         client
@@ -281,7 +281,7 @@ pub async fn cua_click(client: &Client, tab_id: &str, x: i64, y: i64) -> Result<
     Ok(())
 }
 
-pub async fn cua_type(client: &Client, tab_id: &str, text: &str) -> Result<()> {
+pub async fn cua_type(client: &impl BridgeClient, tab_id: &str, text: &str) -> Result<()> {
     let id = parse_tab_id("cua_type", tab_id)?;
     if text.is_empty() {
         return Ok(());
@@ -292,7 +292,7 @@ pub async fn cua_type(client: &Client, tab_id: &str, text: &str) -> Result<()> {
         .map(|_| ())
 }
 
-pub async fn cua_keypress(client: &Client, tab_id: &str, keys: &[String]) -> Result<()> {
+pub async fn cua_keypress(client: &impl BridgeClient, tab_id: &str, keys: &[String]) -> Result<()> {
     let id = parse_tab_id("cua_keypress", tab_id)?;
     for key in keys {
         for event_type in ["keyDown", "keyUp"] {
@@ -309,7 +309,7 @@ pub async fn cua_keypress(client: &Client, tab_id: &str, keys: &[String]) -> Res
 }
 
 pub async fn cua_scroll(
-    client: &Client,
+    client: &impl BridgeClient,
     tab_id: &str,
     x: i64,
     y: i64,
@@ -333,7 +333,7 @@ pub async fn cua_scroll(
         .map(|_| ())
 }
 
-pub async fn get_visible_dom(client: &Client, tab_id: &str) -> Result<String> {
+pub async fn get_visible_dom(client: &impl BridgeClient, tab_id: &str) -> Result<String> {
     let id = parse_tab_id("get_visible_dom", tab_id)?;
     let raw = client
         .execute_cdp(
@@ -348,7 +348,7 @@ pub async fn get_visible_dom(client: &Client, tab_id: &str) -> Result<String> {
     Ok(runtime_value_string(&raw)?.unwrap_or_else(|| raw.get().to_string()))
 }
 
-pub async fn dom_cua_click(client: &Client, tab_id: &str, node_id: &str) -> Result<()> {
+pub async fn dom_cua_click(client: &impl BridgeClient, tab_id: &str, node_id: &str) -> Result<()> {
     let id = parse_tab_id("dom_cua_click", tab_id)?;
     let node_id = parse_node_id(node_id)?;
     client
@@ -369,7 +369,7 @@ pub async fn dom_cua_click(client: &Client, tab_id: &str, node_id: &str) -> Resu
     cua_click(client, tab_id, x as i64, y as i64).await
 }
 
-pub async fn dom_cua_type(client: &Client, tab_id: &str, text: &str) -> Result<()> {
+pub async fn dom_cua_type(client: &impl BridgeClient, tab_id: &str, text: &str) -> Result<()> {
     cua_type(client, tab_id, text).await
 }
 
@@ -395,7 +395,7 @@ const BLOCKED_CDP_DOMAINS: &[&str] = &[
 /// Execute any CDP method with arbitrary params. The universal CDP escape hatch.
 /// Blocks dangerous CDP domains (Browser, Debugger, Target, etc.) for security.
 pub async fn execute_cdp_generic(
-    client: &Client,
+    client: &impl BridgeClient,
     tab_id: &str,
     method: &str,
     params: Option<Value>,
@@ -431,7 +431,7 @@ pub struct PageResource {
     pub frame_id: String,
 }
 
-pub async fn get_resource_tree(client: &Client, tab_id: &str) -> Result<Vec<PageResource>> {
+pub async fn get_resource_tree(client: &impl BridgeClient, tab_id: &str) -> Result<Vec<PageResource>> {
     let id = parse_tab_id("page_assets", tab_id)?;
     let raw = client
         .execute_cdp(id, "Page.getResourceTree", None)
@@ -440,7 +440,7 @@ pub async fn get_resource_tree(client: &Client, tab_id: &str) -> Result<Vec<Page
 }
 
 pub async fn get_resource_content(
-    client: &Client,
+    client: &impl BridgeClient,
     tab_id: &str,
     frame_id: &str,
     url: &str,
@@ -474,7 +474,7 @@ pub struct Cookie {
 }
 
 pub async fn get_cookies(
-    client: &Client,
+    client: &impl BridgeClient,
     tab_id: &str,
     urls: Option<&[String]>,
 ) -> Result<Vec<Cookie>> {
@@ -491,7 +491,7 @@ pub async fn get_cookies(
 }
 
 pub async fn set_cookie(
-    client: &Client,
+    client: &impl BridgeClient,
     tab_id: &str,
     params: Value,
 ) -> Result<()> {

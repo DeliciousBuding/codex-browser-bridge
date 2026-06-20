@@ -38,6 +38,8 @@ async fn dial_named_pipe_with_timeout(
     }
 }
 
+// ── Non-Windows: no-op stubs ──────────────────────────────────
+
 #[cfg(not(windows))]
 pub type PipeStream = tokio::io::DuplexStream;
 
@@ -45,7 +47,8 @@ pub type PipeStream = tokio::io::DuplexStream;
 pub async fn dial_named_pipe(path: &str) -> Result<PipeStream> {
     let _ = path;
     Err(crate::error::BridgeError::User(
-        "codex-browser-bridge only supports Windows named pipes".into(),
+        "codex-browser-bridge only supports Windows named pipes. \
+         On macOS/Linux, consider using WSL or a Windows VM.".into(),
     ))
 }
 
