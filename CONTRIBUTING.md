@@ -7,7 +7,7 @@ Thanks for taking the time to contribute.
 Please open an issue using the bug report template. Include:
 
 - The output of `codex-browser-bridge --version`
-- The output of `codex-browser-bridge -mode discover`, with local identifiers redacted
+- The output of `codex-browser-bridge --mode discover`, with local identifiers redacted
 - Codex Desktop version, Chrome version, Windows version
 - A minimal reproduction (which tool you called, what arguments, what response)
 
