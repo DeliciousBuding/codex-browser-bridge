@@ -510,6 +510,247 @@ pub async fn set_cookie(
         .map(|_| ())
 }
 
+// ── Locator ─────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct AxMatch {
+    pub node_id: String,
+    pub role: String,
+    pub name: String,
+    pub backend_node_id: Option<i64>,
+}
+
+/// Find elements by ARIA role and/or accessible name in the AX tree.
+pub async fn find_elements(
+    client: &Client,
+    tab_id: &str,
+    role: Option<&str>,
+    name: Option<&str>,
+    max_results: usize,
+) -> Result<Vec<AxMatch>> {
+    let raw = dom_snapshot(client, tab_id).await?;
+    let nodes = parse_ax_tree(&raw)?;
+    let mut matches = Vec::new();
+
+    for node in nodes {
+        if let Some(role_filter) = role {
+            if !node.role.eq_ignore_ascii_case(role_filter) {
+                continue;
+            }
+        }
+        if let Some(name_filter) = name {
+            if !node.name.to_ascii_lowercase().contains(&name_filter.to_ascii_lowercase()) {
+                continue;
+            }
+        }
+        matches.push(AxMatch {
+            node_id: node.node_id,
+            role: node.role,
+            name: node.name,
+            backend_node_id: node.backend_dom_node_id,
+        });
+        if matches.len() >= max_results {
+            break;
+        }
+    }
+
+    Ok(matches)
+}
+
+/// Click an element by its accessibility backend node ID.
+/// Reuses the existing DOM.resolveNode → DOM.getBoxModel → Input dispatch pipeline.
+pub async fn click_ax_element(
+    client: &Client,
+    tab_id: &str,
+    node_id: &str,
+) -> Result<()> {
+    dom_cua_click(client, tab_id, node_id).await
+}
+
+// AX tree parsing — defensive: all fields optional
+
+#[derive(Deserialize)]
+struct AxNode {
+    #[serde(rename = "nodeId")]
+    node_id: String,
+    #[serde(default)]
+    role: Option<AxValue>,
+    #[serde(default)]
+    name: Option<AxValue>,
+    #[serde(rename = "backendDOMNodeId", default)]
+    backend_dom_node_id: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct AxValue {
+    value: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AxTree {
+    nodes: Vec<AxNode>,
+}
+
+struct ParsedAxNode {
+    node_id: String,
+    role: String,
+    name: String,
+    backend_dom_node_id: Option<i64>,
+}
+
+fn parse_ax_tree(raw: &str) -> Result<Vec<ParsedAxNode>> {
+    let tree: AxTree = serde_json::from_str(raw)
+        .map_err(|err| BridgeError::Protocol(format!("parse AX tree: {err}")))?;
+    Ok(tree
+        .nodes
+        .into_iter()
+        .map(|n| ParsedAxNode {
+            node_id: n.node_id,
+            role: n.role.and_then(|r| r.value).unwrap_or_default(),
+            name: n.name.and_then(|n| n.value).unwrap_or_default(),
+            backend_dom_node_id: n.backend_dom_node_id,
+        })
+        .collect())
+}
+
+// ── Composite ───────────────────────────────────────────────────
+
+/// Navigate to URL and wait for page load. Reduces 2 MCP calls to 1.
+pub async fn nav_and_wait(
+    client: &Client,
+    tab_id: &str,
+    url: &str,
+    timeout_ms: u64,
+) -> Result<()> {
+    navigate(client, tab_id, url).await?;
+    wait_for_load(client, tab_id, timeout_ms).await?;
+    Ok(())
+}
+
+/// Click element by selector and wait for page load.
+pub async fn click_and_wait(
+    client: &Client,
+    tab_id: &str,
+    selector: &str,
+    timeout_ms: u64,
+) -> Result<()> {
+    click(client, tab_id, selector).await?;
+    wait_for_load(client, tab_id, timeout_ms).await?;
+    Ok(())
+}
+
+/// Fill multiple form fields at once, optionally submitting.
+pub async fn form_fill(
+    client: &Client,
+    tab_id: &str,
+    fields: &Value,
+    submit: Option<&str>,
+    delay_ms: u64,
+) -> Result<()> {
+    let obj = fields.as_object().ok_or_else(|| {
+        BridgeError::User("fields must be an object mapping selector to value".into())
+    })?;
+    for (selector, value) in obj {
+        if let Some(val_str) = value.as_str() {
+            fill(client, tab_id, selector, val_str).await?;
+            if delay_ms > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            }
+        }
+    }
+    if let Some(submit_sel) = submit {
+        click(client, tab_id, submit_sel).await?;
+    }
+    Ok(())
+}
+
+/// Upload files to a `<input type="file">` element via CDP.
+/// First resolves the CSS selector via Runtime.evaluate, then calls DOM.setFileInputFiles.
+/// `paths` must be validated absolute paths (use `security::validate_file_path` beforehand).
+pub async fn file_input(
+    client: &Client,
+    tab_id: &str,
+    selector: &str,
+    paths: &[String],
+) -> Result<()> {
+    let id = parse_tab_id("file_input", tab_id)?;
+
+    // 1. Resolve the file input element via Runtime.evaluate
+    let escaped_selector = selector.replace('\\', "\\\\").replace('\'', "\\'");
+    let raw = client
+        .execute_cdp(
+            id,
+            "Runtime.evaluate",
+            Some(json!({
+                "expression": format!(
+                    "document.querySelector('{}')",
+                    escaped_selector
+                ),
+                "returnByValue": false,
+            })),
+        )
+        .await?;
+
+    // 2. Extract objectId from result
+    #[derive(Deserialize)]
+    struct EvaluateResult {
+        result: EvaluateResultInner,
+    }
+    #[derive(Deserialize)]
+    struct EvaluateResultInner {
+        #[serde(rename = "objectId")]
+        object_id: Option<String>,
+        #[serde(rename = "type")]
+        _type: String,
+        #[serde(default)]
+        subtype: Option<String>,
+    }
+
+    let eval: EvaluateResult = serde_json::from_str(raw.get()).map_err(|err| {
+        BridgeError::Protocol(format!("parse Runtime.evaluate result: {err}"))
+    })?;
+
+    let object_id = eval
+        .result
+        .object_id
+        .filter(|_| eval.result._type == "object" && eval.result.subtype.as_deref() == Some("node"))
+        .ok_or_else(|| BridgeError::User(format!("File input not found: {selector}")))?;
+
+    // 3. Set files on the resolved node
+    client
+        .execute_cdp(
+            id,
+            "DOM.setFileInputFiles",
+            Some(json!({
+                "objectId": object_id,
+                "files": paths,
+            })),
+        )
+        .await
+        .map(|_| ())
+}
+
+// ── Dialog ──────────────────────────────────────────────────────
+
+/// Handle a JavaScript dialog (alert, confirm, prompt) via CDP Page.handleJavaScriptDialog.
+pub async fn handle_dialog(
+    client: &Client,
+    tab_id: &str,
+    action: &str,
+    prompt_text: Option<&str>,
+) -> Result<()> {
+    let id = parse_tab_id("dialog", tab_id)?;
+    let mut params = serde_json::Map::new();
+    params.insert("accept".into(), json!(action == "accept"));
+    if let Some(text) = prompt_text {
+        params.insert("promptText".into(), json!(text));
+    }
+    client
+        .execute_cdp(id, "Page.handleJavaScriptDialog", Some(serde_json::Value::Object(params)))
+        .await
+        .map(|_| ())
+}
+
 #[derive(Deserialize)]
 #[allow(dead_code)]
 struct FrameTree {
@@ -623,23 +864,7 @@ pub fn parse_tab_id(action: &str, tab_id: &str) -> Result<i64> {
         .map_err(|_| BridgeError::User(format!("{action} requires numeric tab_id, got {tab_id:?}")))
 }
 
-pub fn validate_url(raw_url: &str) -> Result<()> {
-    let lower = raw_url.trim().to_ascii_lowercase();
-    for scheme in [
-        "file:",
-        "javascript:",
-        "data:",
-        "vbscript:",
-        "about:",
-        "chrome:",
-        "edge:",
-    ] {
-        if lower.starts_with(scheme) {
-            return Err(BridgeError::User(format!("blocked URL scheme {scheme:?}")));
-        }
-    }
-    Ok(())
-}
+use crate::security::validate_url;
 
 fn normalize_id_value(raw_id: &Value) -> String {
     match raw_id {

@@ -2,11 +2,13 @@ pub mod browser;
 pub mod cli;
 pub mod client;
 pub mod discovery;
+pub mod doctor;
 pub mod error;
 pub mod logging;
 pub mod mcp;
 pub mod pipe;
 pub mod protocol;
+pub mod security;
 
 #[doc(hidden)]
 pub mod browser_test_support {

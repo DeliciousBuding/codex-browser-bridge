@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.0] - 2026-06-20
+
+### Added — 8 new MCP tools (28 → 36)
+
+- **`codex_file_input`** (`[Input]`): Upload files to `<input type=file>` via `DOM.setFileInputFiles`. Security: path traversal defense via `canonicalize` + prefix check, max 10 MB, regular files only. Configurable via `CODEX_BRIDGE_UPLOAD_BASE` env.
+- **`codex_dialog`** (`[Page]`): Handle JavaScript dialogs (alert/confirm/prompt) via `Page.handleJavaScriptDialog`. Accept/dismiss with optional prompt text.
+- **`codex_find_element`** (`[DOM]`): Find elements by ARIA role and/or accessible name in the AX tree. Returns node IDs for use with `codex_click_element`.
+- **`codex_click_element`** (`[Input]`): Click by accessibility node ID via `DOM.resolveNode` → `DOM.getBoxModel` → Input dispatch. No JS injection.
+- **`codex_nav_and_wait`** (`[Navigation]`): Composite: navigate + wait_for_load in one MCP call.
+- **`codex_click_and_wait`** (`[Input]`): Composite: click + wait_for_load in one MCP call.
+- **`codex_form_fill`** (`[Input]`): Fill multiple form fields via `{selector: value}` map, optionally submit.
+- **`codex_doctor`** (`[Session]`): Self-diagnostics — enumerate pipes, probe connectivity, report latencies and browser versions.
+
+### Architecture
+
+- **mcp.rs module split**: 815-line monolith → `src/mcp/{mod,types,schema,handlers}.rs`, each <400 lines.
+- **Centralized security**: `src/security.rs` — `validate_url`, `validate_file_path` with path traversal prevention.
+- **Tool profiles**: `basic` (25 tools) / `network` (32) / `full` (36) via `CODEX_BRIDGE_PROFILE` env or `--profile` CLI flag.
+
+### Changed
+
+- `validate_url` moved from `browser.rs` → `security.rs` (single canonical source).
+- `Tool` visibility relaxed to `pub(crate)` for profile filtering.
+- `Server` struct gains `new_with_profile()` constructor.
+
+### Documentation
+
+- Updated ROADMAP.md with v1.9.0 completion status and SUPER scores.
+
 ## [1.8.0] - 2026-06-20
 
 ### Added
