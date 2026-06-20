@@ -10,7 +10,7 @@ jobs:
   rust:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.85.0
         with:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
@@ -46,7 +46,7 @@ jobs:
   npm:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
