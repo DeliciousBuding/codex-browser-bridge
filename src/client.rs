@@ -164,11 +164,11 @@ impl Client {
                 .await
             {
                 Ok(raw) => return Ok(raw),
-                Err(err) if is_session_invalid_error(&err) => {
-                    // Session stale — invalidate cache and fall through to full re-attach
+                Err(_err) => {
+                    // Any error from sticky path: invalidate cache and fall through to full re-attach.
+                    // This avoids persistent-failure loops when stale sessions produce unrecognized errors.
                     self.inner.attached_tabs.lock().await.remove(&tab_id);
                 }
-                Err(err) => return Err(err),
             }
         }
 
@@ -207,6 +207,16 @@ impl Client {
     /// Invalidate the sticky attach cache for a tab (call on tab close or finalize).
     pub async fn invalidate_attachment(&self, tab_id: i64) {
         self.inner.attached_tabs.lock().await.remove(&tab_id);
+    }
+
+    /// Mark a tab as attached (call after manual attach, e.g. from claim_user_tab).
+    pub async fn mark_attached(&self, tab_id: i64) {
+        self.inner.attached_tabs.lock().await.insert(tab_id, true);
+    }
+
+    /// Clear all attachment state (call on session finalize).
+    pub async fn clear_attachments(&self) {
+        self.inner.attached_tabs.lock().await.clear();
     }
 
     async fn tab_lock(&self, tab_id: i64) -> Arc<Mutex<()>> {
@@ -339,14 +349,13 @@ fn is_session_invalid_error(err: &BridgeError) -> bool {
     let msg = err.to_string().to_ascii_lowercase();
     [
         "target closed",
-        "detached",
+        "not attached",
+        "no session",
         "session not found",
         "no target",
         "target does not exist",
         "cannot find target",
         "execution context destroyed",
-        "inspected target navigated",
-        "frame was detached",
     ]
     .iter()
     .any(|needle| msg.contains(needle))
@@ -372,7 +381,7 @@ fn check_cdp_error(method: &str, raw: &RawValue) -> Result<()> {
             return Err(BridgeError::Cdp {
                 method: method.to_string(),
                 code: err.code,
-                message: err.message,
+                message: err.message.replace('\n', "\\n").replace('\r', "\\r"),
             });
         }
     }

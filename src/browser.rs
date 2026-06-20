@@ -78,6 +78,8 @@ pub async fn claim_user_tab(client: &Client, tab_id: &str) -> Result<Tab> {
     let _ = client
         .send_request("attach", Some(json!({ "tabId": id })))
         .await;
+    // Mark as attached so subsequent CDP calls skip the detach+attach cycle
+    client.mark_attached(id).await;
     Ok(tab.normalize())
 }
 
