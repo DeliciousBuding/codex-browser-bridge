@@ -86,7 +86,7 @@ npm i -g @delicious233/codex-browser-bridge
 
 Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 
-> 💡 **Agent skill 已内置。** 仓库 `.agents/skills/codex-browser/SKILL.md` 包含 LLM agent 使用全部 36 个工具的操作手册。支持项目级 skill 的 MCP 客户端会自动加载。
+> 💡 **Agent skill 已内置。** 仓库 [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) 包含 LLM agent 使用全部 36 个工具的操作手册。将其 symlink 或复制到 agent 的 skills 目录即可（`~/.claude/skills/`、`~/.codex/skills/` 等）。
 
 ## 全部 36 个 MCP 工具
 
@@ -241,7 +241,7 @@ src/
 ## 相关资源
 
 - [examples/](examples/) — MCP 配置示例（Claude Code, Cursor, OpenClaw, Hermes Agent）
-- [.agents/skills/codex-browser/](.agents/skills/codex-browser/SKILL.md) — Agent skill（LLM 使用指南）
+- [skills/codex-browser/](skills/codex-browser/SKILL.md) — Agent skill（LLM 使用指南）
 - [ROADMAP.md](ROADMAP.md) — 完整路线图（含 SUPER 评分）
 - [CHANGELOG.md](CHANGELOG.md) — 发布历史
 - [CONTRIBUTING.md](CONTRIBUTING.md) — 开发配置与规范

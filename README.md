@@ -86,7 +86,7 @@ Find the login button and click it.
 
 For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 
-> 💡 **Agent skill available.** This repo includes a project-level skill at `.agents/skills/codex-browser/SKILL.md` that teaches LLM agents how to use all 36 tools effectively. MCP clients that support project-level skills will auto-load it.
+> 💡 **Agent skill available.** This repo includes a project-level skill at [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) that teaches LLM agents how to use all 36 tools effectively. Symlink or copy it into your agent's skills directory (`~/.claude/skills/`, `~/.codex/skills/`, etc.).
 
 ## All 36 MCP Tools
 
@@ -241,7 +241,7 @@ See [ROADMAP.md](ROADMAP.md). Highlights:
 ## Related
 
 - [examples/](examples/) — MCP configs for Claude Code, Cursor, OpenClaw, Hermes Agent
-- [.agents/skills/codex-browser/](.agents/skills/codex-browser/SKILL.md) — Agent skill (LLM usage guide)
+- [skills/codex-browser/](skills/codex-browser/SKILL.md) — Agent skill (LLM usage guide)
 - [ROADMAP.md](ROADMAP.md) — Full roadmap with SUPER scores
 - [CHANGELOG.md](CHANGELOG.md) — Release history
 - [CONTRIBUTING.md](CONTRIBUTING.md) — Dev setup and conventions
