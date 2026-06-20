@@ -17,6 +17,9 @@ jobs:
       - name: Check Rust rewrite
         shell: bash
         run: cargo check --locked
+      - name: Clippy lint
+        shell: bash
+        run: cargo clippy --locked -- -D warnings
       - name: Test Rust rewrite
         shell: bash
         run: cargo test --locked
