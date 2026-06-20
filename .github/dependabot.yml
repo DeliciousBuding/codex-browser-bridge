@@ -1,37 +1,10 @@
 version: 2
 updates:
-  - package-ecosystem: gomod
-    directory: /
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: chore(deps)
-    labels:
-      - dependencies
-      - go
-
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: chore(ci)
-    labels:
-      - dependencies
-      - github-actions
-
-  - package-ecosystem: npm
-    directory: /npm
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 3
-    commit-message:
-      prefix: chore(npm)
-    labels:
-      - dependencies
-      - npm
+      interval: "monthly"
+    ignore:
+      # dtolnay/rust-toolchain tags are Rust versions, not action versions.
+      # Bump manually when MSRV changes in Cargo.toml.
+      - dependency-name: "dtolnay/rust-toolchain"
