@@ -24,14 +24,25 @@
     "codex",
     "chrome",
     "mcp",
+    "mcp-server",
     "browser",
+    "browser-automation",
     "claude-code",
     "agent",
     "automation",
-    "devtools"
+    "cdp",
+    "devtools",
+    "devtools-protocol",
+    "json-rpc",
+    "named-pipe",
+    "rust"
   ],
   "author": "DeliciousBuding",
   "license": "MIT",
+  "homepage": "https://github.com/DeliciousBuding/codex-browser-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/DeliciousBuding/codex-browser-bridge/issues"
+  },
   "engines": {
     "node": ">=18"
   },

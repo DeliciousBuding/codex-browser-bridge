@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for taking the time to contribute. This is a small project, and issues and PRs are both welcome.
+Thanks for taking the time to contribute.
 
 ## Reporting bugs
 
@@ -20,39 +20,28 @@ See [SECURITY.md](SECURITY.md) and use the private reporting path there.
 ## Development setup
 
 Requirements:
-
-- Go 1.23+
-- Rust 1.85+ for the `rewrite/rust-full` branch
-- Windows (the bridge depends on Windows named pipes via `go-winio`)
-- Codex Desktop and the Codex Chrome Extension running, if you want to test against a real pipe
+- Rust 1.85+
+- Windows (the bridge depends on Windows named pipes)
+- Codex Desktop and the Codex Chrome Extension running (for real-pipe testing)
 
 Build and test:
 
 ```bash
 git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
 cd codex-browser-bridge
-make build
-make test
+cargo check --locked           # fast check
+cargo test --locked             # run all tests
+cargo clippy --locked -- -D warnings  # lint
+cargo build --locked --release  # release build
 ```
 
-The full test suite is hermetic. It uses `net.Pipe` to simulate the Codex pipe, so `go test ./...` runs without Codex Desktop.
-
-Rust rewrite branch checks:
-
-```bash
-cargo check --locked
-cargo test --locked
-cargo build --locked --release
-```
-
-The Rust binary is written to `target/release/codex-browser-bridge.exe`. Use the same MCP config and pass `--mode mcp` when testing that binary locally.
+The full test suite is hermetic. It uses mock named pipes to simulate the Codex pipe, so `cargo test --locked` runs without Codex Desktop. E2E tests in `tests/cdp_tools_e2e.rs` use real Windows named pipe pairs.
 
 ## Code style
 
-- Run `gofmt`/`goimports` before committing. CI enforces this.
-- `make test` runs `go vet ./...` and `go test -race -cover ./...`.
-- Run `cargo fmt`, `cargo check --locked`, and `cargo test --locked` for Rust rewrite changes.
-- `golangci-lint run` is wired into CI; install it locally with [the official instructions](https://golangci-lint.run/usage/install/) and run it before pushing.
+- Run `cargo fmt` before committing. CI enforces clippy with zero warnings.
+- `cargo test --locked` runs all unit, integration, and e2e tests.
+- `cargo clippy --locked -- -D warnings` is wired into CI; run it locally before pushing.
 
 ## Commits
 
@@ -64,27 +53,27 @@ The Rust binary is written to `target/release/codex-browser-bridge.exe`. Use the
 
 - Branch from `main`.
 - Reference the related issue in the PR description, if any.
-- Add or update tests for behavior changes. The wire-format invariants in `internal/client/browser_rpc_test.go` document regressions that were hard to diagnose.
+- Add or update tests for behavior changes.
 - Update `CHANGELOG.md` under `## [Unreleased]`.
 - Update both `README.md` and `README.zh-CN.md` if you add or remove tools.
 
 ## Adding a new MCP tool
 
-There are typically four places to touch:
+Four places to touch:
 
-1. `internal/client/browser.go`: add the client method. If it's a CDP-based tool, use `cdpWithAttach` so the debugger is attached first.
-2. `internal/mcp/server.go`: register the tool in `registerTools()` and add a handler that returns `[]Content`.
-3. `internal/client/browser_rpc_test.go`: lock in the wire format with a `withRecordingServer`-based test.
-4. `internal/mcp/handlers_test.go`: add an integration test that exercises the full client-to-handler path.
+1. `src/browser.rs`: add the browser helper (CDP wrapper, parsing logic)
+2. `src/mcp.rs`: add `ToolHandler` variant, handler function, and tool registration in `registered_tools()`
+3. `tests/cdp_tools_e2e.rs`: add an e2e test with `client_server_pair()` + mock server
+4. `src/browser.rs` test module: add unit tests for CDP response parsing
 
-Then update the count in `internal/mcp/server_test.go:TestRegisteredToolCount` and document the tool in both READMEs.
+Then document the tool in both READMEs and update `CHANGELOG.md`.
 
 ## Releasing
 
 Maintainer-only:
 
-1. Bump `npm/package.json` version.
+1. Bump version in `Cargo.toml` and `npm/package.json`.
 2. Move `## [Unreleased]` notes in `CHANGELOG.md` to the new version section.
 3. Open a `release/vX.Y.Z` PR and merge it.
 4. Tag from `main`: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
-5. The release workflow builds Windows binaries (amd64 + arm64), generates checksums, publishes a GitHub Release, embeds those checksums into the npm package, and publishes npm with provenance.
+5. The release workflow builds Windows binaries (x64 + arm64), generates checksums, publishes a GitHub Release, embeds those checksums into the npm package, and publishes npm with provenance.
