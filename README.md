@@ -6,6 +6,7 @@
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
     Let Claude Code and other MCP agents control your existing Chrome browser through Codex Desktop's browser bridge.
+    <br>36 MCP tools. Pure Rust. Single binary. Zero config.
   </p>
 </p>
 
@@ -27,329 +28,180 @@
 
 ---
 
-`codex-browser-bridge` exposes Codex Desktop's Chrome browser bridge as an MCP server.
+## What It Does
 
-It connects to the local Codex browser named pipe, speaks the same length-prefixed JSON-RPC protocol, and provides browser-control tools to Claude Code or any MCP-compatible agent.
+`codex-browser-bridge` turns your **local Codex Desktop + Chrome** into an MCP server that any agent can control.
 
-## Why
+No browser profile copying. No WebDriver. No remote setup. It connects to the Codex browser named pipe that already exists on your machine, speaks the same JSON-RPC protocol, and exposes 36 MCP tools for browser automation.
 
-Codex Desktop can talk to its Chrome extension through a privileged native pipe. Other agents, such as Claude Code, cannot directly access that internal bridge.
+**Your agent can:**
 
-This project reuses the local browser bridge that already exists on your machine and wraps it as an MCP server.
+- Open, close, and switch browser tabs
+- Navigate pages, go back/forward, wait for loads
+- Capture screenshots (viewport PNG)
+- Read DOM / accessibility trees (including ARIA role+name search)
+- Click, type, scroll — via CSS selectors, coordinates, or accessibility node IDs
+- Execute arbitrary JavaScript in the page context
+- Upload files to `<input type=file>` elements
+- Handle JavaScript dialogs (alert / confirm / prompt)
+- Read and set browser cookies
+- Run raw CDP commands (Chrome DevTools Protocol escape hatch)
+- Self-diagnose with `codex_doctor`
 
-That means an agent can:
+Useful when an agent needs to work with pages that require a real browser session — dashboards, logged-in web apps, local dev servers, documentation sites.
 
-- inspect your current browser tabs
-- claim an existing tab
-- open and close tabs
-- navigate pages
-- capture screenshots
-- read DOM / accessibility snapshots
-- click, type, scroll, and evaluate JavaScript
-
-Useful when an agent needs to work with pages that require a real browser session, such as dashboards, logged-in web apps, local development servers, or documentation sites.
-
-## Status
-
-Version 1.7.0 is a local Windows tool for Codex Desktop and the Codex Chrome Extension. It supports both known Codex browser pipe name formats:
-
-- `codex-browser-use-<uuid>`
-- `codex-browser-use\<uuid>`
-
-Run the bridge for local development and controlled automation on a single trusted machine.
-
-The bridge binary is pure Rust. Tagged releases build x64 and arm64 Windows binaries, published to GitHub Releases and npm.
-
-## Features
-
-- MCP server over stdio
-- Single Windows binary
-- No browser profile copying
-- Uses your existing Chrome session
-- Auto-discovers `codex-browser-use-*` named pipes
-- Talks to Codex Desktop's extension host through JSON-RPC
-- Uses Chrome DevTools Protocol commands for page control
-- Includes an interactive CLI mode for debugging
-
-## Requirements
-
-- Windows
-- Chrome
-- Codex Desktop running
-- Codex Chrome Extension installed and enabled
-- Rust 1.85+
-
-> The bridge connects to local named pipes created by Codex Desktop. If no pipe is found, start Codex Desktop first and make sure the extension is active.
-
-## Installation
-
-### Recommended: npm
+## Quick Install
 
 ```bash
 npm i -g @delicious233/codex-browser-bridge
 ```
 
-### Alternative: Download a release
+Or download from [GitHub Releases](https://github.com/DeliciousBuding/codex-browser-bridge/releases).
 
-<https://github.com/DeliciousBuding/codex-browser-bridge/releases>
+**Requires:** Windows · Chrome · Codex Desktop · Codex Chrome Extension
 
-Download `codex-browser-bridge.exe` and place it somewhere in your `PATH`.
+## 30-Second Setup (Claude Code)
 
-### Alternative: Build from source
-
-```bash
-git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
-cd codex-browser-bridge
-cargo build --locked --release
-```
-
-## Quick Start with Claude Code
-
-Add the MCP server to your Claude Code settings.
+Add to your Claude Code MCP settings:
 
 ```json
 {
   "mcpServers": {
     "codex-browser": {
       "command": "codex-browser-bridge",
-      "args": ["-mode", "mcp"],
+      "args": ["--mode", "mcp"],
       "transport": "stdio"
     }
   }
 }
 ```
 
-If you built from source, use the absolute path instead:
+Restart Claude Code. Then ask:
 
-```json
-{
-  "mcpServers": {
-    "codex-browser": {
-      "command": "D:/path/to/codex-browser-bridge/bin/codex-browser-bridge.exe",
-      "args": ["-mode", "mcp"],
-      "transport": "stdio"
-    }
-  }
-}
 ```
-
-Restart Claude Code after editing the settings file.
-
-Then ask the agent things like:
-
-```text
 List my open browser tabs.
+Open https://example.com and take a screenshot.
+Find the login button and click it.
 ```
 
-```text
-Open https://example.com in a new tab and take a screenshot.
-```
+For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 
-```text
-Claim my current documentation tab and summarize what is visible.
-```
+> 💡 **Agent skill available.** This repo includes a project-level skill at `.agents/skills/codex-browser/SKILL.md` that teaches LLM agents how to use all 36 tools effectively. MCP clients that support project-level skills will auto-load it.
+
+## All 36 MCP Tools
+
+### Tab Management `[Tabs]`
+| Tool | Description |
+|------|-------------|
+| `codex_list_tabs` | List tabs owned by this session |
+| `codex_create_tab` | Create a new blank tab |
+| `codex_close_tab` | Close a tab by ID |
+| `codex_user_tabs` | List all browser tabs (including unclaimed) |
+| `codex_claim_tab` | Claim an existing user tab |
+
+### Navigation `[Navigation]`
+| Tool | Description |
+|------|-------------|
+| `codex_navigate` | Navigate to URL |
+| `codex_reload` | Reload current page |
+| `codex_navigate_back` | Go back one history entry |
+| `codex_navigate_forward` | Go forward one history entry |
+| `codex_wait_for_load` | Poll `document.readyState` until complete |
+| `codex_nav_and_wait` | Navigate + wait (1 call instead of 2) |
+
+### DOM & Accessibility `[DOM]`
+| Tool | Description |
+|------|-------------|
+| `codex_dom_snapshot` | Full accessibility tree with node IDs |
+| `codex_dom_get_visible` | Human-readable visible DOM tree |
+| `codex_dom_click` | Click by accessibility node ID |
+| `codex_find_element` | Find elements by ARIA role + name |
+| `codex_click_element` | Click element from `codex_find_element` result |
+
+### Page Inspection `[Page]`
+| Tool | Description |
+|------|-------------|
+| `codex_screenshot` | Capture viewport PNG screenshot |
+| `codex_evaluate` | Execute JavaScript, return JSON result |
+| `codex_page_assets` | List page resources (images, CSS, JS, fonts) |
+| `codex_dialog` | Handle alert / confirm / prompt |
+
+### Input & Interaction `[Input]`
+| Tool | Description |
+|------|-------------|
+| `codex_click` | Click by CSS selector (JS click) |
+| `codex_fill` | Fill input by CSS selector |
+| `codex_cua_click` | Click at exact coordinates (CDP mouse events) |
+| `codex_cua_type` | Type text at current focus |
+| `codex_cua_keypress` | Press key sequence (Enter, Ctrl+C, etc.) |
+| `codex_cua_scroll` | Scroll at coordinates by delta |
+| `codex_click_and_wait` | Click + wait for load (1 call) |
+| `codex_form_fill` | Fill multiple fields from `{selector: value}` map |
+| `codex_file_input` | Upload files to `<input type=file>` |
+
+### Network `[Network]`
+| Tool | Description |
+|------|-------------|
+| `codex_network_cookies` | Read cookies (values redacted by default) |
+| `codex_network_set_cookie` | Set a browser cookie |
+
+### CDP Escape Hatch `[CDP]`
+| Tool | Description |
+|------|-------------|
+| `codex_execute_cdp` | Execute any CDP command (allowlist-protected) |
+
+### Session `[Session]`
+| Tool | Description |
+|------|-------------|
+| `codex_name_session` | Name the current session |
+| `codex_finalize` | Clean up tabs, release resources |
+| `codex_get_info` | Get extension backend metadata |
+| `codex_doctor` | Self-diagnostics (pipe health, latency, version) |
 
 ## CLI Usage
 
-The binary has three modes.
-
-### MCP mode
-
-Default mode. Used by Claude Code or other MCP clients.
-
 ```bash
-codex-browser-bridge -mode mcp
+# MCP mode (default)
+codex-browser-bridge --mode mcp
+
+# List active pipes
+codex-browser-bridge --mode discover
+
+# Interactive REPL for debugging
+codex-browser-bridge --mode cli
+
+# With tool profiles
+codex-browser-bridge --mode mcp --profile basic     # 25 tools
+codex-browser-bridge --mode mcp --profile network   # 32 tools
+codex-browser-bridge --mode mcp --profile full      # all 36 (default)
 ```
-
-### Discover mode
-
-Lists active Codex browser named pipes.
-
-```bash
-codex-browser-bridge -mode discover
-```
-
-Example output:
-
-```json
-[
-  {
-    "Name": "codex-browser-use-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-    "UUID": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-  }
-]
-```
-
-### Interactive CLI mode
-
-Useful for debugging the bridge without an MCP client.
-
-```bash
-codex-browser-bridge -mode cli
-```
-
-Connect to a specific pipe:
-
-```bash
-codex-browser-bridge -mode cli -pipe "codex-browser-use-<uuid>"
-```
-
-Available CLI commands:
-
-```text
-tabs
-create
-close <tab_id>
-user-tabs
-claim <tab_id>
-nav <tab_id> <url>
-snapshot <tab_id>
-screenshot <tab_id>
-info
-ping
-try <method> [json_params]
-quit
-```
-
-CLI output can include pipe IDs, tab titles, full URLs, screenshots, and page text from logged-in tabs. Redact that output before posting bug reports or feature requests.
-
-## MCP Tools
-
-### Tab management
-
-| Tool               | Description                                     |
-| ------------------ | ----------------------------------------------- |
-| `codex_list_tabs`  | List tabs managed by the current bridge session |
-| `codex_create_tab` | Create a new browser tab                        |
-| `codex_close_tab`  | Close a browser tab                             |
-| `codex_user_tabs`  | List open tabs across browser windows           |
-| `codex_claim_tab`  | Claim an existing user tab for automation       |
-
-### Navigation
-
-| Tool                       | Description                                         |
-| -------------------------- | --------------------------------------------------- |
-| `codex_navigate`           | Navigate a tab to a URL                             |
-| `codex_navigate_back`      | Navigate a tab back one entry in its history        |
-| `codex_navigate_forward`   | Navigate a tab forward one entry in its history     |
-| `codex_reload`             | Reload a tab                                        |
-| `codex_wait_for_load`      | Poll `document.readyState` until `complete`         |
-
-### Page inspection
-
-| Tool                    | Description                                  |
-| ----------------------- | -------------------------------------------- |
-| `codex_screenshot`      | Capture a screenshot (returns MCP image). `fullPage` is reserved for a future release. The current implementation captures the viewport. |
-| `codex_dom_snapshot`    | Get an accessibility tree snapshot           |
-| `codex_dom_get_visible` | Get a simplified visible DOM tree (human-readable; use codex_dom_snapshot for node IDs usable with codex_dom_click) |
-| `codex_evaluate`        | Evaluate JavaScript in the page context      |
-| `codex_get_info`        | Get backend information from the extension   |
-
-### Interaction
-
-| Tool                 | Description                      |
-| -------------------- | -------------------------------- |
-| `codex_click`        | Click an element by CSS selector |
-| `codex_fill`         | Fill an input by CSS selector    |
-| `codex_dom_click`    | Click a DOM node by accessibility node ID from codex_dom_snapshot |
-| `codex_cua_click`    | Click by screen coordinates      |
-| `codex_cua_type`     | Type text at the current focus   |
-| `codex_cua_keypress` | Press keyboard keys              |
-| `codex_cua_scroll`   | Scroll by coordinates            |
-
-### Session
-
-| Tool                 | Description                                         |
-| -------------------- | --------------------------------------------------- |
-| `codex_name_session` | Assign a human-readable name to the browser session |
-| `codex_finalize`     | Finalize the session and clean up tabs              |
-
-### CDP & Network (new in v1.7.0)
-
-| Tool                       | Description                                              |
-| -------------------------- | -------------------------------------------------------- |
-| `codex_execute_cdp`        | Execute any CDP command (allowlist-protected)            |
-| `codex_page_assets`        | List page resources (images, fonts, CSS, JS) via CDP     |
-| `codex_network_cookies`    | Get cookies (values redacted by default)                 |
-| `codex_network_set_cookie` | Set a browser cookie (URL validated)                     |
 
 ## Architecture
 
-```text
-MCP Client
-  Claude Code / other agent
-        │
+```
+MCP Client (Claude Code / Cursor / OpenClaw)
         │ stdio JSON-RPC
         ▼
-codex-browser-bridge
-  Rust binary
-        │
+codex-browser-bridge (Rust binary)
         │ length-prefixed JSON-RPC frames
         ▼
-Windows Named Pipe
-  \\.\pipe\codex-browser-use-*
+Windows Named Pipe \\.\pipe\codex-browser-use-*
         │
         ▼
-Codex Desktop extension host
-        │
-        ▼
-Codex Chrome Extension
-        │
-        ▼
-Chrome tabs
+Codex Desktop → Chrome Extension → Chrome tabs
 ```
 
-## How It Works
-
-1. The bridge searches for local named pipes matching `codex-browser-use-*`.
-2. It connects to the selected pipe through the Windows named pipe API.
-3. Every request is encoded as a 4-byte little-endian length prefix followed by a JSON-RPC payload.
-4. Browser operations are sent to the Codex extension host.
-5. Page-level operations use Chrome DevTools Protocol commands such as `Page.navigate`, `Page.captureScreenshot`, `Runtime.evaluate`, and `Input.dispatchMouseEvent`.
-6. The MCP layer exposes these operations as `codex_*` tools.
-
-## Security Notes
+## Security
 
 This tool gives an agent access to your active browser session.
 
-Use it with the same caution you would apply to browser automation tools:
-
-- do not expose the bridge to a network port
-- do not run it for untrusted MCP clients
-- review agent actions before allowing sensitive operations
-- avoid using it on pages containing passwords, payment details, private tokens, or production admin consoles
-- remember that claimed tabs may already be logged in
-- redact tab titles, URLs, DOM text, screenshots, pipe IDs, and debug logs before sharing output
-
-The project is intended for local development and controlled automation.
-
-## Troubleshooting
-
-### No pipe found
-
-```text
-No codex-browser-use pipes found. Is Codex Desktop running?
-```
-
-Check:
-
-- Codex Desktop is running
-- Chrome is running
-- Codex Chrome Extension is installed and enabled
-- the extension has been initialized by Codex Desktop
-
-### Claude Code does not show the tools
-
-Check:
-
-- the binary is in `PATH`
-- the MCP server config points to the correct executable
-- Claude Code was restarted after editing settings
-- `codex-browser-bridge -mode discover` works in a terminal
-
-### CDP command fails
-
-Some browser operations require the bridge to attach to the tab before sending CDP commands. If a tab was opened outside the bridge, list user tabs first, then claim the target tab.
+- Never expose to a network port
+- Only run for trusted MCP clients
+- Review agent actions before allowing sensitive operations
+- Avoid using on pages with passwords, payments, or admin consoles
+- Redact tab titles, URLs, DOM text, screenshots before sharing output
+- `codex_file_input` enforces path traversal prevention (canonicalize + prefix check, 10 MB limit)
+- Cookie values redacted by default; CDP allowlist blocks dangerous domains
 
 ## Development
 
@@ -357,29 +209,47 @@ Some browser operations require the bridge to attach to the tab before sending C
 git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
 cd codex-browser-bridge
 
-cargo check --locked          # fast check
-cargo test --locked            # run all tests
-cargo clippy --locked -- -D warnings  # lint
-cargo build --locked --release # release build → target/release/codex-browser-bridge.exe
+cargo check --locked
+cargo test --locked
+cargo clippy --locked -- -D warnings
+cargo build --locked --release
+```
+
+Source layout:
+
+```
+src/
+  mcp/          MCP server (mod, types, schema, handlers, profiles)
+  browser.rs    CDP + browser operations
+  client.rs     Named pipe transport + sticky attach
+  security.rs   URL + file path validation
+  doctor.rs     Pipe diagnostics
+  cli.rs        Interactive debug REPL
+  discovery.rs  Pipe auto-discovery
+  protocol.rs   Length-prefixed JSON-RPC frames
 ```
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for the full project roadmap. Highlights:
+See [ROADMAP.md](ROADMAP.md). Highlights:
 
-- `codex_fullpage_screenshot` — true full-page capture via CDP clip + scroll compose
-- `codex_network_monitor` — request/response inspection via `Network.enable`
+- `codex_network_monitor` — request/response inspection
 - `codex_emulate_device` — mobile viewport emulation
-- Non-Windows transport abstraction (WSL / Unix socket fallback)
+- `codex_storage` — localStorage / sessionStorage access
+- v2.0.0: Cross-platform (macOS / Linux via Unix domain sockets)
+
+## Related
+
+- [examples/](examples/) — MCP configs for Claude Code, Cursor, OpenClaw, Hermes Agent
+- [.agents/skills/codex-browser/](.agents/skills/codex-browser/SKILL.md) — Agent skill (LLM usage guide)
+- [ROADMAP.md](ROADMAP.md) — Full roadmap with SUPER scores
+- [CHANGELOG.md](CHANGELOG.md) — Release history
+- [CONTRIBUTING.md](CONTRIBUTING.md) — Dev setup and conventions
 
 ## License
 
-MIT License.
-
-## Project Relationship
-
-Maintained independently from OpenAI, Codex Desktop, Anthropic, Claude Code, Google, and Chrome.
+MIT. Maintained independently from Codex / Anthropic / Google.
 
 ## Acknowledgments
 
-Thanks to [LINUX DO](https://linux.do/) for the community support and feedback.
+Thanks to [LINUX DO](https://linux.do/) for community support and feedback.
