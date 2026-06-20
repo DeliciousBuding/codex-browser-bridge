@@ -40,3 +40,6 @@ vendor/
 
 # Rust
 target/
+
+# Ask-GPT artifacts (never commit to public repo)
+docs/ask-gpt/
