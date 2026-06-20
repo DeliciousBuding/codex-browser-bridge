@@ -13,6 +13,26 @@ use crate::error::{BridgeError, Result};
 use crate::pipe::{dial_named_pipe, PipeStream};
 use crate::protocol::{self, Request, Response};
 
+/// Abstract interface for communicating with the Codex browser pipe.
+///
+/// Enables mock implementations for fast unit testing without a real named pipe.
+pub trait BridgeClient {
+    /// Send a JSON-RPC request and return the result.
+    fn send_request(
+        &self,
+        method: &str,
+        params: Option<Value>,
+    ) -> impl std::future::Future<Output = Result<Box<RawValue>>> + Send;
+
+    /// Execute a CDP command on a tab with attach/detach lifecycle.
+    fn execute_cdp(
+        &self,
+        tab_id: i64,
+        method: &str,
+        params: Option<Value>,
+    ) -> impl std::future::Future<Output = Result<Box<RawValue>>> + Send;
+}
+
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 type PendingMap = HashMap<u64, oneshot::Sender<Response>>;
@@ -238,6 +258,26 @@ impl Client {
         let mut writer = self.inner.writer.lock().await;
         let _ = writer.shutdown().await;
         self.inner.pending.lock().await.clear();
+    }
+}
+
+impl BridgeClient for Client {
+    async fn send_request(
+        &self,
+        method: &str,
+        params: Option<Value>,
+    ) -> Result<Box<RawValue>> {
+        self.send_request_with_timeout(method, params, DEFAULT_REQUEST_TIMEOUT)
+            .await
+    }
+
+    async fn execute_cdp(
+        &self,
+        tab_id: i64,
+        method: &str,
+        params: Option<Value>,
+    ) -> Result<Box<RawValue>> {
+        self.execute_cdp(tab_id, method, params).await
     }
 }
 
