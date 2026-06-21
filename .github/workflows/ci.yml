@@ -75,3 +75,19 @@ jobs:
             }
           }
           NODE
+
+  test-lib:
+    # The reconnect tests in client.rs use tokio duplex mocks under
+    # cfg(not(windows)) — run them on Linux where PipeStream = DuplexStream.
+    # The shipped binary stays Windows-only; this job only exercises
+    # platform-agnostic logic (reconnect state machine, frame round-trip).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - name: Test lib (incl. reconnect tests)
+        shell: bash
+        run: cargo test --locked --lib
+      - name: Clippy lib
+        shell: bash
+        run: cargo clippy --locked --lib -- -D warnings

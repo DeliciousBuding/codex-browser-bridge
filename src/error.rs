@@ -8,6 +8,12 @@ pub enum BridgeError {
     #[error("pipe I/O: {0}")]
     PipeIo(#[from] std::io::Error),
 
+    /// The bridge connection is down (read loop exited / writer reclaimed /
+    /// reconnect failed). The caller may safely retry — a retry can trigger
+    /// an automatic reconnect.
+    #[error("bridge connection is down: {0}")]
+    Connection(String),
+
     #[error("protocol: {0}")]
     Protocol(String),
 

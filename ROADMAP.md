@@ -21,8 +21,8 @@ The tool layer is saturated. The honest gaps are runtime robustness, supply chai
 
 ### P0 — Runtime robustness & supply chain
 
-- [ ] **Pipe auto-reconnect.** Today the read loop dying (Codex restart, extension refresh, pipe hiccup) bricks the client and forces an MCP server restart. Add supervised reconnect: detect read-loop termination, re-discover + re-dial the pipe, re-establish session, drain pending requests with a clear error. Long-running agents hit this regularly.
-  - Effort: M · files: `src/client.rs`
+- [x] **Pipe auto-reconnect.** ✅ Done. Request-driven passive reconnect: read_loop exit marks `alive=false` + drains pending; the next `send_request` runs `ensure_alive` → `reconnect_locked` (discover + dial, 3-attempt backoff 0/100/250ms, 5s cooldown on full failure) → swaps writer + restarts read_loop + clears `attached_tabs`. Injectable `ConnectionFactory` (boxed-future, no async_trait) — real discovery in prod, `duplex()` mocks in tests. New `BridgeError::Connection` distinguishes dead-connection errors. 4 reconnect tests run under `cfg(not(windows))` via a new ubuntu `test-lib` CI job.
+  - Effort: M · landed in `src/client.rs`, `src/error.rs`, `.github/workflows/ci.yml`
 - [x] **Supply-chain CI** (`cargo-deny`). ✅ Done. `deny.toml` (advisories · licenses · bans · sources, tight allow list), `supply-chain.yml` (cargo-deny-action on push/PR + weekly), dependabot for `Cargo.toml`. cargo-deny's advisories check queries the same RustSec DB as cargo-audit, so it is a strict superset — no separate cargo-audit job.
   - Effort: S · landed in `deny.toml`, `.github/workflows/supply-chain.yml`, `.github/dependabot.yml`
 

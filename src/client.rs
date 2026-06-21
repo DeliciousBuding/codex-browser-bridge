@@ -1,5 +1,7 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde_json::{json, value::RawValue, Value};
@@ -20,8 +22,25 @@ const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// waiting the full 60s. Without this, a suspended background tab burns the
 /// entire shared deadline on the sticky attempt, leaving no budget for re-attach.
 const STICKY_FAST_TIMEOUT: Duration = Duration::from_secs(20);
+/// Backoff schedule for a single reconnect cycle (sum ≈ 350ms).
+const RECONNECT_BACKOFFS: [Duration; 3] = [
+    Duration::from_millis(0),
+    Duration::from_millis(100),
+    Duration::from_millis(250),
+];
+/// After a reconnect cycle fully fails, refuse further reconnect attempts for
+/// this long so a dead Codex Desktop does not cause a busy-loop of failed dials.
+const RECONNECT_COOLDOWN: Duration = Duration::from_secs(5);
 
 type PendingMap = HashMap<u64, oneshot::Sender<Response>>;
+
+/// A factory that dials a fresh pipe connection. Production uses real
+/// discovery and dial; tests inject a mock returning a `tokio::io::duplex()`
+/// pair. Kept as a boxed-future closure (no async_trait) to avoid adding a
+/// trait layer for a single use.
+type ConnectionFactory = Arc<
+    dyn Fn() -> Pin<Box<dyn Future<Output = Result<PipeStream>> + Send>> + Send + Sync,
+>;
 
 /// A live subscription to a CDP event stream (e.g. "Network.", "Runtime.consoleAPICalled").
 /// Subscribers receive the event `params` object as a JSON Value.
@@ -37,7 +56,10 @@ pub struct Client {
 }
 
 struct ClientInner {
-    writer: Mutex<WriteHalf<PipeStream>>,
+    /// `Option` so a dead connection's writer can be reclaimed (`take`), forcing
+    /// in-flight writers to see `None` and return a `Connection` error instead of
+    /// writing into a broken pipe.
+    writer: Mutex<Option<WriteHalf<PipeStream>>>,
     pending: Mutex<PendingMap>,
     next_id: AtomicU64,
     session_id: String,
@@ -49,6 +71,16 @@ struct ClientInner {
     /// Active CDP event subscriptions. Routed by read_loop for frames with a `method` and no `id`.
     event_subs: Mutex<Vec<EventSubscription>>,
     next_sub_id: AtomicU64,
+    /// Connection health. Set false by the read loop on exit; set true after a
+    /// successful reconnect. Read with Acquire, written with Release.
+    alive: AtomicBool,
+    /// Serializes reconnect attempts so concurrent dead-connection callers only
+    /// trigger one dial cycle.
+    reconnect_lock: Mutex<()>,
+    /// When a reconnect cycle fully fails, requests fast-fail until this instant.
+    reconnect_cooldown_until: Mutex<Option<Instant>>,
+    /// How to obtain a fresh connection on reconnect.
+    connection_factory: ConnectionFactory,
 }
 
 impl Client {
@@ -59,11 +91,11 @@ impl Client {
         }
     }
 
-    pub fn from_stream(stream: PipeStream) -> Result<Self> {
+    fn from_stream_inner(stream: PipeStream, factory: ConnectionFactory) -> Result<Self> {
         let (reader, writer) = split(stream);
         let client = Self {
             inner: Arc::new(ClientInner {
-                writer: Mutex::new(writer),
+                writer: Mutex::new(Some(writer)),
                 pending: Mutex::new(HashMap::new()),
                 next_id: AtomicU64::new(1),
                 session_id: Uuid::new_v4().to_string(),
@@ -72,10 +104,28 @@ impl Client {
                 attached_tabs: Mutex::new(HashMap::new()),
                 event_subs: Mutex::new(Vec::new()),
                 next_sub_id: AtomicU64::new(1),
+                alive: AtomicBool::new(true),
+                reconnect_lock: Mutex::new(()),
+                reconnect_cooldown_until: Mutex::new(None),
+                connection_factory: factory,
             }),
         };
         client.spawn_read_loop(reader);
         Ok(client)
+    }
+
+    pub fn from_stream(stream: PipeStream) -> Result<Self> {
+        Self::from_stream_inner(stream, real_connection_factory())
+    }
+
+    /// Test-only constructor: inject a custom connection factory so reconnect
+    /// logic can be exercised without a real Codex Desktop pipe.
+    #[cfg(all(test, not(windows)))]
+    pub(crate) fn from_stream_with_factory(
+        stream: PipeStream,
+        factory: ConnectionFactory,
+    ) -> Result<Self> {
+        Self::from_stream_inner(stream, factory)
     }
 
     pub async fn send_request(&self, method: &str, params: Option<Value>) -> Result<Box<RawValue>> {
@@ -89,6 +139,34 @@ impl Client {
         params: Option<Value>,
         request_timeout: Duration,
     ) -> Result<Box<RawValue>> {
+        // Ensure the connection is alive before the first attempt. If the read
+        // loop has died since the last call, this transparently reconnects.
+        self.ensure_alive().await?;
+
+        match self
+            .send_request_once(method, params.clone(), request_timeout)
+            .await
+        {
+            Ok(raw) => Ok(raw),
+            Err(err) if Self::is_connection_error(&err) => {
+                // The pipe broke mid-request (or just after ensure_alive). Force a
+                // reconnect and retry exactly once on the fresh connection.
+                tracing::debug!(method, error = %err, "request failed, reconnecting + retrying once");
+                self.force_reconnect().await?;
+                self.send_request_once(method, params, request_timeout).await
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Single attempt: register pending → encode → await response. Extracted so
+    /// `send_request_with_timeout` can retry on a fresh connection.
+    async fn send_request_once(
+        &self,
+        method: &str,
+        params: Option<Value>,
+        request_timeout: Duration,
+    ) -> Result<Box<RawValue>> {
         let id = self.inner.next_id.fetch_add(1, Ordering::SeqCst);
         let params =
             protocol::with_session_params(&self.inner.session_id, &self.inner.turn_id, params);
@@ -97,8 +175,13 @@ impl Client {
 
         self.inner.pending.lock().await.insert(id, tx);
         let write_result = {
-            let mut writer = self.inner.writer.lock().await;
-            protocol::encode_frame(&mut *writer, &req).await
+            let mut writer_guard = self.inner.writer.lock().await;
+            match writer_guard.as_mut() {
+                Some(w) => protocol::encode_frame(w, &req).await,
+                None => Err(BridgeError::Connection(
+                    "writer is none (connection dropped)".into(),
+                )),
+            }
         };
         if let Err(err) = write_result {
             self.inner.pending.lock().await.remove(&id);
@@ -109,7 +192,9 @@ impl Client {
             Ok(Ok(resp)) => resp,
             Ok(Err(_)) => {
                 self.inner.pending.lock().await.remove(&id);
-                return Err(BridgeError::Protocol(format!(
+                // Channel closed = the read loop died (connection down). Surface as a
+                // Connection error so the caller's retry path can trigger a reconnect.
+                return Err(BridgeError::Connection(format!(
                     "response channel closed for {method}"
                 )));
             }
@@ -136,6 +221,89 @@ impl Client {
                 BridgeError::Protocol(format!("missing result for {method}: {err}"))
             }),
         }
+    }
+
+    fn is_alive(&self) -> bool {
+        self.inner.alive.load(Ordering::Acquire)
+    }
+
+    /// Errors that mean the connection is broken and a reconnect may help.
+    /// Protocol/Rpc/Cdp errors are server-side problems — reconnecting won't fix them.
+    fn is_connection_error(err: &BridgeError) -> bool {
+        matches!(err, BridgeError::Connection(_) | BridgeError::PipeIo(_))
+    }
+
+    /// Reconnect if the connection is dead. Double-checked locking: the second
+    /// caller to arrive while the first is reconnecting sees `alive=true` and skips.
+    async fn ensure_alive(&self) -> Result<()> {
+        if self.is_alive() {
+            return Ok(());
+        }
+        let _guard = self.inner.reconnect_lock.lock().await;
+        if self.is_alive() {
+            return Ok(());
+        }
+        self.reconnect_locked().await
+    }
+
+    /// Force a reconnect even if `alive` still reads true (the pipe just broke).
+    async fn force_reconnect(&self) -> Result<()> {
+        self.inner.alive.store(false, Ordering::Release);
+        let _guard = self.inner.reconnect_lock.lock().await;
+        if self.is_alive() {
+            return Ok(()); // another caller already reconnected
+        }
+        self.reconnect_locked().await
+    }
+
+    /// Run one reconnect cycle. Caller must hold `reconnect_lock`.
+    async fn reconnect_locked(&self) -> Result<()> {
+        {
+            let cooldown = self.inner.reconnect_cooldown_until.lock().await;
+            if let Some(until) = *cooldown {
+                if Instant::now() < until {
+                    let wait = until.saturating_duration_since(Instant::now());
+                    return Err(BridgeError::Connection(format!(
+                        "reconnect cooling down, retry in {:.1}s",
+                        wait.as_secs_f64()
+                    )));
+                }
+            }
+        }
+
+        let mut last_err = None;
+        for (attempt, delay) in RECONNECT_BACKOFFS.iter().enumerate() {
+            if !delay.is_zero() {
+                tokio::time::sleep(*delay).await;
+            }
+            tracing::debug!(attempt, "attempting reconnect");
+            match (self.inner.connection_factory)().await {
+                Ok(stream) => {
+                    let (reader, writer) = split(stream);
+                    *self.inner.writer.lock().await = Some(writer);
+                    // New connection has no CDP debugger sessions — drop the cache so
+                    // execute_cdp falls back to a full attach instead of trusting a stale entry.
+                    self.inner.attached_tabs.lock().await.clear();
+                    *self.inner.reconnect_cooldown_until.lock().await = None;
+                    self.inner.alive.store(true, Ordering::Release);
+                    self.spawn_read_loop(reader);
+                    tracing::info!(attempt = attempt + 1, "bridge reconnected");
+                    return Ok(());
+                }
+                Err(err) => {
+                    tracing::debug!(attempt, error = %err, "reconnect attempt failed");
+                    last_err = Some(err);
+                }
+            }
+        }
+
+        *self.inner.reconnect_cooldown_until.lock().await =
+            Some(Instant::now() + RECONNECT_COOLDOWN);
+        Err(BridgeError::Connection(format!(
+            "reconnect failed after {} attempts: {}",
+            RECONNECT_BACKOFFS.len(),
+            last_err.map(|e| e.to_string()).unwrap_or_default()
+        )))
     }
 
     fn spawn_read_loop(&self, mut reader: ReadHalf<PipeStream>) {
@@ -184,8 +352,16 @@ impl Client {
                     }
                 }
             }
+            // ── read loop exited: the connection is dead ──
+            tracing::warn!("bridge read loop exited; marking connection dead");
+            inner.alive.store(false, Ordering::Release);
+            // Drop pending waiters' senders — they return Connection errors via the
+            // RecvError → Connection translation in send_request_once.
             inner.pending.lock().await.clear();
             inner.event_subs.lock().await.clear();
+            // Reclaim the writer so any in-flight encode sees None instead of
+            // writing into a broken pipe.
+            *inner.writer.lock().await = None;
         });
     }
 
@@ -351,11 +527,13 @@ impl Client {
     }
 
     async fn close_for_health_check_failure(&self) {
-        use tokio::io::AsyncWriteExt;
-
+        // Reclaim the writer; the read loop reads EOF and exits, which clears
+        // pending + marks the connection dead.
         let mut writer = self.inner.writer.lock().await;
-        let _ = writer.shutdown().await;
-        self.inner.pending.lock().await.clear();
+        if let Some(mut w) = writer.take() {
+            use tokio::io::AsyncWriteExt;
+            let _ = w.shutdown().await;
+        }
     }
 }
 
@@ -397,6 +575,35 @@ async fn connect_discovered_client() -> Result<Client> {
     }
 
     Err(last_err.unwrap_or_else(|| BridgeError::Discovery("all pipes failed".into())))
+}
+
+/// Dial the first reachable pipe without a `getInfo` health check. Used by the
+/// reconnect factory — a reachable dial is enough to resume; a bad pipe surfaces
+/// on the next request and triggers another reconnect.
+async fn discover_and_dial_first() -> Result<PipeStream> {
+    let pipes = discovery::discover_codex_pipes().await?;
+    if pipes.is_empty() {
+        return Err(BridgeError::User(
+            "no codex-browser-use pipes found. Start Codex Desktop, Chrome, and the Codex Chrome extension".into(),
+        ));
+    }
+    let mut last_err = None;
+    for pipe in pipes {
+        let path = discovery::pipe_path(&pipe.name);
+        match dial_named_pipe(&path).await {
+            Ok(stream) => {
+                tracing::debug!(pipe = %pipe.name, "reconnect dial succeeded");
+                return Ok(stream);
+            }
+            Err(err) => last_err = Some(err),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| BridgeError::Discovery("all pipes failed".into())))
+}
+
+/// Production connection factory: discover + dial the first reachable pipe.
+fn real_connection_factory() -> ConnectionFactory {
+    Arc::new(|| Box::pin(async { discover_and_dial_first().await }))
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -461,4 +668,141 @@ fn check_cdp_error(method: &str, raw: &RawValue) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(all(test, not(windows)))]
+mod reconnect_tests {
+    use super::*;
+    use crate::error::BridgeError;
+    use crate::protocol::{decode_frame, encode_frame, Request};
+    use std::sync::atomic::AtomicUsize;
+    use tokio::io::{duplex, AsyncWriteExt, DuplexStream};
+    use tokio::sync::Notify;
+
+    async fn test_client(buf: usize) -> (Client, DuplexStream) {
+        let (client_end, server_end) = duplex(buf);
+        let client = Client::from_stream(client_end).unwrap();
+        (client, server_end)
+    }
+
+    /// Read the next request frame off the server side and reply with `result`.
+    async fn reply_ok(server: &mut DuplexStream) {
+        let frame = decode_frame(server).await.unwrap();
+        let req: Request = serde_json::from_slice(&frame).unwrap();
+        encode_frame(server, &json!({"id": req.id, "result": {}}))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn normal_roundtrip_tracks_pending() {
+        let (client, mut server) = test_client(4096).await;
+        let handle = tokio::spawn({
+            let client = client.clone();
+            async move { client.send_request("getInfo", None).await }
+        });
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(client.pending_len_for_test().await, 1);
+
+        reply_ok(&mut server).await;
+        let result = handle.await.unwrap();
+        assert!(result.is_ok());
+        assert_eq!(client.pending_len_for_test().await, 0);
+    }
+
+    #[tokio::test]
+    async fn server_drop_marks_dead_and_drains_pending() {
+        let (client, mut server) = test_client(4096).await;
+        let handle = tokio::spawn({
+            let client = client.clone();
+            async move {
+                client
+                    .send_request_with_timeout("getInfo", None, Duration::from_secs(5))
+                    .await
+            }
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(client.pending_len_for_test().await, 1);
+
+        // Kill the pipe: shut down + drop the server half.
+        server.shutdown().await.ok();
+        drop(server);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        assert!(!client.is_alive(), "connection should be dead");
+        assert_eq!(client.pending_len_for_test().await, 0, "pending must drain");
+
+        let err = handle.await.unwrap().unwrap_err();
+        assert!(matches!(err, BridgeError::Connection(_)), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn send_request_reconnects_on_dead_connection() {
+        let (client_end1, mut server1) = duplex(4096);
+
+        // Factory hands back a fresh duplex on each call and stashes its server
+        // half where the test can answer it.
+        let new_server = Arc::new(Mutex::new(None::<DuplexStream>));
+        let ready = Arc::new(Notify::new());
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let factory: ConnectionFactory = {
+            let new_server = Arc::clone(&new_server);
+            let ready = Arc::clone(&ready);
+            let call_count = Arc::clone(&call_count);
+            Arc::new(move || {
+                let new_server = Arc::clone(&new_server);
+                let ready = Arc::clone(&ready);
+                let call_count = Arc::clone(&call_count);
+                Box::pin(async move {
+                    let (c, s) = duplex(4096);
+                    *new_server.lock().await = Some(s);
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    ready.notify_one();
+                    Ok(c)
+                })
+            })
+        };
+
+        let client = Client::from_stream_with_factory(client_end1, factory).unwrap();
+        assert!(client.is_alive());
+
+        // Kill the first connection.
+        server1.shutdown().await.ok();
+        drop(server1);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(!client.is_alive());
+        assert_eq!(call_count.load(Ordering::SeqCst), 0); // no reconnect yet
+
+        // A request on the dead connection triggers a reconnect.
+        let task = tokio::spawn({
+            let client = client.clone();
+            async move { client.send_request("getInfo", None).await }
+        });
+
+        ready.notified().await; // factory produced a new stream
+        let mut new_srv = new_server.lock().await.take().unwrap();
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+        assert!(client.is_alive());
+
+        reply_ok(&mut new_srv).await;
+        let result = task.await.unwrap();
+        assert!(result.is_ok(), "got: {:?}", result.err());
+    }
+
+    #[tokio::test]
+    async fn reconnect_failure_returns_connection_error() {
+        let (client_end, server) = duplex(4096);
+        // Factory that always fails.
+        let factory: ConnectionFactory =
+            Arc::new(|| Box::pin(async { Err(BridgeError::User("no pipe".into())) }));
+        let client = Client::from_stream_with_factory(client_end, factory).unwrap();
+
+        drop(server); // break the read loop
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(!client.is_alive());
+
+        let err = client.send_request("getInfo", None).await.unwrap_err();
+        assert!(matches!(err, BridgeError::Connection(_)), "got: {err}");
+    }
 }
