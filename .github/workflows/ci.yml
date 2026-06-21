@@ -24,11 +24,16 @@ jobs:
       - name: Test
         shell: bash
         run: cargo test --locked
+      - name: Install cargo-llvm-cov
+        # Prebuilt binary via taiki-e — avoids `cargo install` compiling the
+        # latest cargo-llvm-cov (0.8.7+ needs rustc 1.87, but our MSRV is 1.85).
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
       - name: Coverage
         shell: bash
         run: |
           rustup component add llvm-tools-preview
-          cargo install cargo-llvm-cov --locked
           cargo llvm-cov --locked --lcov --output-path lcov.info
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
