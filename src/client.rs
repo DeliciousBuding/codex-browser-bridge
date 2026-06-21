@@ -807,3 +807,49 @@ mod reconnect_tests {
         assert!(matches!(err, BridgeError::Connection(_)), "got: {err}");
     }
 }
+
+#[cfg(test)]
+mod cdp_error_tests {
+    use super::*;
+
+    #[test]
+    fn check_cdp_error_detects_error_envelope() {
+        let raw = RawValue::from_string(
+            r#"{"error":{"code":-32000,"message":"Target closed"}}"#.into(),
+        )
+        .unwrap();
+        let err = check_cdp_error("Page.navigate", &raw).unwrap_err();
+        match err {
+            BridgeError::Cdp { method, code, message } => {
+                assert_eq!(method, "Page.navigate");
+                assert_eq!(code, -32000);
+                assert_eq!(message, "Target closed");
+            }
+            other => panic!("expected Cdp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn check_cdp_error_passes_through_success() {
+        let raw = RawValue::from_string(r#"{"result":{}}"#.into()).unwrap();
+        assert!(check_cdp_error("Runtime.evaluate", &raw).is_ok());
+    }
+
+    #[test]
+    fn check_cdp_error_sanitizes_newlines_in_message() {
+        // Newlines in CDP error messages are escaped (matching RPC error handling),
+        // so they can't smuggle log injection through the surfaced message.
+        let raw = RawValue::from_string(
+            r#"{"error":{"code":1,"message":"line1\nline2\rline3"}}"#.into(),
+        )
+        .unwrap();
+        let err = check_cdp_error("x", &raw).unwrap_err();
+        let msg = match err {
+            BridgeError::Cdp { message, .. } => message,
+            other => panic!("expected Cdp, got {other:?}"),
+        };
+        assert!(!msg.contains('\n'), "raw newline leaked: {msg:?}");
+        assert!(!msg.contains('\r'));
+        assert!(msg.contains("\\n"));
+    }
+}

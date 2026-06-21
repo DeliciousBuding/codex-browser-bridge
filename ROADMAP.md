@@ -30,8 +30,8 @@ The tool layer is saturated. The honest gaps are runtime robustness, supply chai
 
 - [x] **criterion benchmarks.** ✅ Done. `benches/protocol.rs` benchmarks frame encode/decode round-trip + `with_session_params` — the hot path every request traverses. `attach.rs` skipped: sticky-vs-full-attach is logic best covered by the reconnect tests, not a perf bench (would need a full CDP mock to be meaningful).
   - Effort: S · landed in `benches/protocol.rs`, `Cargo.toml` (criterion dev-dep)
-- [ ] **Restore e2e coverage the right way.** The deleted `#[path]`-include tests were an anti-pattern (they embed the source tree and break under modularization — that is what killed the v1.8/v1.9 releases). Rewrite key flows (network_monitor event pairing, CDP error propagation, storage round-trip) as integration tests using the **public crate API** + tokio mock, not source-tree embedding.
-  - Effort: M · files: `tests/`
+- [x] **Restore e2e coverage the right way.** ✅ Done. Extracted the testable core of each flow as a pure function and unit-tested it (no `#[path]` source-tree embedding): `pair_network_events` (Network event pairing), `runtime_value_string` (storage value decode), `check_cdp_error` (CDP error envelope → `BridgeError::Cdp`, incl. newline sanitization). Client-layer integration (connect / reconnect / event routing) is covered by `reconnect_tests` under `cfg(not(windows))` via the ubuntu `test-lib` CI job. 9 new tests.
+  - Effort: M · landed in `src/browser.rs` (pair extract + 6 tests), `src/client.rs` (3 tests)
 
 ### P2 — Distribution & protocol depth
 

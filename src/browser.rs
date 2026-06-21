@@ -637,11 +637,25 @@ pub async fn network_monitor(
     client.execute_cdp(id, "Network.disable", None).await.ok();
     client.unsubscribe_events(sub_id).await;
 
+    let events: Vec<Value> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let raw_count = events.len();
+    let requests = pair_network_events(&events);
+    Ok(json!({
+        "duration_ms": duration_ms,
+        "raw_event_count": raw_count,
+        "request_count": requests.len(),
+        "requests": requests
+    }))
+}
+
+/// Pair `Network.requestWillBeSent` + `Network.responseReceived` events by
+/// `requestId` into a stable (first-seen) ordered list. Extracted from
+/// `network_monitor` so the pairing logic is testable without a live CDP
+/// session — feed it a Vec of event frames, assert the merged entries.
+fn pair_network_events(events: &[Value]) -> Vec<NetEntry> {
     let mut entries: std::collections::HashMap<String, NetEntry> = std::collections::HashMap::new();
     let mut order: Vec<String> = Vec::new();
-    let mut raw_count = 0usize;
-    while let Ok(v) = rx.try_recv() {
-        raw_count += 1;
+    for v in events {
         let method = v.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let params = v.get("params");
         match method {
@@ -691,13 +705,10 @@ pub async fn network_monitor(
             _ => {}
         }
     }
-    let requests: Vec<&NetEntry> = order.iter().filter_map(|rid| entries.get(rid)).collect();
-    Ok(json!({
-        "duration_ms": duration_ms,
-        "raw_event_count": raw_count,
-        "request_count": requests.len(),
-        "requests": requests
-    }))
+    order
+        .into_iter()
+        .filter_map(|rid| entries.remove(&rid))
+        .collect()
 }
 
 /// Capture `console.*` log calls for a duration. Enables Runtime, collects
@@ -1639,6 +1650,83 @@ mod tests {
     fn parse_ax_tree_empty_nodes() {
         let nodes = parse_ax_tree(r#"{"nodes":[]}"#).unwrap();
         assert!(nodes.is_empty());
+    }
+
+    // ── network_monitor event pairing (pair_network_events) ──
+
+    #[test]
+    fn pair_network_events_merges_request_and_response() {
+        let events = vec![
+            json!({
+                "method": "Network.requestWillBeSent",
+                "params": {
+                    "requestId": "100.1",
+                    "request": {"url": "https://example.com/api", "method": "GET"},
+                    "type": "Fetch"
+                }
+            }),
+            json!({
+                "method": "Network.responseReceived",
+                "params": {
+                    "requestId": "100.1",
+                    "response": {"status": 200, "mimeType": "application/json"}
+                }
+            }),
+        ];
+        let got = pair_network_events(&events);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].request_id, "100.1");
+        assert_eq!(got[0].url, "https://example.com/api");
+        assert_eq!(got[0].method, "GET");
+        assert_eq!(got[0].resource_type.as_deref(), Some("Fetch"));
+        assert_eq!(got[0].status, Some(200));
+        assert_eq!(got[0].mime_type.as_deref(), Some("application/json"));
+    }
+
+    #[test]
+    fn pair_network_events_preserves_first_seen_order_and_drops_orphans() {
+        // Requests keep first-seen order; a response without a prior request is dropped.
+        let events = vec![
+            json!({"method":"Network.requestWillBeSent","params":{"requestId":"A","request":{"url":"https://a","method":"GET"}}}),
+            json!({"method":"Network.requestWillBeSent","params":{"requestId":"B","request":{"url":"https://b","method":"POST"}}}),
+            json!({"method":"Network.responseReceived","params":{"requestId":"A","response":{"status":304}}}),
+            json!({"method":"Network.responseReceived","params":{"requestId":"Z","response":{"status":500}}}),
+        ];
+        let got = pair_network_events(&events);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].request_id, "A");
+        assert_eq!(got[0].status, Some(304));
+        assert_eq!(got[1].request_id, "B");
+        assert!(got[1].status.is_none()); // no response arrived
+    }
+
+    #[test]
+    fn pair_network_events_ignores_empty_request_id() {
+        let events = vec![
+            json!({"method":"Network.requestWillBeSent","params":{"requestId":"","request":{"url":"https://x","method":"GET"}}}),
+        ];
+        assert!(pair_network_events(&events).is_empty());
+    }
+
+    // ── storage value parsing (runtime_value_string) ──
+
+    #[test]
+    fn runtime_value_string_extracts_string_value() {
+        let raw = RawValue::from_string(r#"{"result":{"value":"hello"}}"#.into()).unwrap();
+        assert_eq!(runtime_value_string(&raw).unwrap(), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn runtime_value_string_coerces_non_string() {
+        // Non-string evaluate results (e.g. a number) stringify.
+        let raw = RawValue::from_string(r#"{"result":{"value":42}}"#.into()).unwrap();
+        assert_eq!(runtime_value_string(&raw).unwrap(), Some("42".to_string()));
+    }
+
+    #[test]
+    fn runtime_value_string_none_when_missing() {
+        let raw = RawValue::from_string(r#"{"result":{}}"#.into()).unwrap();
+        assert_eq!(runtime_value_string(&raw).unwrap(), None);
     }
 }
 
