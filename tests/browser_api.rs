@@ -1,10 +1,11 @@
 use codex_browser_bridge::{
     browser::{
         build_click_script, build_fill_script, decode_tabs, decode_user_tabs, json_escaped,
-        parse_tab_id, validate_url,
+        parse_tab_id,
     },
     browser_test_support::{is_tab_gone_error, is_transient_load_error},
     error::BridgeError,
+    security::validate_url,
 };
 use serde_json::value::RawValue;
 
