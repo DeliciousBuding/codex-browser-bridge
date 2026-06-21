@@ -3,6 +3,15 @@ use serde_json::{json, value::RawValue, Value};
 use crate::browser;
 use crate::security;
 
+/// Map a screenshot format string to its MIME type.
+fn mime_for(format: &str) -> &'static str {
+    match format {
+        "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        _ => "image/png",
+    }
+}
+
 use super::types::{
     optional_bool, optional_str_array, optional_u64, required_i64, required_str,
     required_str_array, required_string_value, required_string_vec, sanitize_for_log, Content,
@@ -85,6 +94,7 @@ impl super::Server {
             ToolHandler::EmulateDevice => self.handle_emulate_device(args).await,
             ToolHandler::NetworkMonitor => self.handle_network_monitor(args).await,
             ToolHandler::ConsoleLogs => self.handle_console_logs(args).await,
+            ToolHandler::WaitForUrl => self.handle_wait_for_url(args).await,
         };
 
         match result {
@@ -177,11 +187,16 @@ impl super::Server {
             .or_else(|| args.get("fullPage"))
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let data = browser::screenshot(&self.client, tab_id, full_page).await?;
+        let format = args
+            .get("format")
+            .and_then(Value::as_str)
+            .unwrap_or("png");
+        let quality = optional_u64(&args, "quality")?;
+        let data = browser::screenshot(&self.client, tab_id, full_page, format, quality).await?;
         Ok(vec![
-            Content::image(data.clone(), "image/png"),
+            Content::image(data.clone(), mime_for(format)),
             Content::text(format!(
-                "Screenshot captured for tab {tab_id} ({} bytes base64)",
+                "Screenshot captured for tab {tab_id} ({} bytes base64, {format})",
                 data.len()
             )),
         ])
@@ -584,15 +599,22 @@ impl super::Server {
             .get("action")
             .and_then(Value::as_str)
             .unwrap_or("get");
+        let storage_type = args
+            .get("storage_type")
+            .and_then(Value::as_str)
+            .unwrap_or("local");
         match action {
             "get" => {
-                let val = browser::storage_get(&self.client, tab_id, key).await?;
+                let val =
+                    browser::storage_get(&self.client, tab_id, key, storage_type).await?;
                 Ok(vec![Content::text(val.unwrap_or_else(|| "null".into()))])
             }
             "set" => {
                 let value = required_string_value(&args, "value")?;
-                browser::storage_set(&self.client, tab_id, key, value).await?;
-                Ok(vec![Content::text(format!("localStorage[{key}] set"))])
+                browser::storage_set(&self.client, tab_id, key, value, storage_type).await?;
+                Ok(vec![Content::text(format!(
+                    "{storage_type}Storage[{key}] set"
+                ))])
             }
             other => anyhow::bail!("Invalid action '{other}': must be 'get' or 'set'"),
         }
@@ -690,5 +712,15 @@ impl super::Server {
         let duration_ms = optional_u64(&args, "duration_ms")?.unwrap_or(5_000);
         let result = browser::console_logs(&self.client, tab_id, duration_ms).await?;
         Ok(vec![Content::text(serde_json::to_string_pretty(&result)?)])
+    }
+
+    async fn handle_wait_for_url(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let pattern = required_str(&args, "pattern")?;
+        let timeout_ms = optional_u64(&args, "timeout_ms")?.unwrap_or(10_000);
+        browser::wait_for_url(&self.client, tab_id, pattern, timeout_ms).await?;
+        Ok(vec![Content::text(format!(
+            "URL matched {pattern} in tab {tab_id}"
+        ))])
     }
 }

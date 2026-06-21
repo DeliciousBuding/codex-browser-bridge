@@ -215,14 +215,25 @@ pub async fn dom_snapshot(client: &Client, tab_id: &str) -> Result<String> {
     }
 }
 
-pub async fn screenshot(client: &Client, tab_id: &str, full_page: bool) -> Result<String> {
+pub async fn screenshot(
+    client: &Client,
+    tab_id: &str,
+    full_page: bool,
+    format: &str,
+    quality: Option<u64>,
+) -> Result<String> {
     let _ = full_page;
     let id = parse_tab_id("screenshot", tab_id)?;
+    let mut params = serde_json::Map::new();
+    params.insert("format".into(), json!(format));
+    if format == "jpeg" {
+        params.insert("quality".into(), json!(quality.unwrap_or(80).min(100)));
+    }
     let raw = client
         .execute_cdp(
             id,
             "Page.captureScreenshot",
-            Some(json!({ "format": "png" })),
+            Some(serde_json::Value::Object(params)),
         )
         .await?;
     screenshot_data(&raw)
@@ -311,6 +322,48 @@ pub async fn wait_for_element(
     }
 }
 
+/// Poll until `location.href` contains `pattern`. For SPAs that change the URL
+/// on route change without a full navigation.
+pub async fn wait_for_url(
+    client: &Client,
+    tab_id: &str,
+    pattern: &str,
+    timeout_ms: u64,
+) -> Result<()> {
+    let id = parse_tab_id("wait_for_url", tab_id)?;
+    let timeout_ms = if timeout_ms == 0 { 10_000 } else { timeout_ms };
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let pat_json = serde_json::to_string(pattern).unwrap_or_else(|_| "null".into());
+    let expr = format!("location.href.indexOf({pat_json}) >= 0");
+
+    loop {
+        if Instant::now() >= deadline {
+            return Err(BridgeError::Timeout(format!(
+                "URL did not contain {pattern:?} after {timeout_ms}ms"
+            )));
+        }
+        match client
+            .execute_cdp(
+                id,
+                "Runtime.evaluate",
+                Some(json!({ "expression": expr, "returnByValue": true })),
+            )
+            .await
+        {
+            Ok(raw) => {
+                if let Some(found) = runtime_value_string(&raw)? {
+                    if found == "true" {
+                        return Ok(());
+                    }
+                }
+            }
+            Err(err) if is_transient_load_error(&err) && Instant::now() < deadline => {}
+            Err(err) => return Err(err),
+        }
+        sleep_until(deadline, Duration::from_millis(100)).await;
+    }
+}
+
 /// Hover over an element by CSS selector. Dispatches mouseover + mousemove via JS.
 pub async fn hover(client: &Client, tab_id: &str, selector: &str) -> Result<()> {
     let id = parse_tab_id("hover", tab_id)?;
@@ -349,35 +402,51 @@ pub async fn print_pdf(client: &Client, tab_id: &str) -> Result<String> {
 
 // ── Storage ─────────────────────────────────────────────────────
 
-/// Read a localStorage key. Returns None if the key is unset.
-pub async fn storage_get(client: &Client, tab_id: &str, key: &str) -> Result<Option<String>> {
+/// Read a Web Storage key (local or session). Returns None if the key is unset.
+pub async fn storage_get(
+    client: &Client,
+    tab_id: &str,
+    key: &str,
+    storage_type: &str,
+) -> Result<Option<String>> {
     let id = parse_tab_id("storage_get", tab_id)?;
     let key_json = serde_json::to_string(key).unwrap_or_else(|_| "null".into());
+    let store = if storage_type == "session" {
+        "sessionStorage"
+    } else {
+        "localStorage"
+    };
     let raw = client
         .execute_cdp(
             id,
             "Runtime.evaluate",
-            Some(json!({ "expression": format!("localStorage.getItem({key_json})"), "returnByValue": true })),
+            Some(json!({ "expression": format!("{store}.getItem({key_json})"), "returnByValue": true })),
         )
         .await?;
     Ok(runtime_value_string(&raw)?.filter(|s| s != "null"))
 }
 
-/// Write a localStorage key.
+/// Write a Web Storage key (local or session).
 pub async fn storage_set(
     client: &Client,
     tab_id: &str,
     key: &str,
     value: &str,
+    storage_type: &str,
 ) -> Result<()> {
     let id = parse_tab_id("storage_set", tab_id)?;
     let key_json = serde_json::to_string(key).unwrap_or_else(|_| "null".into());
     let val_json = serde_json::to_string(value).unwrap_or_else(|_| "null".into());
+    let store = if storage_type == "session" {
+        "sessionStorage"
+    } else {
+        "localStorage"
+    };
     let raw = client
         .execute_cdp(
             id,
             "Runtime.evaluate",
-            Some(json!({ "expression": format!("localStorage.setItem({key_json}, {val_json}); true"), "returnByValue": true })),
+            Some(json!({ "expression": format!("{store}.setItem({key_json}, {val_json}); true"), "returnByValue": true })),
         )
         .await?;
     runtime_value_string(&raw)?;

@@ -53,6 +53,7 @@ pub(super) enum ToolHandler {
     EmulateDevice,
     NetworkMonitor,
     ConsoleLogs,
+    WaitForUrl,
 }
 
 #[derive(Clone)]

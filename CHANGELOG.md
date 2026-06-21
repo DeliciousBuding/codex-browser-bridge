@@ -31,6 +31,14 @@ Viewport:
 - **`codex_network_monitor`**: capture `Network.*` events for a window (API/XHR/fetch debugging, endpoint reverse-engineering)
 - **`codex_get_console_logs`**: capture `Runtime.consoleAPICalled` for a window (frontend error/log debugging)
 
+### Polish (50 → 51)
+
+- **`codex_wait_for_url`**: poll until `location.href` contains a substring (SPA route changes).
+- **`--mode doctor`** CLI subcommand: run `codex_doctor` from the terminal without an agent — pipe health, Chrome version, latency as JSON.
+- **`codex_screenshot` format/quality**: PNG (default), JPEG, WebP. JPEG takes a `quality` param (0-100) to cut size for token-sensitive agents.
+- **`codex_storage` storage_type**: `local` (default) or `session` — sessionStorage now supported alongside localStorage.
+- Profiles: `basic` 33 / `network` 49 / `full` 51.
+
 ### Changed
 
 - **Sticky attach fast-path timeout** (`client.rs`): sticky CDP calls now use an independent 20s deadline instead of sharing the 60s budget. A background tab that goes silent fails in 20s instead of burning the full timeout, and the full re-attach path gets a fresh budget to retry.

@@ -36,7 +36,7 @@ const BASIC_TOOLS: &[&str] = &[
     "codex_user_tabs", "codex_claim_tab",
     "codex_navigate", "codex_reload", "codex_navigate_back",
     "codex_navigate_forward", "codex_wait_for_load",
-    "codex_nav_and_wait", "codex_wait_for_element",
+    "codex_nav_and_wait", "codex_wait_for_element", "codex_wait_for_url",
     "codex_dom_snapshot", "codex_dom_get_visible", "codex_dom_click",
     "codex_find_element", "codex_click_element",
     "codex_screenshot", "codex_bring_to_front", "codex_screenshot_element",
@@ -46,13 +46,13 @@ const BASIC_TOOLS: &[&str] = &[
     "codex_name_session", "codex_finalize", "codex_get_info",
 ];
 
-// Network: Basic + cookies + CDP + file upload + dialog + storage + pdf + emulate (~44 tools)
+// Network: Basic + cookies + CDP + file upload + dialog + storage + pdf + emulate (~47 tools)
 const NETWORK_TOOLS: &[&str] = &[
     "codex_list_tabs", "codex_create_tab", "codex_close_tab",
     "codex_user_tabs", "codex_claim_tab",
     "codex_navigate", "codex_reload", "codex_navigate_back",
     "codex_navigate_forward", "codex_wait_for_load",
-    "codex_nav_and_wait", "codex_wait_for_element",
+    "codex_nav_and_wait", "codex_wait_for_element", "codex_wait_for_url",
     "codex_dom_snapshot", "codex_dom_get_visible", "codex_dom_click",
     "codex_find_element", "codex_click_element",
     "codex_screenshot", "codex_bring_to_front", "codex_screenshot_element",

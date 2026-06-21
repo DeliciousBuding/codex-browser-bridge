@@ -1,12 +1,13 @@
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
-use codex_browser_bridge::{cli, client, discovery, logging, mcp};
+use codex_browser_bridge::{cli, client, discovery, doctor, logging, mcp};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Mode {
     Mcp,
     Cli,
     Discover,
+    Doctor,
 }
 
 #[derive(Debug, Parser)]
@@ -71,6 +72,10 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .context("failed to connect to Codex browser pipe")?;
             cli::run_cli(client).await?;
+        }
+        Mode::Doctor => {
+            let result = doctor::run_diagnostics().await;
+            println!("{}", serde_json::to_string_pretty(&result)?);
         }
     }
 

@@ -133,12 +133,11 @@ Focus: make agents more effective at browser automation. Prioritize tools that r
 
 ## Backlog
 
-Delivered in v1.9.x (unreleased, see CHANGELOG `[Unreleased]`): `codex_bring_to_front`, `codex_get_url`, `codex_get_title`, `codex_wait_for_element`, `codex_hover`, `codex_print_pdf`, `codex_screenshot_element`, `codex_select_option`, `codex_drag`, `codex_storage`, `codex_delete_cookies`, `codex_emulate_device`, `codex_network_monitor`, `codex_console_logs`, plus the CDP event-subscription architecture in `client.rs`.
+Delivered in v1.9.x (unreleased, see CHANGELOG `[Unreleased]`): `codex_bring_to_front`, `codex_get_url`, `codex_get_title`, `codex_wait_for_element`, `codex_wait_for_url`, `codex_hover`, `codex_print_pdf`, `codex_screenshot_element`, `codex_select_option`, `codex_drag`, `codex_storage` (local+session), `codex_delete_cookies`, `codex_emulate_device`, `codex_network_monitor`, `codex_console_logs`, screenshot JPEG/WebP, `--mode doctor` CLI, plus the CDP event-subscription architecture in `client.rs`.
 
 Still open:
 
-- [ ] Screenshot format options (JPEG, WebP quality param)
-- [ ] `codex_storage` sessionStorage variant (localStorage done)
+- [ ] Screenshot format options expanded (current: png/jpeg/webp + quality; could add clip/scale)
 - [ ] `codex_network_monitor` structured pairing (request↔response by requestId) — currently returns raw events
 - [ ] `codex_execute_cdp` user-customizable allowlist (config file or env var)
 - [ ] Typed tool result schemas for structured agent consumption

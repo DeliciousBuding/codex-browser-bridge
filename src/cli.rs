@@ -99,7 +99,7 @@ pub async fn run_cli(client: Client) -> anyhow::Result<()> {
                     println!("Usage: screenshot <tab_id>");
                     continue;
                 }
-                match browser::screenshot(&client, &args[1], false).await {
+                match browser::screenshot(&client, &args[1], false, "png", None).await {
                     Ok(data) => println!("Screenshot ({} bytes base64)", data.len()),
                     Err(err) => println!("Error: {err}"),
                 }
