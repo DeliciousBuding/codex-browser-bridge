@@ -674,7 +674,7 @@ fn check_cdp_error(method: &str, raw: &RawValue) -> Result<()> {
 mod reconnect_tests {
     use super::*;
     use crate::error::BridgeError;
-    use crate::protocol::{decode_frame, encode_frame, Request};
+    use crate::protocol::{decode_frame, encode_frame};
     use std::sync::atomic::AtomicUsize;
     use tokio::io::{duplex, AsyncWriteExt, DuplexStream};
     use tokio::sync::Notify;
@@ -688,8 +688,9 @@ mod reconnect_tests {
     /// Read the next request frame off the server side and reply with `result`.
     async fn reply_ok(server: &mut DuplexStream) {
         let frame = decode_frame(server).await.unwrap();
-        let req: Request = serde_json::from_slice(&frame).unwrap();
-        encode_frame(server, &json!({"id": req.id, "result": {}}))
+        let req: Value = serde_json::from_slice(&frame).unwrap();
+        let id = req["id"].as_u64().unwrap();
+        encode_frame(server, &json!({"id": id, "result": {}}))
             .await
             .unwrap();
     }
