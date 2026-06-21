@@ -4,56 +4,49 @@ All notable changes to this project will be documented in this file.
 
 ## [1.9.1] - 2026-06-21
 
-### Added — 11 new MCP tools (37 → 48)
+The first release since v1.7.0. Tool count goes from 28 to 52, and agents can now watch what a page does — not just drive it.
 
-Page info & export:
-- **`codex_get_url`** / **`codex_get_title`**: read current URL / title without `codex_evaluate`
-- **`codex_wait_for_element`**: poll a CSS selector until it matches. Essential for SPAs where `wait_for_load` returns immediately but content renders async
-- **`codex_print_pdf`**: render page to PDF via `Page.printToPDF`
-- **`codex_screenshot_element`**: capture a single element via clipped `captureScreenshot`
+### What's new
 
-Interaction:
-- **`codex_hover`**: mouseover + mousemove (dropdowns, tooltips, hover cards)
-- **`codex_select_option`**: set `<select>` value + fire change/input
-- **`codex_drag`**: CDP mouse drag (down → interpolated moves → up)
+**See live traffic and logs.** A CDP event-subscription layer lets tools receive server-pushed events that were previously dropped on the read loop. Two tools use it:
+- `codex_network_monitor` — captures request↔response pairs as `[{url, method, status, mime_type}]` over a window. Useful for reverse-engineering APIs and debugging XHR/fetch.
+- `codex_console_logs` — captures `console.*` output over a window.
 
-State & cookies:
-- **`codex_storage`**: get/set `localStorage` (login state, tokens, SPA state)
-- **`codex_delete_cookies`**: `Network.deleteCookies` (logout / account switch)
+**Background tabs no longer hang.** Chrome throttles background tabs, and CDP calls on them used to time out silently after 60s. Two fixes:
+- `codex_bring_to_front` activates a tab via `Page.bringToFront`.
+- Sticky CDP calls now use a 20s budget instead of sharing the 60s total, so a stuck call fails fast instead of burning the whole timeout.
 
-Viewport:
-- **`codex_emulate_device`**: `Emulation.setDeviceMetricsOverride` (mobile testing), `reset=true` to clear
-- **`codex_bring_to_front`**: activate a background tab via `Page.bringToFront` (fixes screenshot/CDP timeouts on throttled tabs)
+**More ways to read and interact.** `codex_wait_for_element` and `codex_wait_for_url` (SPAs), `codex_hover` / `codex_select_option` / `codex_drag`, `codex_storage` (local + session), `codex_get_url` / `codex_get_title`, `codex_screenshot_element`, `codex_print_pdf`, `codex_performance_metrics`, `codex_delete_cookies`, `codex_emulate_device`.
 
-### Event architecture (B-class) — 2 tools (48 → 50)
+**Smaller screenshots.** `codex_screenshot` now takes `format` (png/jpeg/webp) and `quality`. JPEG is much smaller than PNG, which matters when the model pays per token.
 
-- **CDP event subscription** (`client.rs`): the read loop now routes frames that carry a `method` and no `id` (server-pushed CDP events) to subscribers, instead of dropping them. New `subscribe_events(method_prefix)` / `unsubscribe_events(id)` API. Never blocks the read loop on a slow consumer — events are dropped on buffer overflow (`try_send`).
-- **`codex_network_monitor`**: capture `Network.*` events for a window (API/XHR/fetch debugging, endpoint reverse-engineering)
-- **`codex_get_console_logs`**: capture `Runtime.consoleAPICalled` for a window (frontend error/log debugging)
+**Terminal diagnostics.** `codex-browser-bridge --mode doctor` prints pipe health, Chrome version, and latency as JSON, without needing an agent.
 
-### Polish (50 → 51)
+### New tools (24 since v1.7.0)
 
-- **`codex_wait_for_url`**: poll until `location.href` contains a substring (SPA route changes).
-- **`--mode doctor`** CLI subcommand: run `codex_doctor` from the terminal without an agent — pipe health, Chrome version, latency as JSON.
-- **`codex_screenshot` format/quality**: PNG (default), JPEG, WebP. JPEG takes a `quality` param (0-100) to cut size for token-sensitive agents.
-- **`codex_storage` storage_type**: `local` (default) or `session` — sessionStorage now supported alongside localStorage.
-- Profiles: `basic` 33 / `network` 49 / `full` 51.
+| Group | Tools |
+|---|---|
+| Waiting | `wait_for_element`, `wait_for_url` |
+| Page info | `get_url`, `get_title`, `performance_metrics`, `emulate_device` |
+| Capture | `screenshot_element`, `print_pdf` |
+| Interaction | `hover`, `select_option`, `drag` |
+| State & network | `storage`, `delete_cookies`, `network_monitor`, `console_logs` |
+| Reliability | `bring_to_front` |
+| Earlier this cycle (v1.9.0) | `file_input`, `dialog`, `find_element`, `click_element`, `nav_and_wait`, `click_and_wait`, `form_fill`, `doctor` |
+
+### Architecture
+
+- **Event subscription** — the read loop (`client.rs`) now routes frames that carry a `method` and no `id` to subscribers, instead of dropping them. New `subscribe_events` / `unsubscribe_events` API. Foundation for `network_monitor`, `console_logs`, and future event-based tools.
+- **Structured network monitoring** — pairs `Network.requestWillBeSent` + `responseReceived` by `requestId`, returning a clean list instead of a raw event dump.
+- **Sticky-attach fast timeout** — silence past 20s now means the tab is background-throttled; we fall through to a full re-attach instead of waiting the full 60s.
 
 ### Fixed
 
-- **Event subscription sent only `params`** (`client.rs` read loop): subscribers now receive the whole event frame (method + params), so `codex_network_monitor` can dispatch on method. Previously every subscriber got `params` with no method and could not tell event types apart.
-- **`codex_network_monitor` now pairs request↔response**: instead of a raw event list, returns `[{request_id, url, method, status, mime_type}]` — directly consumable by agents.
+- Event subscription previously sent only `params` to subscribers (no `method`), so `network_monitor` could not tell event types apart. Subscribers now receive the whole frame.
 
-### Polish (51 → 52)
+### Profiles
 
-- **`codex_performance_metrics`**: `Performance.getMetrics` — DOM node count, JS heap size, document count, event listener count. Diagnose page weight and memory.
-- **`parse_ax_tree` unit tests** (`browser.rs`): 3 tests covering node extraction with defaults, invalid JSON, and empty input.
-
-### Changed
-
-- **Sticky attach fast-path timeout** (`client.rs`): sticky CDP calls now use an independent 20s deadline instead of sharing the 60s budget. A background tab that goes silent fails in 20s instead of burning the full timeout, and the full re-attach path gets a fresh budget to retry.
-- **`codex_screenshot` description**: documents that a timeout means the tab is likely background-throttled, with a pointer to `codex_bring_to_front`.
-- **Profiles**: `basic` 26→32, `network` 33→46, `full` 37→48.
+`basic` 33 / `network` 50 / `full` 52.
 
 ## [1.9.0] - 2026-06-20
 
