@@ -51,6 +51,8 @@ pub(super) enum ToolHandler {
     ScreenshotElement,
     DeleteCookies,
     EmulateDevice,
+    NetworkMonitor,
+    ConsoleLogs,
 }
 
 #[derive(Clone)]

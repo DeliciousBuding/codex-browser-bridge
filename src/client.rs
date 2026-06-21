@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use serde_json::{json, value::RawValue, Value};
 use tokio::io::{split, ReadHalf, WriteHalf};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::time::{timeout, Duration, Instant};
 use uuid::Uuid;
 
@@ -23,6 +23,14 @@ const STICKY_FAST_TIMEOUT: Duration = Duration::from_secs(20);
 
 type PendingMap = HashMap<u64, oneshot::Sender<Response>>;
 
+/// A live subscription to a CDP event stream (e.g. "Network.", "Runtime.consoleAPICalled").
+/// Subscribers receive the event `params` object as a JSON Value.
+struct EventSubscription {
+    id: u64,
+    method_prefix: String,
+    sender: mpsc::Sender<Value>,
+}
+
 #[derive(Clone)]
 pub struct Client {
     inner: Arc<ClientInner>,
@@ -38,6 +46,9 @@ struct ClientInner {
     /// Per-tab sticky attach cache: tabs known to have an active CDP debugger session.
     /// Avoids detach+attach round-trips for repeated CDP calls on the same tab.
     attached_tabs: Mutex<HashMap<i64, bool>>,
+    /// Active CDP event subscriptions. Routed by read_loop for frames with a `method` and no `id`.
+    event_subs: Mutex<Vec<EventSubscription>>,
+    next_sub_id: AtomicU64,
 }
 
 impl Client {
@@ -59,6 +70,8 @@ impl Client {
                 turn_id: Uuid::new_v4().to_string(),
                 tab_locks: Mutex::new(HashMap::new()),
                 attached_tabs: Mutex::new(HashMap::new()),
+                event_subs: Mutex::new(Vec::new()),
+                next_sub_id: AtomicU64::new(1),
             }),
         };
         client.spawn_read_loop(reader);
@@ -140,6 +153,26 @@ impl Client {
                     Ok(response) => response,
                     Err(_) => continue,
                 };
+                // Event frames: no id, has method -> route to subscribers.
+                if response.id.is_none() {
+                    if let Some(method) = response.method.as_deref() {
+                        let matched: Vec<mpsc::Sender<Value>> = inner
+                            .event_subs
+                            .lock()
+                            .await
+                            .iter()
+                            .filter(|s| method.starts_with(s.method_prefix.as_str()))
+                            .map(|s| s.sender.clone())
+                            .collect();
+                        if let Some(params) = response.params {
+                            for tx in matched {
+                                // try_send: never block the read loop on a slow consumer
+                                let _ = tx.try_send(params.clone());
+                            }
+                        }
+                    }
+                    continue;
+                }
                 let Some(id) = response.id else {
                     continue;
                 };
@@ -148,7 +181,33 @@ impl Client {
                 }
             }
             inner.pending.lock().await.clear();
+            inner.event_subs.lock().await.clear();
         });
+    }
+
+    /// Subscribe to CDP events whose `method` starts with `method_prefix`
+    /// (e.g. `"Network."`, `"Runtime.consoleAPICalled"`). Returns a subscription
+    /// id and a receiver that yields each event's `params` object. The read loop
+    /// never blocks on a slow consumer — events are dropped if the buffer is full.
+    /// Call `unsubscribe_events(id)` when done.
+    pub async fn subscribe_events(
+        &self,
+        method_prefix: &str,
+        buffer: usize,
+    ) -> (u64, mpsc::Receiver<Value>) {
+        let (tx, rx) = mpsc::channel(buffer);
+        let id = self.inner.next_sub_id.fetch_add(1, Ordering::SeqCst);
+        self.inner.event_subs.lock().await.push(EventSubscription {
+            id,
+            method_prefix: method_prefix.to_string(),
+            sender: tx,
+        });
+        (id, rx)
+    }
+
+    /// Remove an event subscription by id.
+    pub async fn unsubscribe_events(&self, id: u64) {
+        self.inner.event_subs.lock().await.retain(|s| s.id != id);
     }
 
     pub async fn execute_cdp(

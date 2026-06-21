@@ -83,6 +83,8 @@ impl super::Server {
             ToolHandler::ScreenshotElement => self.handle_screenshot_element(args).await,
             ToolHandler::DeleteCookies => self.handle_delete_cookies(args).await,
             ToolHandler::EmulateDevice => self.handle_emulate_device(args).await,
+            ToolHandler::NetworkMonitor => self.handle_network_monitor(args).await,
+            ToolHandler::ConsoleLogs => self.handle_console_logs(args).await,
         };
 
         match result {
@@ -674,5 +676,19 @@ impl super::Server {
         Ok(vec![Content::text(format!(
             "Emulating {width}x{height} (mobile={mobile}) in tab {tab_id}. Call with reset=true to clear."
         ))])
+    }
+
+    async fn handle_network_monitor(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let duration_ms = optional_u64(&args, "duration_ms")?.unwrap_or(5_000);
+        let result = browser::network_monitor(&self.client, tab_id, duration_ms).await?;
+        Ok(vec![Content::text(serde_json::to_string_pretty(&result)?)])
+    }
+
+    async fn handle_console_logs(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let duration_ms = optional_u64(&args, "duration_ms")?.unwrap_or(5_000);
+        let result = browser::console_logs(&self.client, tab_id, duration_ms).await?;
+        Ok(vec![Content::text(serde_json::to_string_pretty(&result)?)])
     }
 }

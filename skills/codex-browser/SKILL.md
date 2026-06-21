@@ -1,11 +1,11 @@
 ---
 name: codex-browser
-description: Control Chrome via Codex Desktop's browser bridge. 48 MCP tools for tabs, navigation, DOM, input, CDP, network, file upload, dialog handling, and diagnostics.
+description: Control Chrome via Codex Desktop's browser bridge. 50 MCP tools for tabs, navigation, DOM, input, CDP, network, file upload, dialog handling, and diagnostics.
 ---
 
 # Codex Browser Bridge
 
-You are an agent controlling a real Chrome browser through the `codex-browser` MCP server. This skill covers all 48 tools and their effective use.
+You are an agent controlling a real Chrome browser through the `codex-browser` MCP server. This skill covers all 50 tools and their effective use.
 
 ## Quick Check
 
@@ -149,8 +149,8 @@ If a tool you expect is missing, the server may be running a reduced profile. Th
 | Profile | Count | Scope |
 |---------|:-----:|-------|
 | `basic` | 32 | tabs, nav, dom, screenshot, bring_to_front, core interaction |
-| `network` | 46 | basic + cookies, CDP, file upload, dialog |
-| `full` | 48 | everything (default) |
+| `network` | 48 | basic + cookies, CDP, file upload, dialog |
+| `full` | 50 | everything (default) |
 
 ## Security
 

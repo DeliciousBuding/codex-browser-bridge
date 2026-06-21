@@ -533,6 +533,67 @@ pub async fn reset_device(client: &Client, tab_id: &str) -> Result<()> {
         .map(|_| ())
 }
 
+// ── Event capture (requires event subscription architecture) ────
+
+/// Capture `Network.*` events for a duration. Enables Network domain, collects
+/// requestWillBeSent / responseReceived / etc. for `duration_ms`, then disables.
+/// Returns the raw event params list. Large — use a short duration.
+pub async fn network_monitor(
+    client: &Client,
+    tab_id: &str,
+    duration_ms: u64,
+) -> Result<Value> {
+    let id = parse_tab_id("network_monitor", tab_id)?;
+    let duration_ms = if duration_ms == 0 { 5_000 } else { duration_ms };
+    let (sub_id, mut rx) = client.subscribe_events("Network.", 512).await;
+    if let Err(err) = client.execute_cdp(id, "Network.enable", None).await {
+        client.unsubscribe_events(sub_id).await;
+        return Err(err);
+    }
+    tokio::time::sleep(Duration::from_millis(duration_ms)).await;
+    client.execute_cdp(id, "Network.disable", None).await.ok();
+    client.unsubscribe_events(sub_id).await;
+    let mut events = Vec::new();
+    while let Ok(v) = rx.try_recv() {
+        events.push(v);
+    }
+    Ok(json!({
+        "duration_ms": duration_ms,
+        "event_count": events.len(),
+        "events": events
+    }))
+}
+
+/// Capture `console.*` log calls for a duration. Enables Runtime domain, collects
+/// `Runtime.consoleAPICalled` events, then disables. Returns the raw log entries.
+pub async fn console_logs(
+    client: &Client,
+    tab_id: &str,
+    duration_ms: u64,
+) -> Result<Value> {
+    let id = parse_tab_id("console_logs", tab_id)?;
+    let duration_ms = if duration_ms == 0 { 5_000 } else { duration_ms };
+    let (sub_id, mut rx) = client
+        .subscribe_events("Runtime.consoleAPICalled", 512)
+        .await;
+    if let Err(err) = client.execute_cdp(id, "Runtime.enable", None).await {
+        client.unsubscribe_events(sub_id).await;
+        return Err(err);
+    }
+    tokio::time::sleep(Duration::from_millis(duration_ms)).await;
+    client.execute_cdp(id, "Runtime.disable", None).await.ok();
+    client.unsubscribe_events(sub_id).await;
+    let mut logs = Vec::new();
+    while let Ok(v) = rx.try_recv() {
+        logs.push(v);
+    }
+    Ok(json!({
+        "duration_ms": duration_ms,
+        "log_count": logs.len(),
+        "logs": logs
+    }))
+}
+
 pub async fn evaluate(client: &Client, tab_id: &str, expression: &str) -> Result<Box<RawValue>> {
     let id = parse_tab_id("evaluate", tab_id)?;
     client

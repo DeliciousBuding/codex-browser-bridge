@@ -25,6 +25,12 @@ Viewport:
 - **`codex_emulate_device`**: `Emulation.setDeviceMetricsOverride` (mobile testing), `reset=true` to clear
 - **`codex_bring_to_front`**: activate a background tab via `Page.bringToFront` (fixes screenshot/CDP timeouts on throttled tabs)
 
+### Event architecture (B-class) — 2 tools (48 → 50)
+
+- **CDP event subscription** (`client.rs`): the read loop now routes frames that carry a `method` and no `id` (server-pushed CDP events) to subscribers, instead of dropping them. New `subscribe_events(method_prefix)` / `unsubscribe_events(id)` API. Never blocks the read loop on a slow consumer — events are dropped on buffer overflow (`try_send`).
+- **`codex_network_monitor`**: capture `Network.*` events for a window (API/XHR/fetch debugging, endpoint reverse-engineering)
+- **`codex_get_console_logs`**: capture `Runtime.consoleAPICalled` for a window (frontend error/log debugging)
+
 ### Changed
 
 - **Sticky attach fast-path timeout** (`client.rs`): sticky CDP calls now use an independent 20s deadline instead of sharing the 60s budget. A background tab that goes silent fails in 20s instead of burning the full timeout, and the full re-attach path gets a fresh budget to retry.

@@ -35,6 +35,12 @@ pub struct Response {
     pub result: Option<Box<RawValue>>,
     #[serde(default)]
     pub error: Option<RpcError>,
+    /// CDP event method. Present only on server-pushed event frames (no id).
+    #[serde(default)]
+    pub method: Option<String>,
+    /// CDP event params. Present only on event frames.
+    #[serde(default)]
+    pub params: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

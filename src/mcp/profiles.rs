@@ -63,7 +63,7 @@ const NETWORK_TOOLS: &[&str] = &[
     "codex_cua_scroll",
     "codex_network_cookies", "codex_network_set_cookie", "codex_delete_cookies",
     "codex_file_input", "codex_dialog", "codex_storage", "codex_print_pdf",
-    "codex_emulate_device",
+    "codex_emulate_device", "codex_network_monitor", "codex_console_logs",
     "codex_name_session", "codex_finalize", "codex_get_info",
     "codex_doctor",
 ];
