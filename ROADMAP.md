@@ -133,11 +133,13 @@ Focus: make agents more effective at browser automation. Prioritize tools that r
 
 ## Backlog
 
+Delivered in v1.9.x (unreleased, see CHANGELOG `[Unreleased]`): `codex_bring_to_front`, `codex_get_url`, `codex_get_title`, `codex_wait_for_element`, `codex_hover`, `codex_print_pdf`, `codex_screenshot_element`, `codex_select_option`, `codex_drag`, `codex_storage`, `codex_delete_cookies`, `codex_emulate_device`, `codex_network_monitor`, `codex_console_logs`, plus the CDP event-subscription architecture in `client.rs`.
+
+Still open:
+
 - [ ] Screenshot format options (JPEG, WebP quality param)
-- [ ] `codex_emulate_device` — `Emulation.setDeviceMetricsOverride` for mobile viewport testing
-- [ ] `codex_storage` — localStorage/sessionStorage read/write via `Runtime.evaluate`
-- [ ] `codex_console` — `Runtime.evaluate` with `console.log` capture via `Runtime.consoleAPICalled`
-- [ ] `codex_network_monitor` — `Network.enable` + buffered event capture for request/response inspection
+- [ ] `codex_storage` sessionStorage variant (localStorage done)
+- [ ] `codex_network_monitor` structured pairing (request↔response by requestId) — currently returns raw events
 - [ ] `codex_execute_cdp` user-customizable allowlist (config file or env var)
 - [ ] Typed tool result schemas for structured agent consumption
 - [ ] `codex_performance_trace` — `Performance.enable` + trace export

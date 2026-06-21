@@ -108,6 +108,7 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 | `codex_navigate_forward` | 前进 |
 | `codex_wait_for_load` | 等待 `document.readyState` 完成 |
 | `codex_nav_and_wait` | 导航 + 等待（一次调用） |
+| `codex_wait_for_element` | 轮询 CSS 选择器直到匹配（SPA 适用） |
 
 ### DOM 与无障碍 `[DOM]`
 | 工具 | 说明 |
@@ -121,10 +122,16 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 ### 页面检查 `[Page]`
 | 工具 | 说明 |
 |------|------|
-| `codex_screenshot` | 截取视口 PNG 截图 |
-| `codex_bring_to_front` | 激活后台标签（修复截图超时） |
+| `codex_get_url` | 当前标签 URL |
+| `codex_get_title` | 当前页面标题 |
 | `codex_evaluate` | 执行 JavaScript，返回 JSON 结果 |
 | `codex_page_assets` | 列出页面资源（图片/CSS/JS/字体） |
+| `codex_console_logs` | 捕获一段时间内的 console 输出 |
+| `codex_emulate_device` | 模拟移动端视口（`reset=true` 清除） |
+| `codex_screenshot` | 截取视口 PNG 截图 |
+| `codex_screenshot_element` | 截取单个元素 |
+| `codex_print_pdf` | 渲染页面为 PDF |
+| `codex_bring_to_front` | 激活后台标签（修复截图超时） |
 | `codex_dialog` | 处理 alert / confirm / prompt |
 
 ### 输入交互 `[Input]`
@@ -132,6 +139,9 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 |------|------|
 | `codex_click` | CSS 选择器点击（JS click） |
 | `codex_fill` | CSS 选择器填充输入框 |
+| `codex_hover` | 悬停元素（下拉菜单、tooltip） |
+| `codex_select_option` | 设置 `<select>` 值并触发 change |
+| `codex_drag` | CDP 鼠标拖拽（滑块、排序） |
 | `codex_cua_click` | 精确坐标点击（CDP 鼠标事件） |
 | `codex_cua_type` | 在当前焦点输入文字 |
 | `codex_cua_keypress` | 按键序列（Enter、Ctrl+C 等） |
@@ -145,6 +155,9 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 |------|------|
 | `codex_network_cookies` | 读取 Cookie（默认脱敏） |
 | `codex_network_set_cookie` | 设置 Cookie |
+| `codex_delete_cookies` | 按名称删除 Cookie |
+| `codex_storage` | 读写 localStorage |
+| `codex_network_monitor` | 捕获一段时间内的 Network 事件 |
 
 ### CDP 逃生口 `[CDP]`
 | 工具 | 说明 |

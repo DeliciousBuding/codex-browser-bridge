@@ -23,7 +23,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 | `codex_user_tabs` | All browser tabs, including unclaimed |
 | `codex_claim_tab` | Take ownership of an existing tab |
 
-### Navigation (6 tools)
+### Navigation (7 tools)
 
 | Tool | What it does |
 |------|-------------|
@@ -33,6 +33,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 | `codex_navigate_forward` | Forward |
 | `codex_wait_for_load` | Poll `document.readyState` until complete or timeout (default 10s) |
 | `codex_nav_and_wait` | Navigate and wait for load in one call. **Prefer this over navigate + wait_for_load.** |
+| `codex_wait_for_element` | Poll a CSS selector until it matches. Use on SPAs where `wait_for_load` returns immediately but content renders async. |
 
 ### DOM & Accessibility (5 tools)
 
@@ -44,22 +45,36 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 | `codex_find_element` | Search by ARIA `role` and/or `name`. Returns node IDs. |
 | `codex_click_element` | Click a result from `codex_find_element`. Uses CDP mouse events — no JS injection. |
 
-### Page (5 tools)
+### Page inspection (6 tools)
 
 | Tool | What it does |
 |------|-------------|
-| `codex_screenshot` | Viewport PNG. Returns image content the model can see. **Times out on background tabs** — call `codex_bring_to_front` first. |
+| `codex_get_url` | Current URL via `location.href` |
+| `codex_get_title` | Current `document.title` |
 | `codex_evaluate` | Run arbitrary JS, get JSON result |
-| `codex_page_assets` | List page resources (images, CSS, JS, fonts). Optional content fetch. |
-| `codex_dialog` | Handle `alert`/`confirm`/`prompt`. Accept or dismiss. |
-| `codex_bring_to_front` | Activate a background tab via `Page.bringToFront`. Restores its rendering pipeline so screenshot/CDP calls respond again. |
+| `codex_page_assets` | List page resources (images, CSS, JS, fonts) |
+| `codex_console_logs` | Capture `console.*` output for a duration window (frontend debugging) |
+| `codex_emulate_device` | Override viewport to emulate a device (`reset=true` to clear) |
 
-### Input (9 tools)
+### Capture (5 tools)
+
+| Tool | What it does |
+|------|-------------|
+| `codex_screenshot` | Viewport PNG. **Times out on background tabs** — call `codex_bring_to_front` first. |
+| `codex_screenshot_element` | Capture a single element via clipped screenshot |
+| `codex_print_pdf` | Render page to PDF via `Page.printToPDF` |
+| `codex_bring_to_front` | Activate a background tab. Restores its rendering pipeline so screenshot/CDP calls respond again. |
+| `codex_dialog` | Handle `alert`/`confirm`/`prompt`. Accept or dismiss. |
+
+### Input (12 tools)
 
 | Tool | What it does |
 |------|-------------|
 | `codex_click` | CSS selector click via JS `click()`. Prefer AX methods for complex UI. |
 | `codex_fill` | Set input value and fire events, by CSS selector |
+| `codex_hover` | Dispatch mouseover + mousemove (dropdowns, tooltips, hover cards) |
+| `codex_select_option` | Set `<select>` value + fire change/input (plain fill won't) |
+| `codex_drag` | CDP mouse drag from point to point (sliders, sortable lists) |
 | `codex_cua_click` | Click at `(x, y)` via CDP mouse events. Most reliable for complex UI. |
 | `codex_cua_type` | Type at current focus |
 | `codex_cua_keypress` | Key sequence. E.g. `["Control", "c"]`, `["Enter"]` |
@@ -68,12 +83,15 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 | `codex_form_fill` | Fill multiple fields: `{"#name": "Alice", "#email": "a@b.com"}`. Optional `submit` selector. |
 | `codex_file_input` | Upload files to `<input type=file>`. Paths must be absolute. 10 MB per file. |
 
-### Network (2 tools)
+### Network & state (5 tools)
 
 | Tool | What it does |
 |------|-------------|
 | `codex_network_cookies` | Read cookies. Values redacted by default — pass `redact_values: false` to see them. |
 | `codex_network_set_cookie` | Set a cookie. URL is validated. |
+| `codex_delete_cookies` | Delete cookies by name (logout / account switch) |
+| `codex_storage` | Get/set `localStorage` (login state, tokens, SPA state) |
+| `codex_network_monitor` | Capture `Network.*` events for a duration window (API/XHR debugging) |
 
 ### CDP (1 tool)
 
@@ -131,6 +149,42 @@ codex_dialog <tab_id> action="accept" prompt_text="hello"
 // or dismiss:
 codex_dialog <tab_id> action="dismiss"
 ```
+
+### Login flow (SPA, elements render async)
+```
+codex_nav_and_wait <tab_id> <login_url>
+codex_wait_for_element <tab_id> selector="#username"   // SPA renders async
+codex_form_fill <tab_id> {"#username": "alice", "#password": "secret"}
+codex_click_element... or codex_click_and_wait <tab_id> "#login-btn"
+codex_wait_for_element <tab_id> selector=".dashboard"   // confirm login landed
+```
+
+### Extract tabular data
+```
+codex_evaluate <tab_id> "JSON.stringify([...document.querySelectorAll('table tr')].map(r=>[...r.querySelectorAll('td')].map(c=>c.innerText)))"
+// returns rows as JSON — parse and use directly
+```
+
+### Debug a failing interaction
+```
+codex_console_logs <tab_id> duration_ms=5000   // capture while reproducing
+codex_network_monitor <tab_id> duration_ms=5000 // see what requests fired
+```
+
+## Error Recovery
+
+When a tool fails, the cause is usually one of these. Try the fix before retrying.
+
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| `codex_screenshot` or any CDP call **times out** silently | Tab is background-throttled/discarded by Chrome | `codex_bring_to_front <tab_id>` then retry |
+| **attach failed** or "target closed" | Tab was opened outside the bridge, or session dropped | `codex_user_tabs` → `codex_claim_tab <tab_id>`, retry |
+| **Element not found** by selector | Page changed, or selector is wrong | `codex_dom_snapshot` / `codex_find_element` to re-locate by role+name |
+| **Click has no effect** | JS `click()` swallowed by overlay or shadow DOM | Switch to `codex_cua_click` (real CDP mouse events) |
+| **SPA never "loads"** | URL unchanged, `wait_for_load` returns instantly | Use `codex_wait_for_element` on the target element instead |
+| **All tools slow / erratic** | Pipe degraded or extension stalled | `codex_doctor`; if unhealthy, restart Codex Desktop |
+
+General: always `codex_finalize` when the browsing task is done to release tabs.
 
 ## Rules of Thumb
 

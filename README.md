@@ -108,6 +108,7 @@ For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 | `codex_navigate_forward` | Go forward one history entry |
 | `codex_wait_for_load` | Poll `document.readyState` until complete |
 | `codex_nav_and_wait` | Navigate + wait (1 call instead of 2) |
+| `codex_wait_for_element` | Poll a CSS selector until it matches (SPAs) |
 
 ### DOM & Accessibility `[DOM]`
 | Tool | Description |
@@ -121,10 +122,16 @@ For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 ### Page Inspection `[Page]`
 | Tool | Description |
 |------|-------------|
-| `codex_screenshot` | Capture viewport PNG screenshot |
-| `codex_bring_to_front` | Activate a background tab (fixes screenshot timeouts) |
+| `codex_get_url` | Current tab URL |
+| `codex_get_title` | Current page title |
 | `codex_evaluate` | Execute JavaScript, return JSON result |
 | `codex_page_assets` | List page resources (images, CSS, JS, fonts) |
+| `codex_console_logs` | Capture console output for a window |
+| `codex_emulate_device` | Emulate mobile viewport (`reset=true` to clear) |
+| `codex_screenshot` | Capture viewport PNG screenshot |
+| `codex_screenshot_element` | Capture a single element by selector |
+| `codex_print_pdf` | Render page to PDF |
+| `codex_bring_to_front` | Activate a background tab (fixes screenshot timeouts) |
 | `codex_dialog` | Handle alert / confirm / prompt |
 
 ### Input & Interaction `[Input]`
@@ -132,6 +139,9 @@ For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 |------|-------------|
 | `codex_click` | Click by CSS selector (JS click) |
 | `codex_fill` | Fill input by CSS selector |
+| `codex_hover` | Hover over element (dropdowns, tooltips) |
+| `codex_select_option` | Set `<select>` value + fire change |
+| `codex_drag` | CDP mouse drag (sliders, sortable lists) |
 | `codex_cua_click` | Click at exact coordinates (CDP mouse events) |
 | `codex_cua_type` | Type text at current focus |
 | `codex_cua_keypress` | Press key sequence (Enter, Ctrl+C, etc.) |
@@ -145,6 +155,9 @@ For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 |------|-------------|
 | `codex_network_cookies` | Read cookies (values redacted by default) |
 | `codex_network_set_cookie` | Set a browser cookie |
+| `codex_delete_cookies` | Delete cookies by name |
+| `codex_storage` | Get/set localStorage |
+| `codex_network_monitor` | Capture Network events for a window |
 
 ### CDP Escape Hatch `[CDP]`
 | Tool | Description |
