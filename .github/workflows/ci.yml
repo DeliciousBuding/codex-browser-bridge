@@ -85,6 +85,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: clippy
       - name: Test lib (incl. reconnect tests)
         shell: bash
         run: cargo test --locked --lib
