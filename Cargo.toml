@@ -25,5 +25,12 @@ uuid = { version = "1.11", features = ["v4"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"
+criterion = { version = "0.5", features = ["async_tokio"] }
 predicates = "3.1"
 tempfile = "3.14"
+
+# Benchmarks — `cargo bench`. Frame encode/decode is the hot path every
+# request/response traverses, so it gets a regression baseline.
+[[bench]]
+name = "protocol"
+harness = false
