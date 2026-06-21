@@ -604,9 +604,23 @@ pub async fn reset_device(client: &Client, tab_id: &str) -> Result<()> {
 
 // ── Event capture (requires event subscription architecture) ────
 
-/// Capture `Network.*` events for a duration. Enables Network domain, collects
-/// requestWillBeSent / responseReceived / etc. for `duration_ms`, then disables.
-/// Returns the raw event params list. Large — use a short duration.
+/// A paired network request entry: sent request + (optional) received response.
+#[derive(Serialize)]
+struct NetEntry {
+    request_id: String,
+    url: String,
+    method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resource_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mime_type: Option<String>,
+}
+
+/// Capture `Network.*` events for a duration and pair request↔response into a
+/// structured, agent-friendly list. Enables Network domain, collects for
+/// `duration_ms`, then disables.
 pub async fn network_monitor(
     client: &Client,
     tab_id: &str,
@@ -622,19 +636,72 @@ pub async fn network_monitor(
     tokio::time::sleep(Duration::from_millis(duration_ms)).await;
     client.execute_cdp(id, "Network.disable", None).await.ok();
     client.unsubscribe_events(sub_id).await;
-    let mut events = Vec::new();
+
+    let mut entries: std::collections::HashMap<String, NetEntry> = std::collections::HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    let mut raw_count = 0usize;
     while let Ok(v) = rx.try_recv() {
-        events.push(v);
+        raw_count += 1;
+        let method = v.get("method").and_then(|m| m.as_str()).unwrap_or("");
+        let params = v.get("params");
+        match method {
+            "Network.requestWillBeSent" => {
+                if let Some(req) = params.and_then(|p| p.get("request")) {
+                    let rid = params
+                        .and_then(|p| p.get("requestId"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if rid.is_empty() {
+                        continue;
+                    }
+                    let entry = NetEntry {
+                        request_id: rid.clone(),
+                        url: req.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        method: req.get("method").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        resource_type: params
+                            .and_then(|p| p.get("type"))
+                            .and_then(|v| v.as_str())
+                            .map(String::from),
+                        status: None,
+                        mime_type: None,
+                    };
+                    if !entries.contains_key(&rid) {
+                        order.push(rid.clone());
+                    }
+                    entries.insert(rid, entry);
+                }
+            }
+            "Network.responseReceived" => {
+                let rid = params
+                    .and_then(|p| p.get("requestId"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if let Some(resp) = params.and_then(|p| p.get("response")) {
+                    if let Some(e) = entries.get_mut(&rid) {
+                        e.status = resp.get("status").and_then(|v| v.as_i64());
+                        e.mime_type = resp
+                            .get("mimeType")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
+    let requests: Vec<&NetEntry> = order.iter().filter_map(|rid| entries.get(rid)).collect();
     Ok(json!({
         "duration_ms": duration_ms,
-        "event_count": events.len(),
-        "events": events
+        "raw_event_count": raw_count,
+        "request_count": requests.len(),
+        "requests": requests
     }))
 }
 
-/// Capture `console.*` log calls for a duration. Enables Runtime domain, collects
-/// `Runtime.consoleAPICalled` events, then disables. Returns the raw log entries.
+/// Capture `console.*` log calls for a duration. Enables Runtime, collects
+/// `Runtime.consoleAPICalled` events, then disables. Returns raw log params.
 pub async fn console_logs(
     client: &Client,
     tab_id: &str,
@@ -654,7 +721,9 @@ pub async fn console_logs(
     client.unsubscribe_events(sub_id).await;
     let mut logs = Vec::new();
     while let Ok(v) = rx.try_recv() {
-        logs.push(v);
+        if let Some(params) = v.get("params") {
+            logs.push(params.clone());
+        }
     }
     Ok(json!({
         "duration_ms": duration_ms,

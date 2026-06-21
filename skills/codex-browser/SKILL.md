@@ -92,7 +92,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 | `codex_network_set_cookie` | Set a cookie. URL is validated. |
 | `codex_delete_cookies` | Delete cookies by name (logout / account switch) |
 | `codex_storage` | Get/set `localStorage` (login state, tokens, SPA state) |
-| `codex_network_monitor` | Capture `Network.*` events for a duration window (API/XHR debugging) |
+| `codex_network_monitor` | Pair request↔response into a structured list (url, method, status, mime) for a duration window |
 
 ### CDP (1 tool)
 

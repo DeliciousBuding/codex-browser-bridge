@@ -158,7 +158,7 @@ For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 | `codex_network_set_cookie` | Set a browser cookie |
 | `codex_delete_cookies` | Delete cookies by name |
 | `codex_storage` | Get/set localStorage |
-| `codex_network_monitor` | Capture Network events for a window |
+| `codex_network_monitor` | Pair request↔response into structured list |
 
 ### CDP Escape Hatch `[CDP]`
 | Tool | Description |

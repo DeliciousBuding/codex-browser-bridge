@@ -158,7 +158,7 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 | `codex_network_set_cookie` | 设置 Cookie |
 | `codex_delete_cookies` | 按名称删除 Cookie |
 | `codex_storage` | 读写 localStorage |
-| `codex_network_monitor` | 捕获一段时间内的 Network 事件 |
+| `codex_network_monitor` | 配对请求↔响应为结构化列表 |
 
 ### CDP 逃生口 `[CDP]`
 | 工具 | 说明 |

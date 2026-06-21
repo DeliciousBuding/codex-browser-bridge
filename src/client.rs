@@ -149,13 +149,15 @@ impl Client {
                         break;
                     }
                 };
-                let response: Response = match serde_json::from_slice(&frame) {
-                    Ok(response) => response,
+                let value: Value = match serde_json::from_slice(&frame) {
+                    Ok(value) => value,
                     Err(_) => continue,
                 };
-                // Event frames: no id, has method -> route to subscribers.
-                if response.id.is_none() {
-                    if let Some(method) = response.method.as_deref() {
+                // Event frames carry a method and no id -> route the WHOLE frame
+                // to subscribers so they can dispatch on method themselves
+                // (e.g. Network.requestWillBeSent vs Network.responseReceived).
+                if value.get("id").is_none() {
+                    if let Some(method) = value.get("method").and_then(|m| m.as_str()) {
                         let matched: Vec<mpsc::Sender<Value>> = inner
                             .event_subs
                             .lock()
@@ -164,20 +166,22 @@ impl Client {
                             .filter(|s| method.starts_with(s.method_prefix.as_str()))
                             .map(|s| s.sender.clone())
                             .collect();
-                        if let Some(params) = response.params {
-                            for tx in matched {
-                                // try_send: never block the read loop on a slow consumer
-                                let _ = tx.try_send(params.clone());
-                            }
+                        for tx in matched {
+                            // try_send: never block the read loop on a slow consumer
+                            let _ = tx.try_send(value.clone());
                         }
                     }
                     continue;
                 }
-                let Some(id) = response.id else {
-                    continue;
+                // Response path.
+                let response: Response = match serde_json::from_value(value) {
+                    Ok(response) => response,
+                    Err(_) => continue,
                 };
-                if let Some(tx) = inner.pending.lock().await.remove(&id) {
-                    let _ = tx.send(response);
+                if let Some(id) = response.id {
+                    if let Some(tx) = inner.pending.lock().await.remove(&id) {
+                        let _ = tx.send(response);
+                    }
                 }
             }
             inner.pending.lock().await.clear();

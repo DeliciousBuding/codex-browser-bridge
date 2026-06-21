@@ -39,6 +39,11 @@ Viewport:
 - **`codex_storage` storage_type**: `local` (default) or `session` — sessionStorage now supported alongside localStorage.
 - Profiles: `basic` 33 / `network` 49 / `full` 51.
 
+### Fixed
+
+- **Event subscription sent only `params`** (`client.rs` read loop): subscribers now receive the whole event frame (method + params), so `codex_network_monitor` can dispatch on method. Previously every subscriber got `params` with no method and could not tell event types apart.
+- **`codex_network_monitor` now pairs request↔response**: instead of a raw event list, returns `[{request_id, url, method, status, mime_type}]` — directly consumable by agents.
+
 ### Changed
 
 - **Sticky attach fast-path timeout** (`client.rs`): sticky CDP calls now use an independent 20s deadline instead of sharing the 60s budget. A background tab that goes silent fails in 20s instead of burning the full timeout, and the full re-attach path gets a fresh budget to retry.
