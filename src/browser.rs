@@ -228,6 +228,20 @@ pub async fn screenshot(client: &Client, tab_id: &str, full_page: bool) -> Resul
     screenshot_data(&raw)
 }
 
+/// Bring a tab to the foreground via `Page.bringToFront`.
+///
+/// Needed when a background tab has been throttled or discarded by Chrome — CDP
+/// calls (especially screenshot) on a suspended tab can time out silently.
+/// Calling this restores the tab's rendering pipeline so subsequent CDP calls
+/// respond normally. Does not navigate or change page state.
+pub async fn bring_to_front(client: &Client, tab_id: &str) -> Result<()> {
+    let id = parse_tab_id("bring_to_front", tab_id)?;
+    client
+        .execute_cdp(id, "Page.bringToFront", None)
+        .await
+        .map(|_| ())
+}
+
 pub async fn evaluate(client: &Client, tab_id: &str, expression: &str) -> Result<Box<RawValue>> {
     let id = parse_tab_id("evaluate", tab_id)?;
     client

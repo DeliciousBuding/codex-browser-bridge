@@ -71,6 +71,7 @@ impl super::Server {
             ToolHandler::ClickAndWait => self.handle_click_and_wait(args).await,
             ToolHandler::FormFill => self.handle_form_fill(args).await,
             ToolHandler::Doctor => self.handle_doctor().await,
+            ToolHandler::BringToFront => self.handle_bring_to_front(args).await,
         };
 
         match result {
@@ -513,5 +514,13 @@ impl super::Server {
         Ok(vec![Content::text(
             serde_json::to_string_pretty(&result)?,
         )])
+    }
+
+    async fn handle_bring_to_front(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        browser::bring_to_front(&self.client, tab_id).await?;
+        Ok(vec![Content::text(format!(
+            "Tab {tab_id} brought to front"
+        ))])
     }
 }

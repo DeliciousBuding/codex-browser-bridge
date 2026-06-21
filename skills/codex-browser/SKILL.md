@@ -1,11 +1,11 @@
 ---
 name: codex-browser
-description: Control Chrome via Codex Desktop's browser bridge. 36 MCP tools for tabs, navigation, DOM, input, CDP, network, file upload, dialog handling, and diagnostics.
+description: Control Chrome via Codex Desktop's browser bridge. 37 MCP tools for tabs, navigation, DOM, input, CDP, network, file upload, dialog handling, and diagnostics.
 ---
 
 # Codex Browser Bridge
 
-You are an agent controlling a real Chrome browser through the `codex-browser` MCP server. This skill covers all 36 tools and their effective use.
+You are an agent controlling a real Chrome browser through the `codex-browser` MCP server. This skill covers all 37 tools and their effective use.
 
 ## Quick Check
 
@@ -44,14 +44,15 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 | `codex_find_element` | Search by ARIA `role` and/or `name`. Returns node IDs. |
 | `codex_click_element` | Click a result from `codex_find_element`. Uses CDP mouse events — no JS injection. |
 
-### Page (4 tools)
+### Page (5 tools)
 
 | Tool | What it does |
 |------|-------------|
-| `codex_screenshot` | Viewport PNG. Returns image content the model can see. |
+| `codex_screenshot` | Viewport PNG. Returns image content the model can see. **Times out on background tabs** — call `codex_bring_to_front` first. |
 | `codex_evaluate` | Run arbitrary JS, get JSON result |
 | `codex_page_assets` | List page resources (images, CSS, JS, fonts). Optional content fetch. |
 | `codex_dialog` | Handle `alert`/`confirm`/`prompt`. Accept or dismiss. |
+| `codex_bring_to_front` | Activate a background tab via `Page.bringToFront`. Restores its rendering pipeline so screenshot/CDP calls respond again. |
 
 ### Input (9 tools)
 
@@ -95,6 +96,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 ```
 codex_create_tab
 codex_nav_and_wait <tab_id> <url>
+codex_bring_to_front <tab_id>     // if the tab may be backgrounded
 codex_screenshot <tab_id>
 ```
 
@@ -146,9 +148,9 @@ If a tool you expect is missing, the server may be running a reduced profile. Th
 
 | Profile | Count | Scope |
 |---------|:-----:|-------|
-| `basic` | 25 | tabs, nav, dom, screenshot, core interaction |
-| `network` | 32 | basic + cookies, CDP, file upload, dialog |
-| `full` | 36 | everything (default) |
+| `basic` | 26 | tabs, nav, dom, screenshot, bring_to_front, core interaction |
+| `network` | 33 | basic + cookies, CDP, file upload, dialog |
+| `full` | 37 | everything (default) |
 
 ## Security
 

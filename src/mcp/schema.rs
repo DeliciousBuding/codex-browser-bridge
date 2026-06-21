@@ -15,7 +15,7 @@ pub(super) fn registered_tools() -> Vec<Tool> {
         Tool::new("codex_navigate_forward", "[Navigation] Navigate a tab one entry forward in its session history.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"}},"required":["tab_id"]}"#), ToolHandler::NavigateForward),
         Tool::new("codex_wait_for_load", "[Navigation] Wait for page load to complete by polling document.readyState. Useful after codex_navigate on slow or JS-heavy pages.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"},"timeout_ms":{"type":"integer","description":"Max wait in milliseconds. Defaults to 10000."}},"required":["tab_id"]}"#), ToolHandler::WaitForLoad),
         Tool::new("codex_dom_snapshot", "[DOM] Get the full accessibility tree of a tab. Returns structured accessibility nodes with IDs usable by codex_dom_click. For a simpler human-readable tree, use codex_dom_get_visible.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"}},"required":["tab_id"]}"#), ToolHandler::DomSnapshot),
-        Tool::new("codex_screenshot", "[Page] Capture a viewport screenshot as a PNG image. full_page is reserved for future full-page capture (not yet implemented).", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"},"full_page":{"type":"boolean","description":"Reserved for future full-page capture. Always captures viewport currently."}},"required":["tab_id"]}"#), ToolHandler::Screenshot),
+        Tool::new("codex_screenshot", "[Page] Capture a viewport screenshot as a PNG image. full_page is reserved for future full-page capture (not yet implemented). If the call times out, the tab is likely background-throttled by Chrome — call codex_bring_to_front first, then retry.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"},"full_page":{"type":"boolean","description":"Reserved for future full-page capture. Always captures viewport currently."}},"required":["tab_id"]}"#), ToolHandler::Screenshot),
         Tool::new("codex_click", "[Input] Click an element by CSS selector. Uses JavaScript click(); prefer codex_dom_click or codex_cua_click for complex pages where JS click() may not trigger real event listeners.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"},"selector":{"type":"string","description":"CSS selector, e.g. #login-btn or .submit-button"}},"required":["tab_id","selector"]}"#), ToolHandler::Click),
         Tool::new("codex_fill", "[Input] Fill a form input by CSS selector. Sets the value, triggers input and change events. Returns clear error if selector not found.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"},"selector":{"type":"string"},"value":{"type":"string"}},"required":["tab_id","selector","value"]}"#), ToolHandler::Fill),
         Tool::new("codex_evaluate", "[Page] Execute arbitrary JavaScript in the page context and return the result as JSON. Use for data extraction, state inspection, or actions not covered by dedicated tools.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"},"expression":{"type":"string","description":"JavaScript to evaluate, e.g. \"document.title\" or \"JSON.stringify(window.__STATE__)\""}},"required":["tab_id","expression"]}"#), ToolHandler::Evaluate),
@@ -40,6 +40,7 @@ pub(super) fn registered_tools() -> Vec<Tool> {
         Tool::new("codex_click_and_wait", "[Input] Click an element by CSS selector and wait for page load. Combines codex_click + codex_wait_for_load in one call.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID or 'active'"},"selector":{"type":"string","description":"CSS selector to click"},"timeout_ms":{"type":"integer","description":"Max wait in ms. Defaults to 10000."}},"required":["tab_id","selector"]}"#), ToolHandler::ClickAndWait),
         Tool::new("codex_form_fill", "[Input] Fill multiple form fields at once. Accepts a map of CSS selector to value. Optionally clicks a submit button after filling. Sequential dispatch with configurable delay.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID or 'active'"},"fields":{"type":"object","description":"Map of CSS selector to value"},"submit":{"type":"string","description":"Optional CSS selector for submit button to click after filling"},"delay_ms":{"type":"integer","description":"Delay between field inputs in ms. Defaults to 50."}},"required":["tab_id","fields"]}"#), ToolHandler::FormFill),
         Tool::new("codex_doctor", "[Session] Run self-diagnostics. Checks pipe connectivity, Chrome availability, and reports bridge version. Use before browser operations to verify the environment is ready. Returns diagnostic summary with per-pipe health.", object_schema(), ToolHandler::Doctor),
+        Tool::new("codex_bring_to_front", "[Page] Activate a tab and bring it to the foreground via Page.bringToFront. Call this before screenshot or other CDP calls when a tab has been in the background — Chrome throttles/discards background tabs and CDP calls on a suspended tab can time out silently. Does not navigate or change page state.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID or 'active' to activate"}},"required":["tab_id"]}"#), ToolHandler::BringToFront),
     ]
 }
 
@@ -67,8 +68,8 @@ mod tests {
             .map(|tool| tool.name)
             .collect();
         assert_eq!(names.first(), Some(&"codex_list_tabs"));
-        assert_eq!(names.last(), Some(&"codex_doctor"));
-        assert_eq!(names.len(), 36);
+        assert_eq!(names.last(), Some(&"codex_bring_to_front"));
+        assert_eq!(names.len(), 37);
     }
 
     #[test]
@@ -119,6 +120,15 @@ mod tests {
     }
 
     #[test]
+    fn bring_to_front_schema_requires_tab_id() {
+        let tools = registered_tools();
+        let bf = tools.iter().find(|t| t.name == "codex_bring_to_front").unwrap();
+        assert_eq!(bf.input_schema["type"], "object");
+        let required: Vec<_> = bf.input_schema["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+        assert!(required.contains(&"tab_id"));
+    }
+
+    #[test]
     fn file_input_schema_requires_tab_id_selector_files() {
         let tools = registered_tools();
         let fi = tools.iter().find(|t| t.name == "codex_file_input").unwrap();
@@ -130,8 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn dialog_schema_requires_tab_id_action() {
-        let tools = registered_tools();
+    fn dialog_schema_requires_tab_id_action() {        let tools = registered_tools();
         let d = tools.iter().find(|t| t.name == "codex_dialog").unwrap();
         assert_eq!(d.input_schema["type"], "object");
         let required: Vec<_> = d.input_schema["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();

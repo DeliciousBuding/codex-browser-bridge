@@ -39,6 +39,7 @@ pub(super) enum ToolHandler {
     ClickAndWait,
     FormFill,
     Doctor,
+    BringToFront,
 }
 
 #[derive(Clone)]

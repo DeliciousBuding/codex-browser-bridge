@@ -6,7 +6,7 @@
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
     Let Claude Code and other MCP agents control your existing Chrome browser through Codex Desktop's browser bridge.
-    <br>36 MCP tools. Pure Rust. Single binary. Zero config.
+    <br>37 MCP tools. Pure Rust. Single binary. Zero config.
   </p>
 </p>
 
@@ -32,7 +32,7 @@
 
 `codex-browser-bridge` turns your **local Codex Desktop + Chrome** into an MCP server that any agent can control.
 
-No browser profile copying. No WebDriver. No remote setup. It connects to the Codex browser named pipe that already exists on your machine, speaks the same JSON-RPC protocol, and exposes 36 MCP tools for browser automation.
+No browser profile copying. No WebDriver. No remote setup. It connects to the Codex browser named pipe that already exists on your machine, speaks the same JSON-RPC protocol, and exposes 37 MCP tools for browser automation.
 
 **Your agent can:**
 
@@ -86,9 +86,9 @@ Find the login button and click it.
 
 For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 
-> 💡 **Agent skill available.** This repo includes a project-level skill at [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) that teaches LLM agents how to use all 36 tools effectively. Symlink or copy it into your agent's skills directory (`~/.claude/skills/`, `~/.codex/skills/`, etc.).
+> 💡 **Agent skill available.** This repo includes a project-level skill at [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) that teaches LLM agents how to use all 37 tools effectively. Symlink or copy it into your agent's skills directory (`~/.claude/skills/`, `~/.codex/skills/`, etc.).
 
-## All 36 MCP Tools
+## All 37 MCP Tools
 
 ### Tab Management `[Tabs]`
 | Tool | Description |
@@ -122,6 +122,7 @@ For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 | Tool | Description |
 |------|-------------|
 | `codex_screenshot` | Capture viewport PNG screenshot |
+| `codex_bring_to_front` | Activate a background tab (fixes screenshot timeouts) |
 | `codex_evaluate` | Execute JavaScript, return JSON result |
 | `codex_page_assets` | List page resources (images, CSS, JS, fonts) |
 | `codex_dialog` | Handle alert / confirm / prompt |
@@ -171,9 +172,9 @@ codex-browser-bridge --mode discover
 codex-browser-bridge --mode cli
 
 # With tool profiles
-codex-browser-bridge --mode mcp --profile basic     # 25 tools
-codex-browser-bridge --mode mcp --profile network   # 32 tools
-codex-browser-bridge --mode mcp --profile full      # all 36 (default)
+codex-browser-bridge --mode mcp --profile basic     # 26 tools
+codex-browser-bridge --mode mcp --profile network   # 33 tools
+codex-browser-bridge --mode mcp --profile full      # all 37 (default)
 ```
 
 ## Architecture

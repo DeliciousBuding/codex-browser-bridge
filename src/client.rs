@@ -14,6 +14,12 @@ use crate::pipe::{dial_named_pipe, PipeStream};
 use crate::protocol::{self, Request, Response};
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// Sticky-attach fast-path timeout. A healthy attached tab answers CDP within
+/// milliseconds; if it stays silent this long, assume Chrome has throttled or
+/// discarded the background tab and fall through to a full re-attach instead of
+/// waiting the full 60s. Without this, a suspended background tab burns the
+/// entire shared deadline on the sticky attempt, leaving no budget for re-attach.
+const STICKY_FAST_TIMEOUT: Duration = Duration::from_secs(20);
 
 type PendingMap = HashMap<u64, oneshot::Sender<Response>>;
 
@@ -154,13 +160,17 @@ impl Client {
         let tab_lock = self.tab_lock(tab_id).await;
         let _guard = tab_lock.lock().await;
 
-        let deadline = Instant::now() + DEFAULT_REQUEST_TIMEOUT;
         let already_attached = self.inner.attached_tabs.lock().await.get(&tab_id).copied().unwrap_or(false);
 
         if already_attached {
-            // Sticky attach: skip detach+attach, go direct to CDP
+            // Sticky attach: skip detach+attach, go direct to CDP.
+            // Use a short independent timeout — a healthy attached tab responds
+            // fast; silence past this point means the tab is likely background-
+            // throttled by Chrome and we should fall through rather than burn
+            // the full 60s budget on a doomed wait.
+            let sticky_deadline = Instant::now() + STICKY_FAST_TIMEOUT;
             match self
-                .execute_cdp_raw_until(tab_id, method, params.clone(), deadline)
+                .execute_cdp_raw_until(tab_id, method, params.clone(), sticky_deadline)
                 .await
             {
                 Ok(raw) => return Ok(raw),
@@ -172,7 +182,9 @@ impl Client {
             }
         }
 
-        // Full attach flow
+        // Full attach flow. Reset the deadline so re-attach and retry get a fresh
+        // budget even if the sticky fast-path just consumed STICKY_FAST_TIMEOUT.
+        let deadline = Instant::now() + DEFAULT_REQUEST_TIMEOUT;
         self.detach_tab_until(tab_id, deadline).await.ok();
         self.attach_tab_until(tab_id, deadline)
             .await

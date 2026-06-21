@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **`codex_bring_to_front`** (`[Page]`): Activate a background tab via `Page.bringToFront`. Restores the rendering pipeline of a tab Chrome has throttled/discarded, fixing silent screenshot/CDP timeouts on background tabs. Tool count 36 → 37; included in `basic`/`network`/`full` profiles.
+
+### Changed
+
+- **Sticky attach fast-path timeout** (`client.rs`): sticky CDP calls now use an independent 20s deadline instead of sharing the 60s budget. A background tab that goes silent fails in 20s instead of burning the full timeout, and the full re-attach path gets a fresh budget to retry. Error surfaces faster; recovery has room.
+- **`codex_screenshot` description**: now documents that a timeout means the tab is likely background-throttled, with a pointer to `codex_bring_to_front`.
+
 ## [1.9.0] - 2026-06-20
 
 ### Added — 8 new MCP tools (28 → 36)

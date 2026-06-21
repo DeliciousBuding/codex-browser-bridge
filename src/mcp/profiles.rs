@@ -39,7 +39,7 @@ const BASIC_TOOLS: &[&str] = &[
     "codex_nav_and_wait",
     "codex_dom_snapshot", "codex_dom_get_visible", "codex_dom_click",
     "codex_find_element", "codex_click_element",
-    "codex_screenshot", "codex_click", "codex_fill", "codex_form_fill",
+    "codex_screenshot", "codex_bring_to_front", "codex_click", "codex_fill", "codex_form_fill",
     "codex_evaluate", "codex_cua_scroll",
     "codex_name_session", "codex_finalize", "codex_get_info",
 ];
@@ -53,7 +53,7 @@ const NETWORK_TOOLS: &[&str] = &[
     "codex_nav_and_wait",
     "codex_dom_snapshot", "codex_dom_get_visible", "codex_dom_click",
     "codex_find_element", "codex_click_element",
-    "codex_screenshot", "codex_click", "codex_fill", "codex_form_fill",
+    "codex_screenshot", "codex_bring_to_front", "codex_click", "codex_fill", "codex_form_fill",
     "codex_click_and_wait",
     "codex_evaluate",
     "codex_cua_click", "codex_cua_type", "codex_cua_keypress",
