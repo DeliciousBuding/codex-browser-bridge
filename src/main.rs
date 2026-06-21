@@ -1,6 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
-use codex_browser_bridge::{cli, client, discovery, doctor, logging, mcp};
+use codex_browser_bridge::{cli, client, config, discovery, doctor, logging, mcp};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Mode {
@@ -52,18 +52,35 @@ async fn main() -> anyhow::Result<()> {
             let client = client::Client::connect(args.pipe.as_deref())
                 .await
                 .context("failed to connect to Codex browser pipe")?;
-            if let Some(ref base) = args.upload_base {
+            // Precedence: CLI flags > config file > env > default.
+            let config = config::Config::load();
+            if let Some(base) = args.upload_base.clone().or(config.upload_base) {
                 std::env::set_var("CODEX_BRIDGE_UPLOAD_BASE", base);
             }
-            let server = if let Some(profile) = args.profile {
-                let p = match profile {
-                    Profile::Basic => codex_browser_bridge::mcp::profiles::ToolProfile::Basic,
-                    Profile::Network => codex_browser_bridge::mcp::profiles::ToolProfile::Network,
-                    Profile::Full => codex_browser_bridge::mcp::profiles::ToolProfile::Full,
-                };
-                mcp::Server::new_with_profile(client, p)
-            } else {
-                mcp::Server::new(client)
+            let profile = args.profile.or_else(|| match config.profile.as_deref() {
+                Some("basic") => Some(Profile::Basic),
+                Some("network") => Some(Profile::Network),
+                Some("full") => Some(Profile::Full),
+                Some(other) => {
+                    tracing::warn!(profile = other, "unknown profile in config file, ignoring");
+                    None
+                }
+                None => None,
+            });
+            let server = match profile {
+                Some(Profile::Basic) => mcp::Server::new_with_profile(
+                    client,
+                    codex_browser_bridge::mcp::profiles::ToolProfile::Basic,
+                ),
+                Some(Profile::Network) => mcp::Server::new_with_profile(
+                    client,
+                    codex_browser_bridge::mcp::profiles::ToolProfile::Network,
+                ),
+                Some(Profile::Full) => mcp::Server::new_with_profile(
+                    client,
+                    codex_browser_bridge::mcp::profiles::ToolProfile::Full,
+                ),
+                None => mcp::Server::new(client),
             };
             server.run_stdio().await?;
         }

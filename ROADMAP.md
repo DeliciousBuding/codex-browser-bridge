@@ -39,8 +39,8 @@ The tool layer is saturated. The honest gaps are runtime robustness, supply chai
   - Effort: S
 - [ ] **MCP resources/prompts.** Expose cookies/localStorage as subscribable resources (agents read state without a tool call per access); ship prompt templates for login/table-extraction flows.
   - Effort: M
-- [ ] **Config file** (`.codex-browser-bridge.toml`) for profile + upload_base, replacing env-only.
-  - Effort: S
+- [x] **Config file** (`.codex-browser-bridge.toml`) for profile + upload_base. ✅ Done. `src/config.rs` reads `CODEX_BRIDGE_CONFIG` env path or `./.codex-browser-bridge.toml`; precedence CLI flags > config > env > default. Malformed file warns + is ignored (never bricks startup).
+  - Effort: S · landed in `src/config.rs`, `src/main.rs`, `Cargo.toml` (toml dep)
 - [ ] **ARCHITECTURE.md** — design-decision record for contributors.
   - Effort: S
 

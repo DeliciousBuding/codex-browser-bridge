@@ -1,6 +1,7 @@
 pub mod browser;
 pub mod cli;
 pub mod client;
+pub mod config;
 pub mod discovery;
 pub mod doctor;
 pub mod error;
