@@ -23,8 +23,8 @@ The tool layer is saturated. The honest gaps are runtime robustness, supply chai
 
 - [ ] **Pipe auto-reconnect.** Today the read loop dying (Codex restart, extension refresh, pipe hiccup) bricks the client and forces an MCP server restart. Add supervised reconnect: detect read-loop termination, re-discover + re-dial the pipe, re-establish session, drain pending requests with a clear error. Long-running agents hit this regularly.
   - Effort: M · files: `src/client.rs`
-- [ ] **Supply-chain CI** (`cargo-deny` + `cargo-audit`). Standard for public Rust projects; currently absent. `deny.toml` for license/advisory/ban checks, a weekly audit job, and dependabot for `Cargo.toml` (today only `github-actions` is covered).
-  - Effort: S · files: `.github/workflows/`, `deny.toml`
+- [x] **Supply-chain CI** (`cargo-deny`). ✅ Done. `deny.toml` (advisories · licenses · bans · sources, tight allow list), `supply-chain.yml` (cargo-deny-action on push/PR + weekly), dependabot for `Cargo.toml`. cargo-deny's advisories check queries the same RustSec DB as cargo-audit, so it is a strict superset — no separate cargo-audit job.
+  - Effort: S · landed in `deny.toml`, `.github/workflows/supply-chain.yml`, `.github/dependabot.yml`
 
 ### P1 — Performance & test baselines
 

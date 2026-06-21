@@ -1,0 +1,37 @@
+# cargo-deny configuration — supply-chain checks for a public Rust crate.
+# Docs: https://embarkstudios.github.io/cargo-deny/
+# Runs in .github/workflows/supply-chain.yml on every PR and weekly.
+
+[graph]
+# Lint against the exact targets we ship (Windows x64 + arm64).
+targets = [
+    { triple = "x86_64-pc-windows-msvc" },
+    { triple = "aarch64-pc-windows-msvc" },
+]
+
+[advisories]
+# Fail the build on any known vulnerability or yanked crate.
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Permissive licenses only. Kept tight on purpose: if a future dependency
+# lands under a license not listed here, cargo-deny fails and forces a review.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Duplicate versions are common in transitive deps — warn, don't fail.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+# crates.io is the only permitted registry.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

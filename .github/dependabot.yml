@@ -8,3 +8,11 @@ updates:
       # dtolnay/rust-toolchain tags are Rust versions, not action versions.
       # Bump manually when MSRV changes in Cargo.toml.
       - dependency-name: "dtolnay/rust-toolchain"
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Group all Rust dependency bumps into one PR to keep the queue quiet.
+    groups:
+      rust-dependencies:
+        patterns: ["*"]
