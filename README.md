@@ -86,7 +86,22 @@ Find the login button and click it.
 
 For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 
-> 💡 **Agent skill available.** This repo includes a project-level skill at [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) that teaches LLM agents how to use all 52 tools effectively. Symlink or copy it into your agent's skills directory (`~/.claude/skills/`, `~/.codex/skills/`, etc.).
+### 3. Install the agent skill (recommended)
+
+The npm package includes a skill that teaches agents how to use all 52
+tools effectively. After install, copy it to your skills directory:
+
+```bash
+# Global install → Claude Code skills
+cp -r "$(npm root -g)/@delicious233/codex-browser-bridge/skills/codex-browser" ~/.claude/skills/
+
+# Or into a local project
+cp -r node_modules/@delicious233/codex-browser-bridge/skills/codex-browser .claude/skills/
+```
+
+**👤 For agents reading this:** to self-install, run the copy command above
+against your own skills directory. The skill is at
+`skills/codex-browser/SKILL.md` inside the installed npm package.
 
 ## All 52 MCP Tools
 

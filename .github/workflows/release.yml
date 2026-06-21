@@ -221,12 +221,16 @@ jobs:
           const fs = require("fs");
           const pack = JSON.parse(fs.readFileSync("pack.json", "utf8"))[0];
           const files = new Set(pack.files.map((f) => f.path));
-          for (const required of ["package.json", "checksums.json", "scripts/install.js", "bin/codex-browser-bridge.js"]) {
+          for (const required of ["package.json", "checksums.json", "scripts/install.js", "bin/codex-browser-bridge.js", "skills/codex-browser/SKILL.md"]) {
             if (!files.has(required)) {
               throw new Error(`npm package is missing ${required}`);
             }
           }
           NODE
+
+      - name: Bundle skill into npm package
+        shell: bash
+        run: cp -r skills npm/skills
 
       - name: Publish npm package
         shell: bash

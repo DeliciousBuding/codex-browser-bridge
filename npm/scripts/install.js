@@ -111,6 +111,10 @@ async function main() {
   const target = path.join(binDir, exeName);
   fs.writeFileSync(target, binary);
   console.log(`Installed: ${target}`);
+  const skillDir = path.join(__dirname, "..", "skills", "codex-browser");
+  if (fs.existsSync(skillDir)) {
+    console.log(`Skill: ${skillDir}\n  → copy to ~/.claude/skills/ to activate the agent skill`);
+  }
 }
 
 if (require.main === module) {
