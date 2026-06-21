@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.9.1] - 2026-06-21
 
 ### Added — 11 new MCP tools (37 → 48)
 
