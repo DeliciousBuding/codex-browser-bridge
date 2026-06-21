@@ -37,8 +37,8 @@ The tool layer is saturated. The honest gaps are runtime robustness, supply chai
 
 - [ ] **winget + scoop manifests.** `winget install codex-browser-bridge` is more native than npm for Windows users. Discovery lift, no code.
   - Effort: S
-- [ ] **MCP resources/prompts.** Expose cookies/localStorage as subscribable resources (agents read state without a tool call per access); ship prompt templates for login/table-extraction flows.
-  - Effort: M
+- [x] **MCP resources/prompts.** ✅ Done. `resources/list` + `resources/read` expose `codex://tabs` (snapshot via getTabs). `prompts/list` + `prompts/get` ship `login` and `extract-table` workflow templates (each cites the concrete tools to call). `initialize` advertises `resources` + `prompts` capabilities. Subscribe / list-changes omitted — these are on-demand snapshots, not a live feed. 5 tests under `cfg(not(windows))`.
+  - Effort: M · landed in `src/mcp/mod.rs`
 - [x] **Config file** (`.codex-browser-bridge.toml`) for profile + upload_base. ✅ Done. `src/config.rs` reads `CODEX_BRIDGE_CONFIG` env path or `./.codex-browser-bridge.toml`; precedence CLI flags > config > env > default. Malformed file warns + is ignored (never bricks startup).
   - Effort: S · landed in `src/config.rs`, `src/main.rs`, `Cargo.toml` (toml dep)
 - [ ] **ARCHITECTURE.md** — design-decision record for contributors.
