@@ -95,6 +95,7 @@ impl super::Server {
             ToolHandler::NetworkMonitor => self.handle_network_monitor(args).await,
             ToolHandler::ConsoleLogs => self.handle_console_logs(args).await,
             ToolHandler::WaitForUrl => self.handle_wait_for_url(args).await,
+            ToolHandler::PerformanceMetrics => self.handle_performance_metrics(args).await,
         };
 
         match result {
@@ -722,5 +723,11 @@ impl super::Server {
         Ok(vec![Content::text(format!(
             "URL matched {pattern} in tab {tab_id}"
         ))])
+    }
+
+    async fn handle_performance_metrics(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let result = browser::performance_metrics(&self.client, tab_id).await?;
+        Ok(vec![Content::text(serde_json::to_string_pretty(&result)?)])
     }
 }

@@ -1,11 +1,11 @@
 ---
 name: codex-browser
-description: Control Chrome via Codex Desktop's browser bridge. 51 MCP tools for tabs, navigation, DOM, input, CDP, network, file upload, dialog handling, and diagnostics.
+description: Control Chrome via Codex Desktop's browser bridge. 52 MCP tools for tabs, navigation, DOM, input, CDP, network, file upload, dialog handling, and diagnostics.
 ---
 
 # Codex Browser Bridge
 
-You are an agent controlling a real Chrome browser through the `codex-browser` MCP server. This skill covers all 51 tools and their effective use.
+You are an agent controlling a real Chrome browser through the `codex-browser` MCP server. This skill covers all 52 tools and their effective use.
 
 ## Quick Check
 
@@ -46,7 +46,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 | `codex_find_element` | Search by ARIA `role` and/or `name`. Returns node IDs. |
 | `codex_click_element` | Click a result from `codex_find_element`. Uses CDP mouse events — no JS injection. |
 
-### Page inspection (6 tools)
+### Page inspection (7 tools)
 
 | Tool | What it does |
 |------|-------------|
@@ -56,6 +56,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 | `codex_page_assets` | List page resources (images, CSS, JS, fonts) |
 | `codex_console_logs` | Capture `console.*` output for a duration window (frontend debugging) |
 | `codex_emulate_device` | Override viewport to emulate a device (`reset=true` to clear) |
+| `codex_performance_metrics` | Chrome Performance metrics — DOM nodes, JS heap, event listeners |
 
 ### Capture (5 tools)
 
@@ -204,8 +205,8 @@ If a tool you expect is missing, the server may be running a reduced profile. Th
 | Profile | Count | Scope |
 |---------|:-----:|-------|
 | `basic` | 33 | tabs, nav, dom, screenshot, bring_to_front, core interaction |
-| `network` | 49 | basic + cookies, CDP, file upload, dialog |
-| `full` | 51 | everything (default) |
+| `network` | 50 | basic + cookies, CDP, file upload, dialog |
+| `full` | 52 | everything (default) |
 
 ## Security
 

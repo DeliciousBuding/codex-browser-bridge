@@ -55,6 +55,7 @@ pub(super) fn registered_tools() -> Vec<Tool> {
         Tool::new("codex_network_monitor", "[Network] Capture network requests for a duration, pairing request and response into a structured list. Each entry: {request_id, url, method, status, mime_type}. Enables Network domain, collects for duration_ms, then disables. Use to debug API calls, inspect XHR/fetch traffic, or reverse-engineer endpoints.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"},"duration_ms":{"type":"integer","description":"Capture window in ms. Default 5000."}},"required":["tab_id"]}"#), ToolHandler::NetworkMonitor),
         Tool::new("codex_console_logs", "[Page] Capture console.* output for a duration. Enables Runtime, collects Runtime.consoleAPICalled events, then disables. Returns raw log entries. Use to debug frontend errors and log output.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"},"duration_ms":{"type":"integer","description":"Capture window in ms. Default 5000."}},"required":["tab_id"]}"#), ToolHandler::ConsoleLogs),
         Tool::new("codex_wait_for_url", "[Navigation] Poll until location.href contains a substring. For SPAs that change the URL on route change without a full page navigation. Returns error on timeout.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"},"pattern":{"type":"string","description":"Substring to match in the URL"},"timeout_ms":{"type":"integer","description":"Max wait in ms. Default 10000."}},"required":["tab_id","pattern"]}"#), ToolHandler::WaitForUrl),
+        Tool::new("codex_performance_metrics", "[Page] Get Chrome Performance metrics via Performance.getMetrics — DOM node count, JS heap size, document count, event listener count, etc. Use to diagnose page weight and memory.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"}},"required":["tab_id"]}"#), ToolHandler::PerformanceMetrics),
     ]
 }
 
@@ -82,8 +83,8 @@ mod tests {
             .map(|tool| tool.name)
             .collect();
         assert_eq!(names.first(), Some(&"codex_list_tabs"));
-        assert_eq!(names.last(), Some(&"codex_wait_for_url"));
-        assert_eq!(names.len(), 51);
+        assert_eq!(names.last(), Some(&"codex_performance_metrics"));
+        assert_eq!(names.len(), 52);
     }
 
     #[test]

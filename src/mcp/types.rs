@@ -54,6 +54,7 @@ pub(super) enum ToolHandler {
     NetworkMonitor,
     ConsoleLogs,
     WaitForUrl,
+    PerformanceMetrics,
 }
 
 #[derive(Clone)]

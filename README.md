@@ -6,7 +6,7 @@
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
     Let Claude Code and other MCP agents control your existing Chrome browser through Codex Desktop's browser bridge.
-    <br>51 MCP tools. Pure Rust. Single binary. Zero config.
+    <br>52 MCP tools. Pure Rust. Single binary. Zero config.
   </p>
 </p>
 
@@ -32,7 +32,7 @@
 
 `codex-browser-bridge` turns your **local Codex Desktop + Chrome** into an MCP server that any agent can control.
 
-No browser profile copying. No WebDriver. No remote setup. It connects to the Codex browser named pipe that already exists on your machine, speaks the same JSON-RPC protocol, and exposes 51 MCP tools for browser automation.
+No browser profile copying. No WebDriver. No remote setup. It connects to the Codex browser named pipe that already exists on your machine, speaks the same JSON-RPC protocol, and exposes 52 MCP tools for browser automation.
 
 **Your agent can:**
 
@@ -86,9 +86,9 @@ Find the login button and click it.
 
 For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 
-> 💡 **Agent skill available.** This repo includes a project-level skill at [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) that teaches LLM agents how to use all 51 tools effectively. Symlink or copy it into your agent's skills directory (`~/.claude/skills/`, `~/.codex/skills/`, etc.).
+> 💡 **Agent skill available.** This repo includes a project-level skill at [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) that teaches LLM agents how to use all 52 tools effectively. Symlink or copy it into your agent's skills directory (`~/.claude/skills/`, `~/.codex/skills/`, etc.).
 
-## All 51 MCP Tools
+## All 52 MCP Tools
 
 ### Tab Management `[Tabs]`
 | Tool | Description |
@@ -134,6 +134,7 @@ For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 | `codex_print_pdf` | Render page to PDF |
 | `codex_bring_to_front` | Activate a background tab (fixes screenshot timeouts) |
 | `codex_dialog` | Handle alert / confirm / prompt |
+| `codex_performance_metrics` | DOM nodes, JS heap, event listeners (Performance) |
 
 ### Input & Interaction `[Input]`
 | Tool | Description |
@@ -187,8 +188,8 @@ codex-browser-bridge --mode cli
 
 # With tool profiles
 codex-browser-bridge --mode mcp --profile basic     # 33 tools
-codex-browser-bridge --mode mcp --profile network   # 49 tools
-codex-browser-bridge --mode mcp --profile full      # all 51 (default)
+codex-browser-bridge --mode mcp --profile network   # 50 tools
+codex-browser-bridge --mode mcp --profile full      # all 52 (default)
 ```
 
 ## Architecture

@@ -732,6 +732,19 @@ pub async fn console_logs(
     }))
 }
 
+/// Get Performance metrics via `Performance.getMetrics` — DOM node count, JS
+/// heap size, document count, event listener count, etc. Enables/disables the
+/// Performance domain around the read.
+pub async fn performance_metrics(client: &Client, tab_id: &str) -> Result<Value> {
+    let id = parse_tab_id("performance_metrics", tab_id)?;
+    client.execute_cdp(id, "Performance.enable", None).await?;
+    let raw = client.execute_cdp(id, "Performance.getMetrics", None).await;
+    client.execute_cdp(id, "Performance.disable", None).await.ok();
+    let raw = raw?;
+    serde_json::from_str(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("parse performance metrics: {err}")))
+}
+
 pub async fn evaluate(client: &Client, tab_id: &str, expression: &str) -> Result<Box<RawValue>> {
     let id = parse_tab_id("evaluate", tab_id)?;
     client
@@ -1591,4 +1604,41 @@ const VISIBLE_DOM_SCRIPT: &str = r#"(() => {
     }
     return walk(document.body, 0);
 })()"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_ax_tree_extracts_nodes_with_defaults() {
+        let raw = r#"{"nodes":[
+            {"nodeId":"1","role":{"value":"button"},"name":{"value":"Login"},"backendDOMNodeId":42},
+            {"nodeId":"2","role":{"value":"link"},"name":{"value":"Home"}},
+            {"nodeId":"3"}
+        ]}"#;
+        let nodes = parse_ax_tree(raw).unwrap();
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[0].node_id, "1");
+        assert_eq!(nodes[0].role, "button");
+        assert_eq!(nodes[0].name, "Login");
+        assert_eq!(nodes[0].backend_dom_node_id, Some(42));
+        // node with no role/name/backendId defaults to empty/None
+        assert_eq!(nodes[2].node_id, "3");
+        assert_eq!(nodes[2].role, "");
+        assert_eq!(nodes[2].name, "");
+        assert_eq!(nodes[2].backend_dom_node_id, None);
+    }
+
+    #[test]
+    fn parse_ax_tree_rejects_invalid_json() {
+        assert!(parse_ax_tree("not json").is_err());
+        assert!(parse_ax_tree(r#"{"wrong":1}"#).is_err());
+    }
+
+    #[test]
+    fn parse_ax_tree_empty_nodes() {
+        let nodes = parse_ax_tree(r#"{"nodes":[]}"#).unwrap();
+        assert!(nodes.is_empty());
+    }
+}
 

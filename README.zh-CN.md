@@ -6,7 +6,7 @@
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
     让 Claude Code 和其他 MCP Agent 通过 Codex Desktop 控制你现有的 Chrome 浏览器。
-    <br>51 个 MCP 工具。纯 Rust。单文件二进制。零配置。
+    <br>52 个 MCP 工具。纯 Rust。单文件二进制。零配置。
   </p>
 </p>
 
@@ -32,7 +32,7 @@
 
 `codex-browser-bridge` 把你本机的 **Codex Desktop + Chrome** 变成一个任何 agent 都能控制的 MCP 服务器。
 
-无需复制浏览器配置。无需 WebDriver。无需远程配置。它直接连接本机已存在的 Codex 浏览器 named pipe，使用相同的 JSON-RPC 协议，暴露 51 个 MCP 工具用于浏览器自动化。
+无需复制浏览器配置。无需 WebDriver。无需远程配置。它直接连接本机已存在的 Codex 浏览器 named pipe，使用相同的 JSON-RPC 协议，暴露 52 个 MCP 工具用于浏览器自动化。
 
 **你的 Agent 可以：**
 
@@ -86,9 +86,9 @@ npm i -g @delicious233/codex-browser-bridge
 
 Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 
-> 💡 **Agent skill 已内置。** 仓库 [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) 包含 LLM agent 使用全部 51 个工具的操作手册。将其 symlink 或复制到 agent 的 skills 目录即可（`~/.claude/skills/`、`~/.codex/skills/` 等）。
+> 💡 **Agent skill 已内置。** 仓库 [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) 包含 LLM agent 使用全部 52 个工具的操作手册。将其 symlink 或复制到 agent 的 skills 目录即可（`~/.claude/skills/`、`~/.codex/skills/` 等）。
 
-## 全部 51 个 MCP 工具
+## 全部 52 个 MCP 工具
 
 ### 标签管理 `[Tabs]`
 | 工具 | 说明 |
@@ -134,6 +134,7 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 | `codex_print_pdf` | 渲染页面为 PDF |
 | `codex_bring_to_front` | 激活后台标签（修复截图超时） |
 | `codex_dialog` | 处理 alert / confirm / prompt |
+| `codex_performance_metrics` | DOM 节点数、JS 堆、事件监听数（性能） |
 
 ### 输入交互 `[Input]`
 | 工具 | 说明 |
@@ -187,8 +188,8 @@ codex-browser-bridge --mode cli
 
 # 工具 profile
 codex-browser-bridge --mode mcp --profile basic     # 33 个工具
-codex-browser-bridge --mode mcp --profile network   # 49 个工具
-codex-browser-bridge --mode mcp --profile full      # 全部 51 个（默认）
+codex-browser-bridge --mode mcp --profile network   # 50 个工具
+codex-browser-bridge --mode mcp --profile full      # 全部 52 个（默认）
 ```
 
 ## 架构
