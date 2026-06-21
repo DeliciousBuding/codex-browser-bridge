@@ -72,6 +72,17 @@ impl super::Server {
             ToolHandler::FormFill => self.handle_form_fill(args).await,
             ToolHandler::Doctor => self.handle_doctor().await,
             ToolHandler::BringToFront => self.handle_bring_to_front(args).await,
+            ToolHandler::GetUrl => self.handle_get_url(args).await,
+            ToolHandler::GetTitle => self.handle_get_title(args).await,
+            ToolHandler::WaitForElement => self.handle_wait_for_element(args).await,
+            ToolHandler::Hover => self.handle_hover(args).await,
+            ToolHandler::PrintPdf => self.handle_print_pdf(args).await,
+            ToolHandler::Storage => self.handle_storage(args).await,
+            ToolHandler::SelectOption => self.handle_select_option(args).await,
+            ToolHandler::Drag => self.handle_drag(args).await,
+            ToolHandler::ScreenshotElement => self.handle_screenshot_element(args).await,
+            ToolHandler::DeleteCookies => self.handle_delete_cookies(args).await,
+            ToolHandler::EmulateDevice => self.handle_emulate_device(args).await,
         };
 
         match result {
@@ -521,6 +532,147 @@ impl super::Server {
         browser::bring_to_front(&self.client, tab_id).await?;
         Ok(vec![Content::text(format!(
             "Tab {tab_id} brought to front"
+        ))])
+    }
+
+    async fn handle_get_url(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let url = browser::get_url(&self.client, tab_id).await?;
+        Ok(vec![Content::text(url)])
+    }
+
+    async fn handle_get_title(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let title = browser::get_title(&self.client, tab_id).await?;
+        Ok(vec![Content::text(title)])
+    }
+
+    async fn handle_wait_for_element(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let selector = required_str(&args, "selector")?;
+        let timeout_ms = optional_u64(&args, "timeout_ms")?.unwrap_or(10_000);
+        browser::wait_for_element(&self.client, tab_id, selector, timeout_ms).await?;
+        Ok(vec![Content::text(format!(
+            "Element {selector} found in tab {tab_id}"
+        ))])
+    }
+
+    async fn handle_hover(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let selector = required_str(&args, "selector")?;
+        browser::hover(&self.client, tab_id, selector).await?;
+        Ok(vec![Content::text(format!(
+            "Hovered {selector} in tab {tab_id}"
+        ))])
+    }
+
+    async fn handle_print_pdf(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let data = browser::print_pdf(&self.client, tab_id).await?;
+        Ok(vec![Content::text(format!(
+            "PDF generated for tab {tab_id} ({} bytes base64). Save and decode as application/pdf.",
+            data.len()
+        ))])
+    }
+
+    async fn handle_storage(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let key = required_str(&args, "key")?;
+        let action = args
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("get");
+        match action {
+            "get" => {
+                let val = browser::storage_get(&self.client, tab_id, key).await?;
+                Ok(vec![Content::text(val.unwrap_or_else(|| "null".into()))])
+            }
+            "set" => {
+                let value = required_string_value(&args, "value")?;
+                browser::storage_set(&self.client, tab_id, key, value).await?;
+                Ok(vec![Content::text(format!("localStorage[{key}] set"))])
+            }
+            other => anyhow::bail!("Invalid action '{other}': must be 'get' or 'set'"),
+        }
+    }
+
+    async fn handle_select_option(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let selector = required_str(&args, "selector")?;
+        let value = required_string_value(&args, "value")?;
+        browser::select_option(&self.client, tab_id, selector, value).await?;
+        Ok(vec![Content::text(format!(
+            "Selected {value} on {selector} in tab {tab_id}"
+        ))])
+    }
+
+    async fn handle_drag(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let from_x = required_i64(&args, "from_x")?;
+        let from_y = required_i64(&args, "from_y")?;
+        let to_x = required_i64(&args, "to_x")?;
+        let to_y = required_i64(&args, "to_y")?;
+        browser::drag(&self.client, tab_id, from_x, from_y, to_x, to_y).await?;
+        Ok(vec![Content::text(format!(
+            "Dragged ({from_x},{from_y}) to ({to_x},{to_y}) in tab {tab_id}"
+        ))])
+    }
+
+    async fn handle_screenshot_element(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let selector = required_str(&args, "selector")?;
+        let data = browser::screenshot_element(&self.client, tab_id, selector).await?;
+        Ok(vec![
+            Content::image(data.clone(), "image/png"),
+            Content::text(format!(
+                "Element screenshot of {selector} in tab {tab_id} ({} bytes base64)",
+                data.len()
+            )),
+        ])
+    }
+
+    async fn handle_delete_cookies(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let name = required_str(&args, "name")?;
+        let mut params = json!({ "name": name });
+        if let Some(obj) = params.as_object_mut() {
+            if let Some(url) = args.get("url").and_then(Value::as_str) {
+                obj.insert("url".into(), json!(url));
+            }
+            if let Some(domain) = args.get("domain").and_then(Value::as_str) {
+                obj.insert("domain".into(), json!(domain));
+            }
+            if let Some(path) = args.get("path").and_then(Value::as_str) {
+                obj.insert("path".into(), json!(path));
+            }
+        }
+        browser::delete_cookies(&self.client, tab_id, params).await?;
+        Ok(vec![Content::text(format!(
+            "Deleted cookies named {name}"
+        ))])
+    }
+
+    async fn handle_emulate_device(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = required_str(&args, "tab_id")?;
+        let reset = optional_bool(&args, "reset")?.unwrap_or(false);
+        if reset {
+            browser::reset_device(&self.client, tab_id).await?;
+            return Ok(vec![Content::text(format!(
+                "Device emulation cleared for tab {tab_id}"
+            ))]);
+        }
+        let width = optional_u64(&args, "width")?.unwrap_or(390) as i64;
+        let height = optional_u64(&args, "height")?.unwrap_or(844) as i64;
+        let mobile = optional_bool(&args, "mobile")?.unwrap_or(true);
+        let user_agent = args
+            .get("user_agent")
+            .and_then(Value::as_str)
+            .unwrap_or(
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+            );
+        browser::emulate_device(&self.client, tab_id, width, height, user_agent, mobile).await?;
+        Ok(vec![Content::text(format!(
+            "Emulating {width}x{height} (mobile={mobile}) in tab {tab_id}. Call with reset=true to clear."
         ))])
     }
 }

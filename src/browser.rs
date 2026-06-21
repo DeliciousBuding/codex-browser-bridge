@@ -242,6 +242,297 @@ pub async fn bring_to_front(client: &Client, tab_id: &str) -> Result<()> {
         .map(|_| ())
 }
 
+/// Current tab URL via `location.href`.
+pub async fn get_url(client: &Client, tab_id: &str) -> Result<String> {
+    let id = parse_tab_id("get_url", tab_id)?;
+    let raw = client
+        .execute_cdp(
+            id,
+            "Runtime.evaluate",
+            Some(json!({ "expression": "location.href", "returnByValue": true })),
+        )
+        .await?;
+    runtime_value_string(&raw)?
+        .ok_or_else(|| BridgeError::Protocol("empty url from location.href".into()))
+}
+
+/// Current page title via `document.title`.
+pub async fn get_title(client: &Client, tab_id: &str) -> Result<String> {
+    let id = parse_tab_id("get_title", tab_id)?;
+    let raw = client
+        .execute_cdp(
+            id,
+            "Runtime.evaluate",
+            Some(json!({ "expression": "document.title", "returnByValue": true })),
+        )
+        .await?;
+    Ok(runtime_value_string(&raw)?.unwrap_or_default())
+}
+
+/// Poll until a CSS selector matches. Essential for SPAs where `wait_for_load`
+/// returns immediately (URL unchanged) but content renders asynchronously.
+pub async fn wait_for_element(
+    client: &Client,
+    tab_id: &str,
+    selector: &str,
+    timeout_ms: u64,
+) -> Result<()> {
+    let id = parse_tab_id("wait_for_element", tab_id)?;
+    let timeout_ms = if timeout_ms == 0 { 10_000 } else { timeout_ms };
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let escaped = selector.replace('\\', "\\\\").replace('`', "\\`");
+    let expr = format!("document.querySelector(`{escaped}`) !== null");
+
+    loop {
+        if Instant::now() >= deadline {
+            return Err(BridgeError::Timeout(format!(
+                "element {selector:?} not found after {timeout_ms}ms"
+            )));
+        }
+        match client
+            .execute_cdp(
+                id,
+                "Runtime.evaluate",
+                Some(json!({ "expression": expr, "returnByValue": true })),
+            )
+            .await
+        {
+            Ok(raw) => {
+                if let Some(found) = runtime_value_string(&raw)? {
+                    if found == "true" {
+                        return Ok(());
+                    }
+                }
+            }
+            Err(err) if is_transient_load_error(&err) && Instant::now() < deadline => {}
+            Err(err) => return Err(err),
+        }
+        sleep_until(deadline, Duration::from_millis(100)).await;
+    }
+}
+
+/// Hover over an element by CSS selector. Dispatches mouseover + mousemove via JS.
+pub async fn hover(client: &Client, tab_id: &str, selector: &str) -> Result<()> {
+    let id = parse_tab_id("hover", tab_id)?;
+    let escaped = selector.replace('\\', "\\\\").replace('`', "\\`");
+    let expr = format!(
+        "(function(){{var e=document.querySelector(`{escaped}`);if(!e)return{{ok:false,error:'element not found'}};e.dispatchEvent(new MouseEvent('mouseover',{{bubbles:true}}));e.dispatchEvent(new MouseEvent('mousemove',{{bubbles:true}}));return{{ok:true}}}})()"
+    );
+    let raw = client
+        .execute_cdp(
+            id,
+            "Runtime.evaluate",
+            Some(json!({ "expression": expr, "returnByValue": true })),
+        )
+        .await?;
+    parse_action_result(&raw, "hover")
+}
+
+/// Render the page to PDF via `Page.printToPDF`. Returns base64-encoded PDF.
+pub async fn print_pdf(client: &Client, tab_id: &str) -> Result<String> {
+    let id = parse_tab_id("print_pdf", tab_id)?;
+    let raw = client
+        .execute_cdp(
+            id,
+            "Page.printToPDF",
+            Some(json!({ "format": "A4", "printBackground": true })),
+        )
+        .await?;
+    #[derive(Deserialize)]
+    struct Pdf {
+        data: String,
+    }
+    let pdf: Pdf = serde_json::from_str(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("parse printToPDF response: {err}")))?;
+    Ok(pdf.data)
+}
+
+// ── Storage ─────────────────────────────────────────────────────
+
+/// Read a localStorage key. Returns None if the key is unset.
+pub async fn storage_get(client: &Client, tab_id: &str, key: &str) -> Result<Option<String>> {
+    let id = parse_tab_id("storage_get", tab_id)?;
+    let key_json = serde_json::to_string(key).unwrap_or_else(|_| "null".into());
+    let raw = client
+        .execute_cdp(
+            id,
+            "Runtime.evaluate",
+            Some(json!({ "expression": format!("localStorage.getItem({key_json})"), "returnByValue": true })),
+        )
+        .await?;
+    Ok(runtime_value_string(&raw)?.filter(|s| s != "null"))
+}
+
+/// Write a localStorage key.
+pub async fn storage_set(
+    client: &Client,
+    tab_id: &str,
+    key: &str,
+    value: &str,
+) -> Result<()> {
+    let id = parse_tab_id("storage_set", tab_id)?;
+    let key_json = serde_json::to_string(key).unwrap_or_else(|_| "null".into());
+    let val_json = serde_json::to_string(value).unwrap_or_else(|_| "null".into());
+    let raw = client
+        .execute_cdp(
+            id,
+            "Runtime.evaluate",
+            Some(json!({ "expression": format!("localStorage.setItem({key_json}, {val_json}); true"), "returnByValue": true })),
+        )
+        .await?;
+    runtime_value_string(&raw)?;
+    Ok(())
+}
+
+// ── Form & advanced interaction ──────────────────────────────────
+
+/// Set a `<select>` element's value and fire change/input. Plain codex_fill
+/// does not reliably trigger change handlers on select elements.
+pub async fn select_option(
+    client: &Client,
+    tab_id: &str,
+    selector: &str,
+    value: &str,
+) -> Result<()> {
+    let id = parse_tab_id("select_option", tab_id)?;
+    let sel = serde_json::to_string(selector).unwrap_or_else(|_| "null".into());
+    let val = serde_json::to_string(value).unwrap_or_else(|_| "null".into());
+    let expr = format!(
+        "(function(){{var s=document.querySelector({sel});if(!s)return{{ok:false,error:'element not found'}};s.value={val};s.dispatchEvent(new Event('input',{{bubbles:true}}));s.dispatchEvent(new Event('change',{{bubbles:true}}));return{{ok:true}}}})()"
+    );
+    let raw = client
+        .execute_cdp(
+            id,
+            "Runtime.evaluate",
+            Some(json!({ "expression": expr, "returnByValue": true })),
+        )
+        .await?;
+    parse_action_result(&raw, "select_option")
+}
+
+/// Drag from one point to another via CDP mouse events (down → interpolated moves → up).
+pub async fn drag(
+    client: &Client,
+    tab_id: &str,
+    from_x: i64,
+    from_y: i64,
+    to_x: i64,
+    to_y: i64,
+) -> Result<()> {
+    let id = parse_tab_id("drag", tab_id)?;
+    client
+        .execute_cdp(
+            id,
+            "Input.dispatchMouseEvent",
+            Some(json!({ "type": "mousePressed", "x": from_x, "y": from_y, "button": "left", "clickCount": 1 })),
+        )
+        .await?;
+    let steps = 5;
+    for i in 1..=steps {
+        let t = i as f64 / steps as f64;
+        let x = from_x as f64 + (to_x as f64 - from_x as f64) * t;
+        let y = from_y as f64 + (to_y as f64 - from_y as f64) * t;
+        client
+            .execute_cdp(
+                id,
+                "Input.dispatchMouseEvent",
+                Some(json!({ "type": "mouseMoved", "x": x as i64, "y": y as i64 })),
+            )
+            .await?;
+    }
+    client
+        .execute_cdp(
+            id,
+            "Input.dispatchMouseEvent",
+            Some(json!({ "type": "mouseReleased", "x": to_x, "y": to_y, "button": "left", "clickCount": 1 })),
+        )
+        .await
+        .map(|_| ())
+}
+
+/// Screenshot a single element by clipping to its bounding rect.
+pub async fn screenshot_element(client: &Client, tab_id: &str, selector: &str) -> Result<String> {
+    let id = parse_tab_id("screenshot_element", tab_id)?;
+    let sel = serde_json::to_string(selector).unwrap_or_else(|_| "null".into());
+    let expr = format!(
+        "(function(){{var e=document.querySelector({sel});if(!e)return null;var r=e.getBoundingClientRect();if(r.width===0||r.height===0)return null;return JSON.stringify({{x:r.x,y:r.y,width:r.width,height:r.height}})}})()"
+    );
+    let raw = client
+        .execute_cdp(
+            id,
+            "Runtime.evaluate",
+            Some(json!({ "expression": expr, "returnByValue": true })),
+        )
+        .await?;
+    let rect_str = runtime_value_string(&raw)?
+        .filter(|s| s != "null")
+        .ok_or_else(|| BridgeError::User(format!("element {selector:?} not found or has zero size")))?;
+    #[derive(Deserialize)]
+    struct Rect {
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    }
+    let rect: Rect = serde_json::from_str(&rect_str)
+        .map_err(|err| BridgeError::Protocol(format!("parse element rect: {err}")))?;
+    let raw = client
+        .execute_cdp(
+            id,
+            "Page.captureScreenshot",
+            Some(json!({
+                "format": "png",
+                "clip": { "x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height, "scale": 1.0 }
+            })),
+        )
+        .await?;
+    screenshot_data(&raw)
+}
+
+/// Delete cookies by name (optionally scoped by url/domain/path).
+pub async fn delete_cookies(client: &Client, tab_id: &str, params: Value) -> Result<()> {
+    let id = parse_tab_id("delete_cookies", tab_id)?;
+    client
+        .execute_cdp(id, "Network.deleteCookies", Some(params))
+        .await
+        .map(|_| ())
+}
+
+/// Emulate a device viewport (width/height/userAgent/mobile).
+pub async fn emulate_device(
+    client: &Client,
+    tab_id: &str,
+    width: i64,
+    height: i64,
+    user_agent: &str,
+    mobile: bool,
+) -> Result<()> {
+    let id = parse_tab_id("emulate_device", tab_id)?;
+    client
+        .execute_cdp(
+            id,
+            "Emulation.setDeviceMetricsOverride",
+            Some(json!({
+                "width": width,
+                "height": height,
+                "deviceScaleFactor": 1,
+                "mobile": mobile,
+                "userAgent": user_agent
+            })),
+        )
+        .await
+        .map(|_| ())
+}
+
+/// Clear device emulation (revert to real viewport).
+pub async fn reset_device(client: &Client, tab_id: &str) -> Result<()> {
+    let id = parse_tab_id("reset_device", tab_id)?;
+    client
+        .execute_cdp(id, "Emulation.clearDeviceMetricsOverride", None)
+        .await
+        .map(|_| ())
+}
+
 pub async fn evaluate(client: &Client, tab_id: &str, expression: &str) -> Result<Box<RawValue>> {
     let id = parse_tab_id("evaluate", tab_id)?;
     client

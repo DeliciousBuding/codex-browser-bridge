@@ -30,36 +30,40 @@ impl ToolProfile {
     }
 }
 
-// Basic: essential tab + nav + dom + screenshot + interaction (~25 tools)
+// Basic: essential tab + nav + dom + screenshot + interaction (~32 tools)
 const BASIC_TOOLS: &[&str] = &[
     "codex_list_tabs", "codex_create_tab", "codex_close_tab",
     "codex_user_tabs", "codex_claim_tab",
     "codex_navigate", "codex_reload", "codex_navigate_back",
     "codex_navigate_forward", "codex_wait_for_load",
-    "codex_nav_and_wait",
+    "codex_nav_and_wait", "codex_wait_for_element",
     "codex_dom_snapshot", "codex_dom_get_visible", "codex_dom_click",
     "codex_find_element", "codex_click_element",
-    "codex_screenshot", "codex_bring_to_front", "codex_click", "codex_fill", "codex_form_fill",
-    "codex_evaluate", "codex_cua_scroll",
+    "codex_screenshot", "codex_bring_to_front", "codex_screenshot_element",
+    "codex_click", "codex_fill", "codex_form_fill", "codex_select_option",
+    "codex_hover",
+    "codex_evaluate", "codex_get_url", "codex_get_title", "codex_cua_scroll",
     "codex_name_session", "codex_finalize", "codex_get_info",
 ];
 
-// Network: Basic + cookies + CDP + file upload + dialog + doctor (~32 tools)
+// Network: Basic + cookies + CDP + file upload + dialog + storage + pdf + emulate (~44 tools)
 const NETWORK_TOOLS: &[&str] = &[
     "codex_list_tabs", "codex_create_tab", "codex_close_tab",
     "codex_user_tabs", "codex_claim_tab",
     "codex_navigate", "codex_reload", "codex_navigate_back",
     "codex_navigate_forward", "codex_wait_for_load",
-    "codex_nav_and_wait",
+    "codex_nav_and_wait", "codex_wait_for_element",
     "codex_dom_snapshot", "codex_dom_get_visible", "codex_dom_click",
     "codex_find_element", "codex_click_element",
-    "codex_screenshot", "codex_bring_to_front", "codex_click", "codex_fill", "codex_form_fill",
-    "codex_click_and_wait",
-    "codex_evaluate",
+    "codex_screenshot", "codex_bring_to_front", "codex_screenshot_element",
+    "codex_click", "codex_fill", "codex_form_fill", "codex_select_option",
+    "codex_click_and_wait", "codex_hover", "codex_drag",
+    "codex_evaluate", "codex_get_url", "codex_get_title",
     "codex_cua_click", "codex_cua_type", "codex_cua_keypress",
     "codex_cua_scroll",
-    "codex_network_cookies", "codex_network_set_cookie",
-    "codex_file_input", "codex_dialog",
+    "codex_network_cookies", "codex_network_set_cookie", "codex_delete_cookies",
+    "codex_file_input", "codex_dialog", "codex_storage", "codex_print_pdf",
+    "codex_emulate_device",
     "codex_name_session", "codex_finalize", "codex_get_info",
     "codex_doctor",
 ];

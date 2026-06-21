@@ -40,6 +40,17 @@ pub(super) enum ToolHandler {
     FormFill,
     Doctor,
     BringToFront,
+    GetUrl,
+    GetTitle,
+    WaitForElement,
+    Hover,
+    PrintPdf,
+    Storage,
+    SelectOption,
+    Drag,
+    ScreenshotElement,
+    DeleteCookies,
+    EmulateDevice,
 }
 
 #[derive(Clone)]
