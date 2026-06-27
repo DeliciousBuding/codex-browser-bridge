@@ -22,11 +22,11 @@ tokio = { version = "1.48", features = ["io-std", "io-util", "macros", "net", "p
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 uuid = { version = "1.11", features = ["v4"] }
-toml = "0.8"
+toml = "1.1"
 
 [dev-dependencies]
 assert_cmd = "2.0"
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 predicates = "3.1"
 tempfile = "3.14"
 
