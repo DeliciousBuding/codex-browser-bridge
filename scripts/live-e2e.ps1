@@ -50,12 +50,38 @@ $proc = [System.Diagnostics.Process]::Start($psi)
 
 $nextId = 0
 $tabId = $null
+$bridgeStopped = $false
+
+function Stop-BridgeProcess {
+    if ($script:bridgeStopped) {
+        return
+    }
+    $script:bridgeStopped = $true
+    if ($script:proc -and -not $script:proc.HasExited) {
+        $script:proc.Kill()
+        [void]$script:proc.WaitForExit(5000)
+    }
+}
+
+function Read-BridgeStderr {
+    if (-not $script:proc) {
+        return ""
+    }
+    if ($script:proc.HasExited) {
+        return $script:proc.StandardError.ReadToEnd()
+    }
+    return "<stderr unavailable: bridge process is still running>"
+}
 
 function Invoke-Mcp {
     param(
         [string]$Method,
         [object]$Params = $null
     )
+
+    if ($script:bridgeStopped -or $script:proc.HasExited) {
+        throw "MCP process is not running"
+    }
 
     $script:nextId += 1
     $request = [ordered]@{
@@ -73,16 +99,17 @@ function Invoke-Mcp {
 
     $lineTask = $script:proc.StandardOutput.ReadLineAsync()
     if (-not $lineTask.Wait($script:RequestTimeoutMs)) {
-        if (-not $script:proc.HasExited) {
-            $script:proc.Kill()
-        }
-        $stderr = $script:proc.StandardError.ReadToEnd()
+        Stop-BridgeProcess
+        $stderr = Read-BridgeStderr
         throw "MCP response timed out after $script:RequestTimeoutMs ms for $Method. stderr: $stderr"
     }
 
     $line = $lineTask.Result
     if (-not $line) {
-        $stderr = $script:proc.StandardError.ReadToEnd()
+        if (-not $script:proc.HasExited) {
+            Stop-BridgeProcess
+        }
+        $stderr = Read-BridgeStderr
         throw "MCP process closed before response. stderr: $stderr"
     }
 
@@ -143,20 +170,20 @@ try {
 
     Write-Host "Live E2E passed: tab=$tabId title=$titleText screenshot_base64_bytes=$($image.data.Length)"
 } finally {
-    if ($tabId) {
+    if ($tabId -and -not $bridgeStopped -and -not $proc.HasExited) {
         try {
             Invoke-Tool "codex_close_tab" @{ tab_id = $tabId } | Out-Null
         } catch {
             Write-Warning $_
         }
     }
-    try {
-        Invoke-Tool "codex_finalize" | Out-Null
-    } catch {
-        Write-Warning $_
+    if (-not $bridgeStopped -and -not $proc.HasExited) {
+        try {
+            Invoke-Tool "codex_finalize" | Out-Null
+        } catch {
+            Write-Warning $_
+        }
     }
-    if (-not $proc.HasExited) {
-        $proc.Kill()
-    }
+    Stop-BridgeProcess
     $proc.Dispose()
 }
