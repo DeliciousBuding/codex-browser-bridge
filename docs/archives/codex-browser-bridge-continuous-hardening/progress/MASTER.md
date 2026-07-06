@@ -33,8 +33,8 @@
 
 ## Current Status
 
-**Active Phase**: Live E2E harness cleanup hardening
-**Active Task**: PR #15 CI is green at `488d8fb`; hardening live E2E timeout cleanup so killed bridge processes do not trigger blocking stderr reads or follow-up MCP cleanup calls.
+**Active Phase**: Live E2E harness timeout gate
+**Active Task**: PR #15 CI is green at `d29aa83`; adding a CI-covered fake bridge timeout harness for the live E2E cleanup path.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -85,6 +85,7 @@ adaptive:
 | 2026-07-07 | CI concurrency hardening | S | 5/5 | 0 | Cancel stale PR CI/supply-chain runs and serialize same-tag release workflow runs without cancelling active releases. |
 | 2026-07-07 | Client resource cleanup | S | 5/5 | 1 | Retire idle per-tab locks on tab close/finalize and treat invalid page asset sizes as unknown, with tests for lock retention and resource-size normalization. |
 | 2026-07-07 | Live E2E timeout cleanup | S | 5/5 | 0 | Killed bridge processes now skip close/finalize cleanup and avoid blocking stderr reads on timeout. |
+| 2026-07-07 | Live E2E timeout gate | S | 5/5 | 0 | Added a fake bridge timeout harness script and wired it into Windows CI/release test jobs. |
 
 ## Quick Status Commands
 
@@ -99,8 +100,8 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 
 ## Next Steps
 
-1. Commit and push the live E2E timeout cleanup follow-up to PR #15.
-2. Watch GitHub CI and keep the optional live E2E script syntax-checked locally.
+1. Commit and push the live E2E timeout harness gate to PR #15.
+2. Watch GitHub CI, especially the new Windows fake bridge timeout step.
 3. Configure npm Trusted Publisher before the first tokenless release publish.
 
 ## Session Log
@@ -124,3 +125,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | workflow-concurrency | Added PR-run cancellation for CI/supply-chain and same-tag serialization for release workflow runs. |
 | 2026-07-07 | client-resource-cleanup | Added close/finalize cleanup for stale per-tab locks and page asset size normalization to reduce long-lived agent session resource growth. |
 | 2026-07-07 | live-e2e-timeout-cleanup | Hardened live E2E timeout cleanup so killed bridge processes do not cause secondary hangs. |
+| 2026-07-07 | live-e2e-timeout-gate | Added a CI/release fake bridge timeout harness for live E2E cleanup regressions. |

@@ -39,6 +39,9 @@ jobs:
       - name: Test Rust
         shell: bash
         run: cargo test --locked
+      - name: Test live E2E timeout cleanup
+        shell: pwsh
+        run: ./scripts/test-live-e2e-timeout.ps1
       - name: Build x64
         shell: bash
         run: cargo build --locked --release --target x86_64-pc-windows-msvc
