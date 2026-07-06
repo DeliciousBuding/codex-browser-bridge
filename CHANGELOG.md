@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - Added the Ubuntu mock harness to the release workflow gate before asset creation.
 - Staged GitHub Release assets as a draft until npm publish succeeds, with checksum transfer through workflow artifacts to avoid draft-release read coupling.
 - Added workflow concurrency controls to cancel stale PR validation runs and serialize same-tag release runs.
+- Retired per-tab client locks on tab close/finalize and normalized invalid page asset sizes as unknown to avoid long-lived agent sessions accumulating stale state or fetching misleadingly sized resources.
 - Made explicit config paths authoritative, rejected relative upload paths, cleaned pending CDP requests on page asset timeouts, and normalized fetched asset content to base64.
 - Fixed npm package content checks so CI and release jobs verify the bundled agent skill before publish.
 - Included README and LICENSE in the npm package tarball.

@@ -314,7 +314,7 @@ impl super::Server {
         self.client
             .send_request("finalizeTabs", Some(json!({ "keep": [] })))
             .await?;
-        self.client.clear_attachments().await;
+        self.client.clear_tab_state().await;
         Ok(vec![Content::text("Tabs finalized".to_string())])
     }
 

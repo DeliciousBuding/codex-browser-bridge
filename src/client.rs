@@ -473,9 +473,21 @@ impl Client {
         }
     }
 
-    /// Invalidate the sticky attach cache for a tab (call on tab close or finalize).
+    /// Invalidate the sticky attach cache for a tab.
     pub async fn invalidate_attachment(&self, tab_id: i64) {
         self.inner.attached_tabs.lock().await.remove(&tab_id);
+    }
+
+    /// Retire per-tab state after a tab closes. The lock is removed only when no
+    /// other task already cloned it, preserving serialization for in-flight work.
+    pub async fn retire_tab_state(&self, tab_id: i64) {
+        self.inner.attached_tabs.lock().await.remove(&tab_id);
+        let mut locks = self.inner.tab_locks.lock().await;
+        if let Some(lock) = locks.get(&tab_id) {
+            if Arc::strong_count(lock) == 1 {
+                locks.remove(&tab_id);
+            }
+        }
     }
 
     /// Mark a tab as attached (call after manual attach, e.g. from claim_user_tab).
@@ -483,9 +495,14 @@ impl Client {
         self.inner.attached_tabs.lock().await.insert(tab_id, true);
     }
 
-    /// Clear all attachment state (call on session finalize).
-    pub async fn clear_attachments(&self) {
+    /// Clear all per-tab state (call on session finalize).
+    pub async fn clear_tab_state(&self) {
         self.inner.attached_tabs.lock().await.clear();
+        self.inner
+            .tab_locks
+            .lock()
+            .await
+            .retain(|_, lock| Arc::strong_count(lock) > 1);
     }
 
     async fn tab_lock(&self, tab_id: i64) -> Arc<Mutex<()>> {
@@ -542,6 +559,12 @@ impl Client {
     #[allow(dead_code)]
     pub(crate) async fn pending_len_for_test(&self) -> usize {
         self.inner.pending.lock().await.len()
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) async fn tab_lock_len_for_test(&self) -> usize {
+        self.inner.tab_locks.lock().await.len()
     }
 
     async fn close_for_health_check_failure(&self) {
@@ -865,6 +888,64 @@ mod reconnect_tests {
 
         let err = client.send_request("getInfo", None).await.unwrap_err();
         assert!(matches!(err, BridgeError::Connection(_)), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn retire_tab_state_removes_idle_tab_lock() {
+        let (client, _server) = test_client(4096).await;
+
+        let lock = client.tab_lock(7).await;
+        drop(lock);
+        assert_eq!(client.tab_lock_len_for_test().await, 1);
+
+        client.mark_attached(7).await;
+        client.retire_tab_state(7).await;
+
+        assert_eq!(client.tab_lock_len_for_test().await, 0);
+    }
+
+    #[tokio::test]
+    async fn retire_tab_state_keeps_lock_with_waiters() {
+        let (client, _server) = test_client(4096).await;
+
+        let lock = client.tab_lock(7).await;
+        assert_eq!(client.tab_lock_len_for_test().await, 1);
+
+        client.retire_tab_state(7).await;
+
+        assert_eq!(client.tab_lock_len_for_test().await, 1);
+        drop(lock);
+        client.retire_tab_state(7).await;
+        assert_eq!(client.tab_lock_len_for_test().await, 0);
+    }
+
+    #[tokio::test]
+    async fn clear_tab_state_removes_all_tab_locks() {
+        let (client, _server) = test_client(4096).await;
+
+        drop(client.tab_lock(7).await);
+        drop(client.tab_lock(8).await);
+        assert_eq!(client.tab_lock_len_for_test().await, 2);
+
+        client.clear_tab_state().await;
+
+        assert_eq!(client.tab_lock_len_for_test().await, 0);
+    }
+
+    #[tokio::test]
+    async fn clear_tab_state_keeps_locks_with_waiters() {
+        let (client, _server) = test_client(4096).await;
+
+        let lock = client.tab_lock(7).await;
+        drop(client.tab_lock(8).await);
+        assert_eq!(client.tab_lock_len_for_test().await, 2);
+
+        client.clear_tab_state().await;
+
+        assert_eq!(client.tab_lock_len_for_test().await, 1);
+        drop(lock);
+        client.clear_tab_state().await;
+        assert_eq!(client.tab_lock_len_for_test().await, 0);
     }
 }
 

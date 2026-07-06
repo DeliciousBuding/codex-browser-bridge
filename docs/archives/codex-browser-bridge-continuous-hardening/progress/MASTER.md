@@ -33,8 +33,8 @@
 
 ## Current Status
 
-**Active Phase**: CI resource and release race hardening
-**Active Task**: PR #15 CI is green at `0c2ddc4`; adding workflow concurrency so stale PR runs are cancelled and same-tag release runs cannot race.
+**Active Phase**: Client resource cleanup hardening
+**Active Task**: PR #15 CI is green at `defe4fb`; retiring stale per-tab locks and normalizing invalid page asset sizes to reduce long-lived agent memory/resource growth.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -83,6 +83,7 @@ adaptive:
 | 2026-07-07 | Multi-client config and resource cleanup follow-ups | M | 5/5 | 4 | Made explicit config paths authoritative, added CDP to the network profile, rejected relative upload paths, moved timeout cleanup into the Client path for page asset fetches, normalized asset content to base64, removed stateful/raw Runtime methods from generic CDP, and moved ship-bound changelog entries into 1.10.0. |
 | 2026-07-07 | Release atomicity hardening | S | 5/5 | 1 | Stage GitHub Release assets as a draft, pass checksums to npm via workflow artifact, then publish the GitHub Release only after npm succeeds. |
 | 2026-07-07 | CI concurrency hardening | S | 5/5 | 0 | Cancel stale PR CI/supply-chain runs and serialize same-tag release workflow runs without cancelling active releases. |
+| 2026-07-07 | Client resource cleanup | S | 5/5 | 1 | Retire idle per-tab locks on tab close/finalize and treat invalid page asset sizes as unknown, with tests for lock retention and resource-size normalization. |
 
 ## Quick Status Commands
 
@@ -97,8 +98,8 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 
 ## Next Steps
 
-1. Commit and push the workflow concurrency follow-up to PR #15.
-2. Watch GitHub CI, especially workflow syntax and existing Rust/npm/supply-chain gates.
+1. Commit and push the client resource cleanup follow-up to PR #15.
+2. Watch GitHub CI, especially Windows Rust and Ubuntu mock harness gates.
 3. Configure npm Trusted Publisher before the first tokenless release publish.
 
 ## Session Log
@@ -120,3 +121,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | config-resource-followups | Addressed subagent findings for CODEX_BRIDGE_CONFIG fallback, network profile CDP visibility, relative upload paths, Client pending cleanup on timeouts, base64 page asset content, raw CDP stateful methods, and 1.10.0 changelog hygiene. |
 | 2026-07-07 | release-atomicity | Added draft GitHub Release staging and checksum artifact handoff so npm publish must succeed before release assets become public. |
 | 2026-07-07 | workflow-concurrency | Added PR-run cancellation for CI/supply-chain and same-tag serialization for release workflow runs. |
+| 2026-07-07 | client-resource-cleanup | Added close/finalize cleanup for stale per-tab locks and page asset size normalization to reduce long-lived agent session resource growth. |

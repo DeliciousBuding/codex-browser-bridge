@@ -108,11 +108,11 @@ pub async fn close_tab(client: &Client, tab_id: &str) -> Result<()> {
     let id = parse_tab_id("close_tab", tab_id)?;
     match client.execute_cdp(id, "Page.close", None).await {
         Ok(_) => {
-            client.invalidate_attachment(id).await;
+            client.retire_tab_state(id).await;
             Ok(())
         }
         Err(err) if is_tab_gone_error(&err) => {
-            client.invalidate_attachment(id).await;
+            client.retire_tab_state(id).await;
             Ok(())
         }
         Err(err) => Err(err),
@@ -1402,7 +1402,7 @@ fn collect_resources(tree: &FrameTree, out: &mut Vec<PageResource>) {
             resource_type: r.resource_type.clone(),
             mime_type: r.mime_type.clone(),
             content: None,
-            size: r.content_size.map(|size| size as u64),
+            size: normalize_resource_size(r.content_size),
             failed: None,
             frame_id: frame_id.clone(),
         });
@@ -1410,6 +1410,14 @@ fn collect_resources(tree: &FrameTree, out: &mut Vec<PageResource>) {
     for child in &tree.child_frames {
         collect_resources(child, out);
     }
+}
+
+fn normalize_resource_size(size: Option<f64>) -> Option<u64> {
+    let size = size?;
+    if !size.is_finite() || size <= 0.0 || size > u64::MAX as f64 {
+        return None;
+    }
+    Some(size.ceil() as u64)
 }
 
 fn extract_resource_content(raw: &RawValue) -> Result<String> {
@@ -1851,6 +1859,33 @@ mod tests {
             RawValue::from_string(r#"{"content":"aGVsbG8=","base64Encoded":true}"#.to_string())
                 .unwrap();
         assert_eq!(extract_resource_content(&encoded).unwrap(), "aGVsbG8=");
+    }
+
+    #[test]
+    fn resource_tree_treats_invalid_content_size_as_unknown() {
+        let raw = RawValue::from_string(
+            r#"{"frame":{"id":"root","url":"https://example.com"},"resources":[
+                {"url":"https://example.com/negative.bin","type":"Other","mimeType":"application/octet-stream","contentSize":-1},
+                {"url":"https://example.com/zero.bin","type":"Other","mimeType":"application/octet-stream","contentSize":0},
+                {"url":"https://example.com/ok.css","type":"Stylesheet","mimeType":"text/css","contentSize":12.7}
+            ]}"#
+                .to_string(),
+        )
+        .unwrap();
+
+        let resources = parse_resource_tree(&raw).unwrap();
+
+        assert_eq!(resources[0].size, None);
+        assert_eq!(resources[1].size, None);
+        assert_eq!(resources[2].size, Some(13));
+    }
+
+    #[test]
+    fn resource_size_normalization_rejects_non_finite_values() {
+        assert_eq!(normalize_resource_size(None), None);
+        assert_eq!(normalize_resource_size(Some(f64::NAN)), None);
+        assert_eq!(normalize_resource_size(Some(f64::INFINITY)), None);
+        assert_eq!(normalize_resource_size(Some(1.2)), Some(2));
     }
 
     #[test]
