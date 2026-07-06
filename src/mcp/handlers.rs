@@ -1,5 +1,6 @@
 use serde::Serialize;
 use serde_json::{json, value::RawValue, Value};
+use tokio::time::{timeout, Duration, Instant};
 
 use crate::browser;
 use crate::security;
@@ -26,6 +27,9 @@ const DEFAULT_PAGE_ASSET_MAX_RESOURCES: u64 = 50;
 const MAX_PAGE_ASSET_RESOURCES: u64 = 200;
 const DEFAULT_PAGE_ASSET_MAX_TOTAL_BYTES: u64 = 1_048_576;
 const MAX_PAGE_ASSET_TOTAL_BYTES: u64 = 5_242_880;
+const MAX_PAGE_ASSET_PER_RESOURCE_BYTES: u64 = 1_048_576;
+const PAGE_ASSET_FETCH_TIMEOUT_MS: u64 = 1_500;
+const PAGE_ASSET_FETCH_TOTAL_TIMEOUT_MS: u64 = 10_000;
 
 #[derive(Serialize)]
 struct PageAssetsResponse {
@@ -316,7 +320,25 @@ impl super::Server {
 
     async fn handle_get_info(&self) -> anyhow::Result<Vec<Content>> {
         let raw = self.client.send_request("getInfo", None).await?;
-        Ok(vec![Content::text(raw.get().to_string())])
+        let mut info = serde_json::from_str::<Value>(raw.get()).unwrap_or_else(|_| {
+            json!({
+                "raw": raw.get()
+            })
+        });
+        if let Some(obj) = info.as_object_mut() {
+            let runtime_key = if obj.contains_key("bridge") {
+                "codexBridge"
+            } else {
+                "bridge"
+            };
+            obj.insert(runtime_key.into(), self.bridge_runtime_info());
+        } else {
+            info = json!({
+                "raw": info,
+                "bridge": self.bridge_runtime_info()
+            });
+        }
+        Ok(vec![Content::text(serde_json::to_string_pretty(&info)?)])
     }
 
     async fn handle_execute_cdp(&self, args: Value) -> anyhow::Result<Vec<Content>> {
@@ -352,6 +374,8 @@ impl super::Server {
                 .min(MAX_PAGE_ASSET_TOTAL_BYTES);
             let mut truncated = false;
             let mut limit_reason = None;
+            let fetch_deadline =
+                Instant::now() + Duration::from_millis(PAGE_ASSET_FETCH_TOTAL_TIMEOUT_MS);
 
             if resources.len() > max_resources {
                 resources.truncate(max_resources);
@@ -361,20 +385,43 @@ impl super::Server {
 
             let mut total_bytes = 0_u64;
             for resource in resources.iter_mut() {
-                if let Some(resource_size) = resource.size {
-                    if total_bytes.saturating_add(resource_size) > max_total_bytes {
-                        truncated = true;
-                        limit_reason = Some("max_total_bytes");
-                        resource.failed = Some(true);
-                        break;
-                    }
+                if Instant::now() >= fetch_deadline {
+                    truncated = true;
+                    limit_reason = Some("fetch_timeout");
+                    resource.failed = Some(true);
+                    break;
+                }
+
+                let Some(resource_size) = resource.size else {
+                    truncated = true;
+                    limit_reason = Some("unknown_resource_size");
+                    resource.failed = Some(true);
+                    continue;
+                };
+                if resource_size > MAX_PAGE_ASSET_PER_RESOURCE_BYTES {
+                    truncated = true;
+                    limit_reason = Some("max_resource_bytes");
+                    resource.failed = Some(true);
+                    continue;
+                }
+                if total_bytes.saturating_add(resource_size) > max_total_bytes {
+                    truncated = true;
+                    limit_reason = Some("max_total_bytes");
+                    resource.failed = Some(true);
+                    break;
                 }
 
                 let frame_id = resource.frame_id.clone();
-                match browser::get_resource_content(&self.client, tab_id, &frame_id, &resource.url)
-                    .await
+                let remaining = fetch_deadline.saturating_duration_since(Instant::now());
+                let per_resource_timeout =
+                    remaining.min(Duration::from_millis(PAGE_ASSET_FETCH_TIMEOUT_MS));
+                match timeout(
+                    per_resource_timeout,
+                    browser::get_resource_content(&self.client, tab_id, &frame_id, &resource.url),
+                )
+                .await
                 {
-                    Ok(content) => {
+                    Ok(Ok(content)) => {
                         let content_bytes = content.len() as u64;
                         if total_bytes.saturating_add(content_bytes) > max_total_bytes {
                             truncated = true;
@@ -384,10 +431,20 @@ impl super::Server {
                         total_bytes += content_bytes;
                         resource.content = Some(content);
                     }
-                    Err(err) => {
+                    Ok(Err(err)) => {
                         resource.failed = Some(true);
                         tracing::debug!(
                             "resource content fetch failed for {} (frame={}): {err}",
+                            sanitize_for_log(&resource.url),
+                            sanitize_for_log(&frame_id),
+                        );
+                    }
+                    Err(_) => {
+                        resource.failed = Some(true);
+                        truncated = true;
+                        limit_reason = Some("fetch_timeout");
+                        tracing::debug!(
+                            "resource content fetch timed out for {} (frame={})",
                             sanitize_for_log(&resource.url),
                             sanitize_for_log(&frame_id),
                         );
@@ -477,12 +534,21 @@ impl super::Server {
         let selector = required_str(&args, "selector")?;
         let files = required_str_array(&args, "files")?;
 
-        // Determine upload base: env var or server's current directory
-        let allowed_base = std::env::var("CODEX_BRIDGE_UPLOAD_BASE")
-            .ok()
-            .map(std::path::PathBuf::from)
-            .or_else(|| std::env::current_dir().ok())
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine upload base directory"))?;
+        let upload_base = std::env::var("CODEX_BRIDGE_UPLOAD_BASE").map_err(|_| {
+            anyhow::anyhow!("CODEX_BRIDGE_UPLOAD_BASE must be set to enable codex_file_input")
+        })?;
+        let allowed_base = std::fs::canonicalize(&upload_base).map_err(|err| {
+            anyhow::anyhow!(
+                "Cannot resolve CODEX_BRIDGE_UPLOAD_BASE '{}': {err}",
+                sanitize_for_log(&upload_base)
+            )
+        })?;
+        if !allowed_base.is_dir() {
+            anyhow::bail!(
+                "CODEX_BRIDGE_UPLOAD_BASE '{}' is not a directory",
+                sanitize_for_log(&upload_base)
+            );
+        }
 
         // Validate every file path
         let validated: Vec<String> = files

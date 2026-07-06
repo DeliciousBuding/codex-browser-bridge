@@ -953,31 +953,30 @@ const BLOCKED_CDP_DOMAINS: &[&str] = &[
     "Storage.clearDataForOrigin",
 ];
 
-const BLOCKED_CDP_METHODS: &[&str] = &[
-    "DOM.setFileInputFiles",
-    "Page.captureScreenshot",
-    "Page.getResourceContent",
-    "Page.navigate",
-    "Page.navigateToHistoryEntry",
-    "Page.printToPDF",
-    "Network.getAllCookies",
-    "Network.getCookies",
-    "Network.setCookie",
-    "Network.setCookies",
-    "Storage.getCookies",
-    "Storage.setCookies",
-];
-
-const ALLOWED_CDP_PREFIXES: &[&str] = &[
-    "Accessibility.",
-    "CSS.",
-    "DOM.",
-    "Input.",
-    "Log.",
-    "Network.",
-    "Page.",
-    "Performance.",
-    "Runtime.",
+const ALLOWED_CDP_METHODS: &[&str] = &[
+    "Accessibility.getFullAXTree",
+    "CSS.getComputedStyleForNode",
+    "CSS.getMatchedStylesForNode",
+    "DOM.describeNode",
+    "DOM.getAttributes",
+    "DOM.getBoxModel",
+    "DOM.getDocument",
+    "DOM.querySelector",
+    "DOM.querySelectorAll",
+    "DOM.resolveNode",
+    "Log.clear",
+    "Log.disable",
+    "Log.enable",
+    "Network.disable",
+    "Network.enable",
+    "Page.getFrameTree",
+    "Page.getLayoutMetrics",
+    "Performance.disable",
+    "Performance.enable",
+    "Performance.getMetrics",
+    "Runtime.callFunctionOn",
+    "Runtime.evaluate",
+    "Runtime.getProperties",
 ];
 
 /// Execute any CDP method with arbitrary params. The universal CDP escape hatch.
@@ -999,15 +998,7 @@ pub async fn execute_cdp_generic(
 }
 
 fn validate_generic_cdp_method(method: &str) -> Result<()> {
-    for blocked in BLOCKED_CDP_METHODS {
-        if method == *blocked {
-            return blocked_cdp_method(method, blocked);
-        }
-    }
-    if ALLOWED_CDP_PREFIXES
-        .iter()
-        .any(|prefix| method.starts_with(prefix))
-    {
+    if ALLOWED_CDP_METHODS.contains(&method) {
         return Ok(());
     }
     Err(BridgeError::User(format!(
@@ -1727,8 +1718,11 @@ mod tests {
     fn generic_cdp_blocks_methods_that_bypass_dedicated_safety_tools() {
         for method in [
             "DOM.setFileInputFiles",
+            "Network.getRequestPostData",
+            "Network.getResponseBody",
             "Network.getCookies",
             "Network.setCookie",
+            "Page.close",
             "Page.captureScreenshot",
             "Page.getResourceContent",
             "Page.navigate",
@@ -1837,7 +1831,13 @@ mod tests {
 
     #[test]
     fn generic_cdp_allows_known_low_level_methods() {
-        for method in ["Runtime.evaluate", "DOM.getDocument", "Network.enable"] {
+        for method in [
+            "Runtime.evaluate",
+            "DOM.getDocument",
+            "Network.enable",
+            "Page.getLayoutMetrics",
+            "Performance.getMetrics",
+        ] {
             assert!(validate_generic_cdp_method(method).is_ok(), "{method}");
         }
     }

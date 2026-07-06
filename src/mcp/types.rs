@@ -147,7 +147,19 @@ impl Content {
 }
 
 pub(super) fn bounded_text_for_mcp(text: String) -> String {
-    bounded_text(text, max_text_content_bytes())
+    bounded_text(text, content_limits().max_text_bytes)
+}
+
+pub(super) struct ContentLimits {
+    pub(super) max_text_bytes: usize,
+    pub(super) max_image_bytes: usize,
+}
+
+pub(super) fn content_limits() -> ContentLimits {
+    ContentLimits {
+        max_text_bytes: max_text_content_bytes(),
+        max_image_bytes: max_image_content_bytes(),
+    }
 }
 
 fn max_text_content_bytes() -> usize {

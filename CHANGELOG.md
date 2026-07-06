@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Made `codex_file_input` require an explicit `CODEX_BRIDGE_UPLOAD_BASE` instead of falling back to the process working directory.
+- Routed npm prerelease publishes to the `next` dist-tag while keeping stable releases on `latest`.
+
+### Fixed
+
+- Tightened raw CDP execution from broad domain prefixes to an explicit method allowlist.
+- Added page asset content fetch timeouts and skipped unknown-size resources before requesting content.
+
 ## [1.10.0] - 2026-07-06
 
 ### Changed

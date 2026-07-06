@@ -16,7 +16,7 @@
 - 每个 CDP 操作封装为一个 `pub async fn`，接受 `&Client` + 参数
 - CDP 响应解析用私有函数，返回 `Result<T>`
 - 使用 `#[derive(Deserialize)]` 私有结构体解析 CDP 响应
-- `execute_cdp_generic()` 是低风险 raw CDP 入口；高风险能力必须走专用受控工具
+- `execute_cdp_generic()` 是显式低风险方法 allowlist 的 raw CDP 入口；不要用域名前缀放宽，高风险能力必须走专用受控工具
 
 ### 2. MCP 层（`src/mcp/` 目录）
 - `types.rs`：`ToolHandler` 枚举新增 variant（当前 52 个工具）
@@ -94,5 +94,5 @@ src/
 - 文件操作经过 `security::validate_file_path` 路径穿越检查
 - Cookie 值默认脱敏
 - URL 导航只允许 `http://` / `https://`
-- CDP allowlist 阻止 Browser/Debugger/Target/Emulation/Security/Tracing 域，以及 navigation/cookie/screenshot/PDF/file upload/page-resource content/destructive storage 等敏感 raw CDP 方法
+- CDP raw 入口只允许显式列出的低风险方法，阻止 Browser/Debugger/Target/Emulation/Security/Tracing 域，以及 navigation/cookie/screenshot/PDF/file upload/page-resource content/destructive storage 等敏感 raw CDP 方法
 - MCP 输出统一经过 `Content` 层上限：`CODEX_BRIDGE_MAX_TEXT_BYTES` / `max_text_bytes` 默认 1 MiB，`CODEX_BRIDGE_MAX_IMAGE_BYTES` / `max_image_bytes` 默认 3 MiB，配置值最高 8 MiB；不要在单个 handler 里绕过该出口。

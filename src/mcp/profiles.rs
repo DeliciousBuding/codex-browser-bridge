@@ -6,6 +6,14 @@ pub enum ToolProfile {
 }
 
 impl ToolProfile {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ToolProfile::Basic => "basic",
+            ToolProfile::Network => "network",
+            ToolProfile::Full => "full",
+        }
+    }
+
     pub fn from_env() -> Self {
         match std::env::var("CODEX_BRIDGE_PROFILE").ok().as_deref() {
             Some("basic") => ToolProfile::Basic,

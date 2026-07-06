@@ -34,7 +34,7 @@
 ## Current Status
 
 **Active Phase**: PR CI hardening
-**Active Task**: Output cap configuration follow-up implemented; awaiting PR #15 CI rerun.
+**Active Task**: Bridge runtime metadata, security review follow-ups, and npm release gates implemented; awaiting PR #15 CI rerun.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -76,6 +76,9 @@ adaptive:
 | 2026-07-06 | Subagent review follow-ups | M | 5/5 | 3 | Tightened raw CDP method blocks, validated cookie URLs, pre-budgeted page asset fetches, staged npm README/LICENSE/skills via prepack, bumped release target to 1.10.0, bounded npm downloads, and added MCP response timeout to live E2E. |
 | 2026-07-07 | MCP response size caps | M | 5/5 | 1 | Added central `Content` text/image output bounds, covered `resources/read`, documented env knobs, and verified Rust/npm/actionlint/live E2E locally. |
 | 2026-07-07 | Output cap multi-config | S | 5/5 | 0 | Added `max_text_bytes` and `max_image_bytes` to TOML config and CLI flags, preserving CLI > config > env > default precedence. |
+| 2026-07-07 | Bridge runtime metadata | S | 5/5 | 1 | Extended `codex_get_info` with additive bridge runtime metadata while preserving top-level extension fields and avoiding raw upload path leakage. |
+| 2026-07-07 | Trusted Publishing toolchain gate | S | 5/5 | 0 | Added an explicit npm >= 11.5.1 publish-job check and documented the npm CLI prerequisite for OIDC Trusted Publishing. |
+| 2026-07-07 | Review follow-ups for CDP, assets, upload, prerelease publishing | M | 5/5 | 3 | Replaced broad raw CDP prefixes with an explicit method allowlist, required explicit upload base for file input, bounded page asset content fetches by known size and timeout, preserved extension-owned `bridge` metadata, and routed npm prereleases to `next`. |
 
 ## Quick Status Commands
 
@@ -106,3 +109,6 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-06 | review-follow-ups | Addressed high/medium findings from security, CI/release, and stability review agents before final PR verification. |
 | 2026-07-07 | response-caps | Closed remaining large MCP response risk by enforcing bounded text/image content at the shared response layer. |
 | 2026-07-07 | output-cap-config | Made response cap settings available through config file and CLI, not only environment variables. |
+| 2026-07-07 | runtime-info | Added agent-facing runtime diagnostics for profile, tool count, response caps, and upload-base configured status. |
+| 2026-07-07 | release-toolchain | Added a publish-job npm CLI version gate for npm Trusted Publishing compatibility. |
+| 2026-07-07 | review-hardening | Addressed subagent findings for raw CDP scope, page asset fetch budgets, file upload opt-in, metadata field compatibility, and npm prerelease dist-tags. |

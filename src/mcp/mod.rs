@@ -5,7 +5,9 @@ use crate::client::Client;
 
 use self::profiles::ToolProfile;
 use self::schema::{registered_tools, tools_to_values};
-use self::types::{bounded_text_for_mcp, error_response, result_response, RpcRequest, Tool};
+use self::types::{
+    bounded_text_for_mcp, content_limits, error_response, result_response, RpcRequest, Tool,
+};
 
 pub mod handlers;
 pub mod profiles;
@@ -141,6 +143,25 @@ impl Server {
 
     pub fn tool_list(&self) -> Vec<Value> {
         tools_to_values(&self.tools)
+    }
+
+    pub(crate) fn bridge_runtime_info(&self) -> Value {
+        Self::runtime_info_for(self.profile, self.tools.len())
+    }
+
+    fn runtime_info_for(profile: ToolProfile, tool_count: usize) -> Value {
+        let limits = content_limits();
+        json!({
+            "bridgeVersion": env!("CARGO_PKG_VERSION"),
+            "profile": profile.as_str(),
+            "toolCount": tool_count,
+            "uploadBaseConfigured": std::env::var_os("CODEX_BRIDGE_UPLOAD_BASE").is_some(),
+            "responseLimits": {
+                "maxTextBytes": limits.max_text_bytes,
+                "maxImageBytes": limits.max_image_bytes,
+                "maxConfigurableBytes": 8 * 1024 * 1024
+            }
+        })
     }
 
     // ── MCP resources (agent-readable state) ──
@@ -446,16 +467,71 @@ mod stdio_tests {
     }
 }
 
+#[cfg(test)]
+mod runtime_info_tests {
+    use super::*;
+
+    #[test]
+    fn bridge_runtime_info_omits_raw_upload_path() {
+        let previous = std::env::var_os("CODEX_BRIDGE_UPLOAD_BASE");
+        std::env::set_var("CODEX_BRIDGE_UPLOAD_BASE", r"C:\Users\someone\secret");
+        let info = Server::runtime_info_for(ToolProfile::Basic, 34);
+        match previous {
+            Some(value) => std::env::set_var("CODEX_BRIDGE_UPLOAD_BASE", value),
+            None => std::env::remove_var("CODEX_BRIDGE_UPLOAD_BASE"),
+        }
+
+        assert_eq!(info["profile"], "basic");
+        assert_eq!(info["toolCount"], 34);
+        assert_eq!(info["uploadBaseConfigured"], true);
+        assert!(info.get("uploadBase").is_none());
+        assert!(info["responseLimits"]["maxImageBytes"].as_u64().unwrap() > 0);
+    }
+}
+
 #[cfg(all(test, not(windows)))]
 mod tools_call_tests {
     use super::*;
     use crate::client::Client;
+    use crate::protocol;
     use serde_json::json;
-    use tokio::io::duplex;
+    use tokio::io::{duplex, DuplexStream};
+    use tokio::time::{timeout, Duration};
 
     fn test_server(profile: ToolProfile) -> Server {
         let (client_end, _server) = duplex(4096);
         Server::new_with_profile(Client::from_stream(client_end).unwrap(), profile)
+    }
+
+    fn test_server_with_pipe(profile: ToolProfile) -> (Server, DuplexStream) {
+        let (client_end, server_end) = duplex(4096);
+        (
+            Server::new_with_profile(Client::from_stream(client_end).unwrap(), profile),
+            server_end,
+        )
+    }
+
+    async fn next_request(server: &mut DuplexStream) -> Value {
+        let frame = protocol::decode_frame(server).await.unwrap();
+        serde_json::from_slice(&frame).unwrap()
+    }
+
+    async fn reply_result(server: &mut DuplexStream, request: &Value, result: Value) {
+        protocol::encode_frame(server, &json!({"id": request["id"], "result": result}))
+            .await
+            .unwrap();
+    }
+
+    async fn complete_attach_sequence(server: &mut DuplexStream, tab_id: i64) {
+        let detach = next_request(server).await;
+        assert_eq!(detach["method"], "detach");
+        assert_eq!(detach["params"]["tabId"], tab_id);
+        reply_result(server, &detach, json!({})).await;
+
+        let attach = next_request(server).await;
+        assert_eq!(attach["method"], "attach");
+        assert_eq!(attach["params"]["tabId"], tab_id);
+        reply_result(server, &attach, json!({})).await;
     }
 
     async fn call(server: &Server, request: Value) -> Value {
@@ -476,6 +552,165 @@ mod tools_call_tests {
         .await;
 
         assert_eq!(response["error"]["code"], -32602);
+    }
+
+    #[tokio::test]
+    async fn get_info_returns_bridge_and_extension_metadata() {
+        let (server, mut pipe) = test_server_with_pipe(ToolProfile::Network);
+        let call_task = tokio::spawn(async move {
+            call(
+                &server,
+                json!({
+                    "jsonrpc":"2.0",
+                    "id":1,
+                    "method":"tools/call",
+                    "params":{"name":"codex_get_info","arguments":{}}
+                }),
+            )
+            .await
+        });
+
+        let request = next_request(&mut pipe).await;
+        assert_eq!(request["method"], "getInfo");
+        reply_result(
+            &mut pipe,
+            &request,
+            json!({"browserVersion":"Chrome/126","extensionId":"abc"}),
+        )
+        .await;
+
+        let response = call_task.await.unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let info: Value = serde_json::from_str(text).unwrap();
+
+        assert_eq!(info["bridge"]["profile"], "network");
+        assert_eq!(info["bridge"]["bridgeVersion"], env!("CARGO_PKG_VERSION"));
+        assert!(info["bridge"]["toolCount"].as_u64().unwrap() > 0);
+        assert!(
+            info["bridge"]["responseLimits"]["maxTextBytes"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert_eq!(info["browserVersion"], "Chrome/126");
+        assert_eq!(info["extensionId"], "abc");
+    }
+
+    #[tokio::test]
+    async fn get_info_preserves_extension_bridge_field() {
+        let (server, mut pipe) = test_server_with_pipe(ToolProfile::Network);
+        let call_task = tokio::spawn(async move {
+            call(
+                &server,
+                json!({
+                    "jsonrpc":"2.0",
+                    "id":1,
+                    "method":"tools/call",
+                    "params":{"name":"codex_get_info","arguments":{}}
+                }),
+            )
+            .await
+        });
+
+        let request = next_request(&mut pipe).await;
+        reply_result(
+            &mut pipe,
+            &request,
+            json!({"bridge":{"extensionOwned":true}}),
+        )
+        .await;
+
+        let response = call_task.await.unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let info: Value = serde_json::from_str(text).unwrap();
+
+        assert_eq!(info["bridge"]["extensionOwned"], true);
+        assert_eq!(info["codexBridge"]["profile"], "network");
+    }
+
+    #[tokio::test]
+    async fn page_assets_skips_unknown_size_content_fetches() {
+        let (server, mut pipe) = test_server_with_pipe(ToolProfile::Full);
+        let call_task = tokio::spawn(async move {
+            call(
+                &server,
+                json!({
+                    "jsonrpc":"2.0",
+                    "id":1,
+                    "method":"tools/call",
+                    "params":{
+                        "name":"codex_page_assets",
+                        "arguments":{"tab_id":"7","include_content":true}
+                    }
+                }),
+            )
+            .await
+        });
+
+        complete_attach_sequence(&mut pipe, 7).await;
+
+        let request = next_request(&mut pipe).await;
+        assert_eq!(request["params"]["method"], "Page.getResourceTree");
+        reply_result(
+            &mut pipe,
+            &request,
+            json!({
+                "frame": {"id":"frame-1","url":"https://example.com"},
+                "resources": [{
+                    "url":"https://example.com/app.js",
+                    "type":"Script",
+                    "mimeType":"application/javascript"
+                }]
+            }),
+        )
+        .await;
+
+        let no_content_fetch = timeout(Duration::from_millis(50), next_request(&mut pipe)).await;
+        assert!(
+            no_content_fetch.is_err(),
+            "unknown-size resources should not request Page.getResourceContent"
+        );
+
+        let response = call_task.await.unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let body: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(body["truncated"], true);
+        assert_eq!(body["limit_reason"], "unknown_resource_size");
+        assert_eq!(body["resources"][0]["failed"], true);
+    }
+
+    #[tokio::test]
+    async fn file_input_requires_explicit_upload_base_before_pipe_use() {
+        if std::env::var_os("CODEX_BRIDGE_UPLOAD_BASE").is_some() {
+            eprintln!("skipping upload-base absence test because env is set");
+            return;
+        }
+
+        let (server, mut pipe) = test_server_with_pipe(ToolProfile::Full);
+        let response = call(
+            &server,
+            json!({
+                "jsonrpc":"2.0",
+                "id":1,
+                "method":"tools/call",
+                "params":{
+                    "name":"codex_file_input",
+                    "arguments":{"tab_id":"7","selector":"#file","files":["C:/tmp/a.txt"]}
+                }
+            }),
+        )
+        .await;
+
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("CODEX_BRIDGE_UPLOAD_BASE must be set"));
+        let no_pipe_use = timeout(Duration::from_millis(50), next_request(&mut pipe)).await;
+        assert!(
+            no_pipe_use.is_err(),
+            "validation should fail before pipe use"
+        );
     }
 
     #[tokio::test]

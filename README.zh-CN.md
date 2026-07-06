@@ -120,7 +120,7 @@ MCP 客户端配置中也可以设置环境变量：
 }
 ```
 
-`CODEX_BRIDGE_UPLOAD_BASE` 会限制 `codex_file_input` 只能上传该目录下的文件。建议显式设置，因为不同 MCP 客户端启动 server 的工作目录不一定一致。
+`CODEX_BRIDGE_UPLOAD_BASE` 会启用 `codex_file_input`，并限制只能上传该目录下的文件。未显式设置时文件上传会被拒绝，因为不同 MCP 客户端启动 server 的工作目录不一定一致。
 
 MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScript、CDP 或截图 payload：
 
@@ -167,7 +167,7 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 | `codex_get_url` | 当前标签 URL |
 | `codex_get_title` | 当前页面标题 |
 | `codex_evaluate` | 执行 JavaScript，返回有上限的 JSON 结果 |
-| `codex_page_assets` | 列出页面资源（图片/CSS/JS/字体） |
+| `codex_page_assets` | 列出页面资源；可选抓取有已知大小且受限的内容 |
 | `codex_console_logs` | 捕获一段时间内的 console 输出 |
 | `codex_emulate_device` | 模拟移动端视口（`reset=true` 清除） |
 | `codex_screenshot` | 截取视口截图，超大图片返回摘要 |
@@ -205,14 +205,14 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 ### CDP 逃生口 `[CDP]`
 | 工具 | 说明 |
 |------|------|
-| `codex_execute_cdp` | 执行 allowlist 允许的低风险 CDP 命令 |
+| `codex_execute_cdp` | 执行明确 allowlist 允许的低风险 CDP 命令 |
 
 ### 会话 `[Session]`
 | 工具 | 说明 |
 |------|------|
 | `codex_name_session` | 命名当前 session |
 | `codex_finalize` | 结束 session，清理标签 |
-| `codex_get_info` | 获取扩展后端元数据 |
+| `codex_get_info` | 获取 bridge 运行时 + 扩展后端元数据 |
 | `codex_doctor` | 自检诊断（pipe 连通性、延迟、版本） |
 
 ## CLI 用法

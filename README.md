@@ -140,7 +140,7 @@ The same settings can be provided in MCP client config:
 }
 ```
 
-`CODEX_BRIDGE_UPLOAD_BASE` limits `codex_file_input` to a specific directory. Set it explicitly when enabling file uploads; MCP clients do not always launch servers from a predictable working directory.
+`CODEX_BRIDGE_UPLOAD_BASE` enables `codex_file_input` and limits uploads to a specific directory. File upload is disabled until this is set explicitly; MCP clients do not always launch servers from a predictable working directory.
 
 Large MCP responses are bounded so agents do not receive multi-megabyte DOM,
 JavaScript, CDP, or screenshot payloads by accident:
@@ -194,7 +194,7 @@ JavaScript, CDP, or screenshot payloads by accident:
 | `codex_get_url` | Current tab URL |
 | `codex_get_title` | Current page title |
 | `codex_evaluate` | Execute JavaScript, return bounded JSON result |
-| `codex_page_assets` | List page resources (images, CSS, JS, fonts) |
+| `codex_page_assets` | List page resources; optionally fetch bounded known-size content |
 | `codex_console_logs` | Capture console output for a window |
 | `codex_emulate_device` | Emulate mobile viewport (`reset=true` to clear) |
 | `codex_screenshot` | Capture viewport screenshot; oversized images return a summary |
@@ -232,14 +232,14 @@ JavaScript, CDP, or screenshot payloads by accident:
 ### CDP Escape Hatch `[CDP]`
 | Tool | Description |
 |------|-------------|
-| `codex_execute_cdp` | Execute allowlisted low-risk CDP commands |
+| `codex_execute_cdp` | Execute explicitly allowlisted low-risk CDP commands |
 
 ### Session `[Session]`
 | Tool | Description |
 |------|-------------|
 | `codex_name_session` | Name the current session |
 | `codex_finalize` | Clean up tabs, release resources |
-| `codex_get_info` | Get extension backend metadata |
+| `codex_get_info` | Get bridge runtime + extension backend metadata |
 | `codex_doctor` | Self-diagnostics (pipe health, latency, version) |
 
 ## CLI Usage

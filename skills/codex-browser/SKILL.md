@@ -53,7 +53,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 | `codex_get_url` | Current URL via `location.href` |
 | `codex_get_title` | Current `document.title` |
 | `codex_evaluate` | Run arbitrary JS, get JSON result |
-| `codex_page_assets` | List page resources (images, CSS, JS, fonts) |
+| `codex_page_assets` | List page resources; optionally fetch bounded known-size content |
 | `codex_console_logs` | Capture `console.*` output for a duration window (frontend debugging) |
 | `codex_emulate_device` | Override viewport to emulate a device (`reset=true` to clear) |
 | `codex_performance_metrics` | Chrome Performance metrics — DOM nodes, JS heap, event listeners |
@@ -99,7 +99,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 
 | Tool | What it does |
 |------|-------------|
-| `codex_execute_cdp` | Raw CDP command. Allowlist-protected; browser/target/debugger/navigation/cookie/destructive storage operations are blocked. |
+| `codex_execute_cdp` | Raw CDP command. Explicit allowlist only; browser/target/debugger/navigation/cookie/destructive storage operations are blocked. |
 
 ### Session (4 tools)
 
@@ -107,7 +107,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 |------|-------------|
 | `codex_name_session` | Label the session |
 | `codex_finalize` | Clean up all tabs. **Call when done.** |
-| `codex_get_info` | Extension metadata |
+| `codex_get_info` | Bridge runtime + extension metadata |
 | `codex_doctor` | Self-check: pipe health, Chrome version, latency |
 
 ## Workflows

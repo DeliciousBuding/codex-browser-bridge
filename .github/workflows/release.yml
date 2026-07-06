@@ -177,7 +177,23 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
 
+      - name: Verify npm trusted publishing toolchain
+        shell: bash
+        run: |
+          node --version
+          npm --version
+          node - <<'NODE'
+          const { execSync } = require("child_process");
+          const version = execSync("npm --version", { encoding: "utf8" }).trim();
+          const [major, minor, patch] = version.split(".").map(Number);
+          const ok = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+          if (!ok) {
+            throw new Error(`npm ${version} is too old for Trusted Publishing; require npm >= 11.5.1`);
+          }
+          NODE
+
       - name: Verify npm version matches tag
+        id: npm-version
         shell: bash
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
@@ -186,6 +202,11 @@ jobs:
           if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
             echo "npm package version $PACKAGE_VERSION does not match release tag $TAG" >&2
             exit 1
+          fi
+          if [[ "$VERSION" == *-* ]]; then
+            echo "dist_tag=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "dist_tag=latest" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Embed release checksums
@@ -228,4 +249,4 @@ jobs:
         shell: bash
         run: |
           cd npm
-          npm publish --access public
+          npm publish --access public --tag "${{ steps.npm-version.outputs.dist_tag }}"

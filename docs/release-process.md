@@ -8,6 +8,7 @@ This project uses explicit SemVer tags, a curated changelog, GitHub Release asse
 - Release tags must be annotated tags named `vX.Y.Z`.
 - Pre-release tags may use SemVer pre-release syntax, for example `v2.0.0-beta.1`.
 - `Cargo.toml` and `npm/package.json` must match the tag without the leading `v`.
+- npm publishes stable versions to the `latest` dist-tag and SemVer pre-release versions to the `next` dist-tag.
 - Rust MSRV is part of the compatibility contract. Do not raise `rust-version` unless the release notes call it out.
 
 ## Changelog
@@ -57,7 +58,7 @@ The `publish-npm` job uses npm Trusted Publishing. Before the first release, con
 - workflow filename: `release.yml`
 - allowed action: `npm publish`
 
-The workflow uses GitHub-hosted runners, `id-token: write`, Node 24, and npm's OIDC authentication path. Do not add `NODE_AUTH_TOKEN` back to the publish step unless the project intentionally reverts to token-based publishing and updates this document at the same time.
+The workflow uses GitHub-hosted runners, `id-token: write`, Node 24, npm >= 11.5.1, and npm's OIDC authentication path. Do not add `NODE_AUTH_TOKEN` back to the publish step unless the project intentionally reverts to token-based publishing and updates this document at the same time.
 
 ## Provenance and Verification
 
