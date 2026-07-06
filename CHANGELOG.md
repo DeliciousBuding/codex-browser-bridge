@@ -23,7 +23,9 @@ All notable changes to this project will be documented in this file.
 - Tightened raw CDP execution from broad domain prefixes to an explicit method allowlist.
 - Added page asset content fetch timeouts and skipped unknown-size resources before requesting content.
 - Added the Ubuntu mock harness to the release workflow gate before asset creation.
-- Staged GitHub Release assets as a draft until npm publish succeeds, with checksum transfer through workflow artifacts to avoid draft-release read coupling.
+- Staged GitHub Release assets through a recoverable draft/update path, then published the GitHub Release before npm so npm installs can immediately download public binaries.
+- Validated release jobs against the exact annotated tag commit SHA and required non-empty dated changelog sections for release notes.
+- Pinned release-workflow actions to full commit SHAs for the jobs that hold release write or OIDC permissions.
 - Added workflow concurrency controls to cancel stale PR validation runs and serialize same-tag release runs.
 - Retired per-tab client locks on tab close/finalize and normalized invalid page asset sizes as unknown to avoid long-lived agent sessions accumulating stale state or fetching misleadingly sized resources.
 - Hardened the live E2E script timeout path and added a CI-covered fake bridge timeout harness so killed MCP bridge processes do not trigger blocking stderr reads or follow-up cleanup requests.

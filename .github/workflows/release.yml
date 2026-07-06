@@ -17,16 +17,73 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      version: ${{ steps.validate.outputs.version }}
+      commit_sha: ${{ steps.validate.outputs.commit_sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Validate release tag and contents
+        id: validate
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: $TAG" >&2
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          git fetch origin main --depth=1
+          TAG_TYPE="$(git cat-file -t "$TAG")"
+          if [ "$TAG_TYPE" != "tag" ]; then
+            echo "Release tag $TAG must be an annotated tag" >&2
+            exit 1
+          fi
+          COMMIT_SHA="$(git rev-parse "$TAG^{commit}")"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "$HEAD_SHA" != "$COMMIT_SHA" ]; then
+            echo "Checked out $HEAD_SHA, but $TAG points to $COMMIT_SHA" >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$COMMIT_SHA" origin/main
+
+          PACKAGE_VERSION="$(grep -m1 '"version"' npm/package.json | sed -E 's/.*"version": "([^"]+)".*/\1/')"
+          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
+            echo "npm package version $PACKAGE_VERSION does not match release tag $TAG" >&2
+            exit 1
+          fi
+          CARGO_VERSION="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')"
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "Cargo.toml version $CARGO_VERSION does not match release tag $TAG" >&2
+            exit 1
+          fi
+          if ! grep -Eq "^## \[$VERSION\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
+            echo "CHANGELOG.md is missing dated section ## [$VERSION] - YYYY-MM-DD" >&2
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+
   test:
+    needs: validate-release
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-      - uses: actions/setup-node@v6
+          ref: ${{ needs.validate-release.outputs.commit_sha }}
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "22"
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
         with:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
           components: clippy
@@ -60,12 +117,13 @@ jobs:
           npm run check:package
 
   test-lib:
+    needs: validate-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-      - uses: dtolnay/rust-toolchain@1.85.0
+          ref: ${{ needs.validate-release.outputs.commit_sha }}
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
         with:
           components: clippy
       - name: Test non-Windows harness
@@ -76,61 +134,22 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
 
   release:
-    needs: [test, test-lib]
+    needs: [validate-release, test, test-lib]
     runs-on: windows-latest
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ needs.validate-release.outputs.commit_sha }}
 
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
         with:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
           components: clippy
-
-      - name: Get version
-        id: version
-        shell: bash
-        run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid release tag: $TAG" >&2
-            exit 1
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Validate release contents
-        shell: bash
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${TAG#v}"
-          git fetch origin main --depth=1
-          TAG_TYPE="$(git cat-file -t "$TAG")"
-          if [ "$TAG_TYPE" != "tag" ]; then
-            echo "Release tag $TAG must be an annotated tag" >&2
-            exit 1
-          fi
-          git rev-parse "$TAG^{commit}" >/dev/null
-          git merge-base --is-ancestor "$TAG^{commit}" origin/main
-          PACKAGE_VERSION="$(grep -m1 '"version"' npm/package.json | sed -E 's/.*"version": "([^"]+)".*/\1/')"
-          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
-            echo "npm package version $PACKAGE_VERSION does not match release tag $TAG" >&2
-            exit 1
-          fi
-          CARGO_VERSION="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')"
-          if [ "$CARGO_VERSION" != "$VERSION" ]; then
-            echo "Cargo.toml version $CARGO_VERSION does not match release tag $TAG" >&2
-            exit 1
-          fi
-          if ! grep -Fq "## [$VERSION]" CHANGELOG.md; then
-            echo "CHANGELOG.md is missing ## [$VERSION]" >&2
-            exit 1
-          fi
 
       - name: Build
         shell: bash
@@ -146,14 +165,14 @@ jobs:
         run: sha256sum codex-browser-bridge*.exe > checksums.txt
 
       - name: Upload release checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-checksums
           path: checksums.txt
           retention-days: 7
 
       - name: Generate artifact attestation
-        uses: actions/attest@v4
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:
           subject-path: |
             codex-browser-bridge.exe
@@ -163,47 +182,60 @@ jobs:
       - name: Generate release notes
         shell: bash
         run: |
-          if [ -f CHANGELOG.md ]; then
-            VERSION="${{ steps.version.outputs.tag }}"
-            VERSION="${VERSION#v}"
-            HEADING="## [$VERSION]"
-            awk -v heading="$HEADING" '
-              index($0, heading) == 1 { found=1; next }
-              found && /^## \[/ { exit }
-              found { print }
-            ' CHANGELOG.md > release_notes.txt
-          fi
-          if [ ! -s release_notes.txt ]; then
-            prev=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || git rev-list --max-parents=0 HEAD)
-            git log --oneline --no-merges "$prev"..HEAD > release_notes.txt
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          HEADING="## [$VERSION]"
+          awk -v heading="$HEADING" '
+            index($0, heading) == 1 { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release_notes.txt
+          if ! grep -Eq '[^[:space:]]' release_notes.txt; then
+            echo "CHANGELOG.md section for $VERSION is empty" >&2
+            exit 1
           fi
 
-      - name: Create draft GitHub Release
+      - name: Stage GitHub Release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
         shell: bash
         run: |
-          gh release create "${{ steps.version.outputs.tag }}" \
-            --draft \
-            --verify-tag \
-            --title "${{ steps.version.outputs.tag }}" \
-            --notes-file release_notes.txt \
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "$TAG" \
+              --notes-file release_notes.txt
+          else
+            gh release create "$TAG" \
+              --draft \
+              --verify-tag \
+              --title "$TAG" \
+              --notes-file release_notes.txt
+          fi
+          gh release upload "$TAG" \
             codex-browser-bridge.exe \
             codex-browser-bridge-arm64.exe \
-            checksums.txt
+            checksums.txt \
+            --clobber
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
+        shell: bash
+        run: gh release edit "$TAG" --draft=false
 
   publish-npm:
-    needs: [release]
+    needs: [validate-release, release]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ needs.validate-release.outputs.commit_sha }}
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
@@ -228,8 +260,8 @@ jobs:
         id: npm-version
         shell: bash
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          VERSION="${TAG#v}"
+          TAG="${{ needs.validate-release.outputs.tag }}"
+          VERSION="${{ needs.validate-release.outputs.version }}"
           PACKAGE_VERSION="$(node -p 'require("./npm/package.json").version')"
           if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
             echo "npm package version $PACKAGE_VERSION does not match release tag $TAG" >&2
@@ -242,7 +274,7 @@ jobs:
           fi
 
       - name: Download release checksums
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-checksums
           path: npm
@@ -250,7 +282,7 @@ jobs:
       - name: Embed release checksums
         shell: bash
         env:
-          TAG_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+          TAG_VERSION: ${{ needs.validate-release.outputs.version }}
         run: |
           rm -f npm/checksums.json
           node - <<'NODE'
@@ -285,16 +317,3 @@ jobs:
         run: |
           cd npm
           npm publish --access public --tag "${{ steps.npm-version.outputs.dist_tag }}"
-
-  publish-release:
-    needs: [publish-npm]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.inputs.tag || github.ref_name }}
-        shell: bash
-        run: gh release edit "$TAG" --draft=false
