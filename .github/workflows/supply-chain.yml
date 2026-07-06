@@ -9,10 +9,9 @@ on:
     # Weekly Monday ~04:37 UTC — off-round minute to spread load across the fleet.
     - cron: "37 4 * * 1"
 
-# A daily cap so a runaway schedule loop can't burn CI minutes.
 concurrency:
-  group: supply-chain-${{ github.ref }}
-  cancel-in-progress: false
+  group: supply-chain-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
