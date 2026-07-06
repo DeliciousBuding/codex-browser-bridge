@@ -33,9 +33,9 @@
 
 ## Current Status
 
-**Active Phase**: Local PR-ready audit complete
-**Active Task**: Await user decision on commit/PR or further optimization pass.
-**Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. GitHub CI has not run on this branch yet.
+**Active Phase**: PR CI hardening
+**Active Task**: Supply Chain advisory fix pushed for PR #15; awaiting GitHub CI rerun.
+**Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 CI must complete green before undrafting/merge.
 
 ## Governance Status
 
@@ -72,6 +72,7 @@ adaptive:
 | 2026-07-06 | T3.1 partial | S | 4/5 | 1 | Added Linux-only MCP tools/call envelope tests; Windows tests pass, Linux target typechecked to linker, WSL run blocked by crates.io/cache timeout. |
 | 2026-07-06 | T3.1-T3.3 completion | M | 4/5 | 1 | Added non-Windows mock pipe E2E, expanded Ubuntu CI harness, refactored npm installer for injectable tests, added live E2E script, and ran live E2E successfully against Codex Desktop + Chrome. |
 | 2026-07-06 | Final local audit | S | 4/5 | 1 | `actionlint` via `go run`, Rust, npm, package checks, example JSON, PowerShell syntax, and live E2E all passed locally; GitHub CI remains external. |
+| 2026-07-06 | PR #15 supply-chain fix | S | 5/5 | 1 | Updated `anyhow` from 1.0.102 to 1.0.103 to clear RustSec advisory; local `cargo test`, clippy, Linux test target check, npm tests, and `cargo deny check` passed. |
 
 ## Quick Status Commands
 
@@ -98,3 +99,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-06 | follow-up | Closed review findings in release automation, CDP safety, page asset resource bounds, MCP UTF-8 handling, and stricter MCP argument typing. |
 | 2026-07-06 | phase-3 | Added mock and live E2E harnesses, npm installer injectable tests, and verified a live Codex Desktop + Chrome flow against example.com. |
 | 2026-07-06 | final-local-audit | Re-ran full local verification, actionlint, npm package dry-runs, and live E2E; branch is locally PR-ready pending GitHub CI and npm Trusted Publisher setup. |
+| 2026-07-06 | pr-ci-fix | Updated `anyhow` lockfile entry for RustSec advisory and verified the supply-chain gate locally before pushing. |
