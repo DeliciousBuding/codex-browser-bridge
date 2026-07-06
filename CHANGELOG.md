@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- Tightened navigation URL validation to only allow `http://` and `https://`.
+- Added bounded duration validation for MCP waits, captures, and form-fill delays.
+- Restricted generic CDP execution to an explicit low-level allowlist.
+- Added `codex_doctor` to the `basic` tool profile.
+
+### Fixed
+
+- Bounded MCP stdio line reads to reject oversized JSON-RPC messages before unbounded buffer growth.
+- Fixed npm package content checks so CI and release jobs verify the bundled agent skill before publish.
+- Aligned Dependabot with the Rust 1.85 MSRV by holding back `criterion` minor updates that require newer Rust.
+
+### Documentation
+
+- Documented release/tag/changelog/npm provenance policy.
+- Clarified multi-client configuration examples, upload-base setup, profile behavior, and numeric tab ID schemas.
+
 ## [1.9.1] - 2026-06-21
 
 The first release since v1.7.0. Tool count goes from 28 to 52, and agents can now watch what a page does — not just drive it.

@@ -29,18 +29,18 @@ pub(super) fn registered_tools() -> Vec<Tool> {
         Tool::new("codex_finalize", "[Session] Finalize the session: clean up all tabs owned by the bridge and release resources. Call when done with browser automation.", object_schema(), ToolHandler::Finalize),
         Tool::new("codex_get_info", "[Session] Get metadata about the Codex extension backend (version, capabilities, extension ID). Use for diagnostics.", object_schema(), ToolHandler::GetInfo),
         Tool::new("codex_execute_cdp", "[CDP] Execute a raw Chrome DevTools Protocol command. This is the universal escape hatch — use for CDP methods not covered by dedicated codex_* tools. Safety: blocks Browser.*, Debugger.*, Target.*, and other dangerous domains. Prefer dedicated tools when available (e.g. codex_network_cookies instead of execute_cdp with Network.getCookies).", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID to execute on"},"method":{"type":"string","description":"CDP method, e.g. \"Runtime.evaluate\", \"Page.captureScreenshot\", \"Network.enable\""},"params":{"type":"object","description":"CDP method parameters as a JSON object"}},"required":["tab_id","method"]}"#), ToolHandler::ExecuteCdp),
-        Tool::new("codex_page_assets", "[Page] List page resources (images, fonts, CSS, JS, etc.). Optionally fetch content as base64. More efficient than execute_cdp with Page.getResourceTree — uses the Codex extension's native pageAssets capability.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID to inspect"},"include_content":{"type":"boolean","description":"Fetch each resource's content as base64. Defaults to false."},"types":{"type":"array","items":{"type":"string"},"description":"Filter: Image, Stylesheet, Script, Font, Document, Media, Manifest, Fetch, Other"}},"required":["tab_id"]}"#), ToolHandler::PageAssets),
+        Tool::new("codex_page_assets", "[Page] List page resources (images, fonts, CSS, JS, etc.). Optionally fetch content as base64 with bounded max_resources/max_total_bytes. More efficient than execute_cdp with Page.getResourceTree — uses the Codex extension's native pageAssets capability.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID to inspect"},"include_content":{"type":"boolean","description":"Fetch each resource's content as base64. Defaults to false."},"types":{"type":"array","items":{"type":"string"},"description":"Filter: Image, Stylesheet, Script, Font, Document, Media, Manifest, Fetch, Other"},"max_resources":{"type":"integer","description":"Max resources to fetch when include_content=true. Default 50, max 200."},"max_total_bytes":{"type":"integer","description":"Max total base64 content bytes when include_content=true. Default 1048576, max 5242880."}},"required":["tab_id"]}"#), ToolHandler::PageAssets),
         Tool::new("codex_network_cookies", "[Network] Read cookies for the current page or specific URLs. Cookie values are REDACTED by default for security (set redact_values: false to see raw values). Preferred over execute_cdp with Network.getCookies.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID"},"urls":{"type":"array","items":{"type":"string"},"description":"Optional URL list to filter. Omit to get all cookies for the current page."},"redact_values":{"type":"boolean","description":"Redact cookie values for security. Default: true."}},"required":["tab_id"]}"#), ToolHandler::NetworkCookies),
         Tool::new("codex_network_set_cookie", "[Network] Set a browser cookie. Use this for cookie manipulation; for reading cookies, use codex_network_cookies.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID"},"name":{"type":"string","description":"Cookie name"},"value":{"type":"string","description":"Cookie value"},"url":{"type":"string","description":"URL to associate cookie with"},"domain":{"type":"string","description":"Cookie domain"},"path":{"type":"string","description":"Cookie path"},"httpOnly":{"type":"boolean","description":"HttpOnly flag"},"secure":{"type":"boolean","description":"Secure flag"},"sameSite":{"type":"string","description":"Strict, Lax, or None"}},"required":["tab_id","name","value"]}"#), ToolHandler::NetworkSetCookie),
-        Tool::new("codex_file_input", "[Input] Upload files to a <input type=file> element. First finds the element by CSS selector, then sets the specified files via DOM.setFileInputFiles. Paths must be absolute and within the allowed upload directory (set via CODEX_BRIDGE_UPLOAD_BASE env var, defaults to current directory). Security: path traversal blocked, only regular files, max 10 MB per file.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID or 'active'"},"selector":{"type":"string","description":"CSS selector for the file input element"},"files":{"type":"array","items":{"type":"string"},"description":"Absolute file paths to upload"}},"required":["tab_id","selector","files"]}"#), ToolHandler::FileInput),
-        Tool::new("codex_dialog", "[Page] Handle a JavaScript dialog (alert, confirm, prompt). Use action='accept' to accept (with optional prompt_text for prompt dialogs), or action='dismiss' to dismiss. Only one dialog can be active at a time per tab.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID or 'active'"},"action":{"type":"string","enum":["accept","dismiss"],"description":"Accept or dismiss the dialog"},"prompt_text":{"type":"string","description":"Text to enter for prompt dialogs (only valid with accept)"}},"required":["tab_id","action"]}"#), ToolHandler::Dialog),
-        Tool::new("codex_find_element", "[DOM] Find elements by ARIA role and/or accessible name in the page's accessibility tree. Returns matching elements with node IDs for use with codex_click_element. Provide at least one of role or name. Examples: role='button', name='submit', role='link' with name='login'. More reliable than CSS selectors.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID or 'active'"},"role":{"type":"string","description":"ARIA role, case-insensitive exact match (e.g. 'button', 'link', 'textbox', 'checkbox', 'heading')"},"name":{"type":"string","description":"Accessible name, case-insensitive substring match"},"max_results":{"type":"integer","description":"Maximum results (default 10, max 50)"}},"required":["tab_id"]}"#), ToolHandler::FindElement),
-        Tool::new("codex_click_element", "[Input] Click an element by its accessibility node ID from codex_find_element. Uses CDP DOM.resolveNode → DOM.getBoxModel → Input dispatch (no JS injection). Safer than CSS selector clicking.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID or 'active'"},"node_id":{"type":"string","description":"Accessibility node ID from codex_find_element"}},"required":["tab_id","node_id"]}"#), ToolHandler::ClickElement),
-        Tool::new("codex_nav_and_wait", "[Navigation] Navigate to a URL and wait for the page to load. Combines codex_navigate + codex_wait_for_load in one call — use this instead of two separate calls.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID or 'active'"},"url":{"type":"string","description":"Full URL to navigate to"},"timeout_ms":{"type":"integer","description":"Max wait in ms. Defaults to 30000."}},"required":["tab_id","url"]}"#), ToolHandler::NavAndWait),
-        Tool::new("codex_click_and_wait", "[Input] Click an element by CSS selector and wait for page load. Combines codex_click + codex_wait_for_load in one call.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID or 'active'"},"selector":{"type":"string","description":"CSS selector to click"},"timeout_ms":{"type":"integer","description":"Max wait in ms. Defaults to 10000."}},"required":["tab_id","selector"]}"#), ToolHandler::ClickAndWait),
-        Tool::new("codex_form_fill", "[Input] Fill multiple form fields at once. Accepts a map of CSS selector to value. Optionally clicks a submit button after filling. Sequential dispatch with configurable delay.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID or 'active'"},"fields":{"type":"object","description":"Map of CSS selector to value"},"submit":{"type":"string","description":"Optional CSS selector for submit button to click after filling"},"delay_ms":{"type":"integer","description":"Delay between field inputs in ms. Defaults to 50."}},"required":["tab_id","fields"]}"#), ToolHandler::FormFill),
+        Tool::new("codex_file_input", "[Input] Upload files to a <input type=file> element. First finds the element by CSS selector, then sets the specified files via DOM.setFileInputFiles. Paths must be absolute and within the allowed upload directory (set via CODEX_BRIDGE_UPLOAD_BASE env var, defaults to current directory). Security: path traversal blocked, only regular files, max 10 MB per file.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Numeric tab ID"},"selector":{"type":"string","description":"CSS selector for the file input element"},"files":{"type":"array","items":{"type":"string"},"description":"Absolute file paths to upload"}},"required":["tab_id","selector","files"]}"#), ToolHandler::FileInput),
+        Tool::new("codex_dialog", "[Page] Handle a JavaScript dialog (alert, confirm, prompt). Use action='accept' to accept (with optional prompt_text for prompt dialogs), or action='dismiss' to dismiss. Only one dialog can be active at a time per tab.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Numeric tab ID"},"action":{"type":"string","enum":["accept","dismiss"],"description":"Accept or dismiss the dialog"},"prompt_text":{"type":"string","description":"Text to enter for prompt dialogs (only valid with accept)"}},"required":["tab_id","action"]}"#), ToolHandler::Dialog),
+        Tool::new("codex_find_element", "[DOM] Find elements by ARIA role and/or accessible name in the page's accessibility tree. Returns matching elements with node IDs for use with codex_click_element. Provide at least one of role or name. Examples: role='button', name='submit', role='link' with name='login'. More reliable than CSS selectors.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Numeric tab ID"},"role":{"type":"string","description":"ARIA role, case-insensitive exact match (e.g. 'button', 'link', 'textbox', 'checkbox', 'heading')"},"name":{"type":"string","description":"Accessible name, case-insensitive substring match"},"max_results":{"type":"integer","description":"Maximum results (default 10, max 50)"}},"required":["tab_id"]}"#), ToolHandler::FindElement),
+        Tool::new("codex_click_element", "[Input] Click an element by its accessibility node ID from codex_find_element. Uses CDP DOM.resolveNode → DOM.getBoxModel → Input dispatch (no JS injection). Safer than CSS selector clicking.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Numeric tab ID"},"node_id":{"type":"string","description":"Accessibility node ID from codex_find_element"}},"required":["tab_id","node_id"]}"#), ToolHandler::ClickElement),
+        Tool::new("codex_nav_and_wait", "[Navigation] Navigate to a URL and wait for the page to load. Combines codex_navigate + codex_wait_for_load in one call — use this instead of two separate calls.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Numeric tab ID"},"url":{"type":"string","description":"Full URL to navigate to"},"timeout_ms":{"type":"integer","description":"Max wait in ms. Defaults to 30000."}},"required":["tab_id","url"]}"#), ToolHandler::NavAndWait),
+        Tool::new("codex_click_and_wait", "[Input] Click an element by CSS selector and wait for page load. Combines codex_click + codex_wait_for_load in one call.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Numeric tab ID"},"selector":{"type":"string","description":"CSS selector to click"},"timeout_ms":{"type":"integer","description":"Max wait in ms. Defaults to 10000."}},"required":["tab_id","selector"]}"#), ToolHandler::ClickAndWait),
+        Tool::new("codex_form_fill", "[Input] Fill multiple form fields at once. Accepts a map of CSS selector to value. Optionally clicks a submit button after filling. Sequential dispatch with configurable delay.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Numeric tab ID"},"fields":{"type":"object","description":"Map of CSS selector to value"},"submit":{"type":"string","description":"Optional CSS selector for submit button to click after filling"},"delay_ms":{"type":"integer","description":"Delay between field inputs in ms. Defaults to 50."}},"required":["tab_id","fields"]}"#), ToolHandler::FormFill),
         Tool::new("codex_doctor", "[Session] Run self-diagnostics. Checks pipe connectivity, Chrome availability, and reports bridge version. Use before browser operations to verify the environment is ready. Returns diagnostic summary with per-pipe health.", object_schema(), ToolHandler::Doctor),
-        Tool::new("codex_bring_to_front", "[Page] Activate a tab and bring it to the foreground via Page.bringToFront. Call this before screenshot or other CDP calls when a tab has been in the background — Chrome throttles/discards background tabs and CDP calls on a suspended tab can time out silently. Does not navigate or change page state.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID or 'active' to activate"}},"required":["tab_id"]}"#), ToolHandler::BringToFront),
+        Tool::new("codex_bring_to_front", "[Page] Activate a tab and bring it to the foreground via Page.bringToFront. Call this before screenshot or other CDP calls when a tab has been in the background — Chrome throttles/discards background tabs and CDP calls on a suspended tab can time out silently. Does not navigate or change page state.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Numeric tab ID to activate"}},"required":["tab_id"]}"#), ToolHandler::BringToFront),
         Tool::new("codex_get_url", "[Page] Get the current URL of a tab via location.href. Cheaper than codex_evaluate for this common read.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"}},"required":["tab_id"]}"#), ToolHandler::GetUrl),
         Tool::new("codex_get_title", "[Page] Get the current document.title of a tab.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"}},"required":["tab_id"]}"#), ToolHandler::GetTitle),
         Tool::new("codex_wait_for_element", "[Navigation] Poll until a CSS selector matches. Use this instead of codex_wait_for_load on SPAs where the URL does not change but content renders asynchronously. Returns error on timeout.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"},"selector":{"type":"string","description":"CSS selector to wait for"},"timeout_ms":{"type":"integer","description":"Max wait in ms. Defaults to 10000."}},"required":["tab_id","selector"]}"#), ToolHandler::WaitForElement),
@@ -90,17 +90,34 @@ mod tests {
     #[test]
     fn execute_cdp_schema_requires_tab_id_and_method() {
         let tools = registered_tools();
-        let cdp = tools.iter().find(|t| t.name == "codex_execute_cdp").unwrap();
+        let cdp = tools
+            .iter()
+            .find(|t| t.name == "codex_execute_cdp")
+            .unwrap();
         assert_eq!(cdp.input_schema["type"], "object");
-        let required: Vec<_> = cdp.input_schema["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
-        assert!(required.contains(&"tab_id"), "required should contain tab_id");
-        assert!(required.contains(&"method"), "required should contain method");
+        let required: Vec<_> = cdp.input_schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(
+            required.contains(&"tab_id"),
+            "required should contain tab_id"
+        );
+        assert!(
+            required.contains(&"method"),
+            "required should contain method"
+        );
     }
 
     #[test]
     fn page_assets_schema_requires_tab_id() {
         let tools = registered_tools();
-        let pa = tools.iter().find(|t| t.name == "codex_page_assets").unwrap();
+        let pa = tools
+            .iter()
+            .find(|t| t.name == "codex_page_assets")
+            .unwrap();
         assert_eq!(pa.input_schema["type"], "object");
         let required = pa.input_schema["required"].as_array().unwrap();
         assert_eq!(required[0], "tab_id");
@@ -109,7 +126,10 @@ mod tests {
     #[test]
     fn network_cookies_schema_requires_tab_id() {
         let tools = registered_tools();
-        let nc = tools.iter().find(|t| t.name == "codex_network_cookies").unwrap();
+        let nc = tools
+            .iter()
+            .find(|t| t.name == "codex_network_cookies")
+            .unwrap();
         assert_eq!(nc.input_schema["type"], "object");
         let required = nc.input_schema["required"].as_array().unwrap();
         assert_eq!(required[0], "tab_id");
@@ -118,9 +138,17 @@ mod tests {
     #[test]
     fn network_set_cookie_schema_requires_name_value() {
         let tools = registered_tools();
-        let nsc = tools.iter().find(|t| t.name == "codex_network_set_cookie").unwrap();
+        let nsc = tools
+            .iter()
+            .find(|t| t.name == "codex_network_set_cookie")
+            .unwrap();
         assert_eq!(nsc.input_schema["type"], "object");
-        let required: Vec<_> = nsc.input_schema["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+        let required: Vec<_> = nsc.input_schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
         assert!(required.contains(&"tab_id"));
         assert!(required.contains(&"name"));
         assert!(required.contains(&"value"));
@@ -129,17 +157,28 @@ mod tests {
     #[test]
     fn all_tool_schemas_are_valid() {
         for tool in registered_tools() {
-            assert_eq!(tool.input_schema["type"], "object",
-                "tool {} schema must be object type", tool.name);
+            assert_eq!(
+                tool.input_schema["type"], "object",
+                "tool {} schema must be object type",
+                tool.name
+            );
         }
     }
 
     #[test]
     fn bring_to_front_schema_requires_tab_id() {
         let tools = registered_tools();
-        let bf = tools.iter().find(|t| t.name == "codex_bring_to_front").unwrap();
+        let bf = tools
+            .iter()
+            .find(|t| t.name == "codex_bring_to_front")
+            .unwrap();
         assert_eq!(bf.input_schema["type"], "object");
-        let required: Vec<_> = bf.input_schema["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+        let required: Vec<_> = bf.input_schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
         assert!(required.contains(&"tab_id"));
     }
 
@@ -148,17 +187,28 @@ mod tests {
         let tools = registered_tools();
         let fi = tools.iter().find(|t| t.name == "codex_file_input").unwrap();
         assert_eq!(fi.input_schema["type"], "object");
-        let required: Vec<_> = fi.input_schema["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+        let required: Vec<_> = fi.input_schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
         assert!(required.contains(&"tab_id"));
         assert!(required.contains(&"selector"));
         assert!(required.contains(&"files"));
     }
 
     #[test]
-    fn dialog_schema_requires_tab_id_action() {        let tools = registered_tools();
+    fn dialog_schema_requires_tab_id_action() {
+        let tools = registered_tools();
         let d = tools.iter().find(|t| t.name == "codex_dialog").unwrap();
         assert_eq!(d.input_schema["type"], "object");
-        let required: Vec<_> = d.input_schema["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+        let required: Vec<_> = d.input_schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
         assert!(required.contains(&"tab_id"));
         assert!(required.contains(&"action"));
     }

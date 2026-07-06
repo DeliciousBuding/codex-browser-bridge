@@ -1,3 +1,4 @@
+use serde::Serialize;
 use serde_json::{json, value::RawValue, Value};
 
 use crate::browser;
@@ -13,10 +14,26 @@ fn mime_for(format: &str) -> &'static str {
 }
 
 use super::types::{
-    optional_bool, optional_str_array, optional_u64, required_i64, required_str,
-    required_str_array, required_string_value, required_string_vec, sanitize_for_log, Content,
-    ToolHandler,
+    optional_bool, optional_duration_ms, optional_str_array, optional_u64, required_i64,
+    required_str, required_str_array, required_string_value, required_string_vec, sanitize_for_log,
+    Content, ToolHandler,
 };
+
+const MAX_WAIT_MS: u64 = 60_000;
+const MAX_CAPTURE_MS: u64 = 30_000;
+const MAX_FORM_DELAY_MS: u64 = 1_000;
+const DEFAULT_PAGE_ASSET_MAX_RESOURCES: u64 = 50;
+const MAX_PAGE_ASSET_RESOURCES: u64 = 200;
+const DEFAULT_PAGE_ASSET_MAX_TOTAL_BYTES: u64 = 1_048_576;
+const MAX_PAGE_ASSET_TOTAL_BYTES: u64 = 5_242_880;
+
+#[derive(Serialize)]
+struct PageAssetsResponse {
+    resources: Vec<browser::PageResource>,
+    truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    limit_reason: Option<&'static str>,
+}
 
 impl super::Server {
     pub(super) async fn handle_tool_call(&self, id: Value, params: Option<Value>) -> String {
@@ -168,7 +185,7 @@ impl super::Server {
 
     async fn handle_wait_for_load(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
-        let timeout_ms = optional_u64(&args, "timeout_ms")?.unwrap_or(10_000);
+        let timeout_ms = optional_duration_ms(&args, "timeout_ms", MAX_WAIT_MS)?.unwrap_or(10_000);
         let state = browser::wait_for_load(&self.client, tab_id, timeout_ms).await?;
         Ok(vec![Content::text(format!(
             "Tab {tab_id} reached readyState={state}"
@@ -188,10 +205,7 @@ impl super::Server {
             .or_else(|| args.get("fullPage"))
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let format = args
-            .get("format")
-            .and_then(Value::as_str)
-            .unwrap_or("png");
+        let format = args.get("format").and_then(Value::as_str).unwrap_or("png");
         let quality = optional_u64(&args, "quality")?;
         let data = browser::screenshot(&self.client, tab_id, full_page, format, quality).await?;
         Ok(vec![
@@ -317,7 +331,7 @@ impl super::Server {
     async fn handle_page_assets(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
         let include_content = optional_bool(&args, "include_content")?.unwrap_or(false);
-        let types: Option<Vec<String>> = optional_str_array(&args, "types");
+        let types: Option<Vec<String>> = optional_str_array(&args, "types")?;
 
         let mut resources = browser::get_resource_tree(&self.client, tab_id).await?;
 
@@ -330,17 +344,35 @@ impl super::Server {
         }
 
         if include_content {
+            let max_resources = optional_u64(&args, "max_resources")?
+                .unwrap_or(DEFAULT_PAGE_ASSET_MAX_RESOURCES)
+                .min(MAX_PAGE_ASSET_RESOURCES) as usize;
+            let max_total_bytes = optional_u64(&args, "max_total_bytes")?
+                .unwrap_or(DEFAULT_PAGE_ASSET_MAX_TOTAL_BYTES)
+                .min(MAX_PAGE_ASSET_TOTAL_BYTES);
+            let mut truncated = false;
+            let mut limit_reason = None;
+
+            if resources.len() > max_resources {
+                resources.truncate(max_resources);
+                truncated = true;
+                limit_reason = Some("max_resources");
+            }
+
+            let mut total_bytes = 0_u64;
             for resource in resources.iter_mut() {
                 let frame_id = resource.frame_id.clone();
-                match browser::get_resource_content(
-                    &self.client,
-                    tab_id,
-                    &frame_id,
-                    &resource.url,
-                )
-                .await
+                match browser::get_resource_content(&self.client, tab_id, &frame_id, &resource.url)
+                    .await
                 {
                     Ok(content) => {
+                        let content_bytes = content.len() as u64;
+                        if total_bytes.saturating_add(content_bytes) > max_total_bytes {
+                            truncated = true;
+                            limit_reason = Some("max_total_bytes");
+                            break;
+                        }
+                        total_bytes += content_bytes;
                         resource.content = Some(content);
                     }
                     Err(err) => {
@@ -353,20 +385,27 @@ impl super::Server {
                     }
                 }
             }
+
+            return Ok(vec![Content::text(serde_json::to_string_pretty(
+                &PageAssetsResponse {
+                    resources,
+                    truncated,
+                    limit_reason,
+                },
+            )?)]);
         }
 
-        Ok(vec![Content::text(
-            serde_json::to_string_pretty(&resources)?,
-        )])
+        Ok(vec![Content::text(serde_json::to_string_pretty(
+            &resources,
+        )?)])
     }
 
     async fn handle_network_cookies(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
-        let urls: Option<Vec<String>> = optional_str_array(&args, "urls");
+        let urls: Option<Vec<String>> = optional_str_array(&args, "urls")?;
         let redact = optional_bool(&args, "redact_values")?.unwrap_or(true);
 
-        let mut cookies =
-            browser::get_cookies(&self.client, tab_id, urls.as_deref()).await?;
+        let mut cookies = browser::get_cookies(&self.client, tab_id, urls.as_deref()).await?;
 
         if redact {
             for cookie in cookies.iter_mut() {
@@ -463,13 +502,7 @@ impl super::Server {
             anyhow::bail!("prompt_text is only valid with action='accept'");
         }
 
-        browser::handle_dialog(
-            &self.client,
-            tab_id,
-            action,
-            prompt_text.as_deref(),
-        )
-        .await?;
+        browser::handle_dialog(&self.client, tab_id, action, prompt_text.as_deref()).await?;
         Ok(vec![Content::text(format!(
             "Dialog {action}ed in tab {tab_id}"
         ))])
@@ -479,21 +512,15 @@ impl super::Server {
         let tab_id = required_str(&args, "tab_id")?;
         let role = args.get("role").and_then(Value::as_str);
         let name = args.get("name").and_then(Value::as_str);
-        let max_results = optional_u64(&args, "max_results")?
-            .unwrap_or(10)
-            .min(50) as usize; // cap at 50
+        let max_results = optional_u64(&args, "max_results")?.unwrap_or(10).min(50) as usize; // cap at 50
 
         if role.is_none() && name.is_none() {
             anyhow::bail!("At least one of 'role' or 'name' is required");
         }
 
-        let matches = browser::find_elements(
-            &self.client, tab_id, role, name, max_results,
-        ).await?;
+        let matches = browser::find_elements(&self.client, tab_id, role, name, max_results).await?;
 
-        Ok(vec![Content::text(
-            serde_json::to_string_pretty(&matches)?,
-        )])
+        Ok(vec![Content::text(serde_json::to_string_pretty(&matches)?)])
     }
 
     async fn handle_click_element(&self, args: Value) -> anyhow::Result<Vec<Content>> {
@@ -508,7 +535,7 @@ impl super::Server {
     async fn handle_nav_and_wait(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
         let url = required_str(&args, "url")?;
-        let timeout_ms = optional_u64(&args, "timeout_ms")?.unwrap_or(30_000);
+        let timeout_ms = optional_duration_ms(&args, "timeout_ms", MAX_WAIT_MS)?.unwrap_or(30_000);
         browser::nav_and_wait(&self.client, tab_id, url, timeout_ms).await?;
         Ok(vec![Content::text(format!(
             "Navigated to {url} and loaded in tab {tab_id}"
@@ -518,7 +545,7 @@ impl super::Server {
     async fn handle_click_and_wait(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
         let selector = required_str(&args, "selector")?;
-        let timeout_ms = optional_u64(&args, "timeout_ms")?.unwrap_or(10_000);
+        let timeout_ms = optional_duration_ms(&args, "timeout_ms", MAX_WAIT_MS)?.unwrap_or(10_000);
         browser::click_and_wait(&self.client, tab_id, selector, timeout_ms).await?;
         Ok(vec![Content::text(format!(
             "Clicked {selector} and waited in tab {tab_id}"
@@ -531,18 +558,14 @@ impl super::Server {
             .get("fields")
             .ok_or_else(|| anyhow::anyhow!("missing required argument: fields"))?;
         let submit = args.get("submit").and_then(Value::as_str);
-        let delay_ms = optional_u64(&args, "delay_ms")?.unwrap_or(50);
+        let delay_ms = optional_duration_ms(&args, "delay_ms", MAX_FORM_DELAY_MS)?.unwrap_or(50);
         browser::form_fill(&self.client, tab_id, fields, submit, delay_ms).await?;
-        Ok(vec![Content::text(format!(
-            "Form filled in tab {tab_id}"
-        ))])
+        Ok(vec![Content::text(format!("Form filled in tab {tab_id}"))])
     }
 
     async fn handle_doctor(&self) -> anyhow::Result<Vec<Content>> {
         let result = crate::doctor::run_diagnostics().await;
-        Ok(vec![Content::text(
-            serde_json::to_string_pretty(&result)?,
-        )])
+        Ok(vec![Content::text(serde_json::to_string_pretty(&result)?)])
     }
 
     async fn handle_bring_to_front(&self, args: Value) -> anyhow::Result<Vec<Content>> {
@@ -568,7 +591,7 @@ impl super::Server {
     async fn handle_wait_for_element(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
         let selector = required_str(&args, "selector")?;
-        let timeout_ms = optional_u64(&args, "timeout_ms")?.unwrap_or(10_000);
+        let timeout_ms = optional_duration_ms(&args, "timeout_ms", MAX_WAIT_MS)?.unwrap_or(10_000);
         browser::wait_for_element(&self.client, tab_id, selector, timeout_ms).await?;
         Ok(vec![Content::text(format!(
             "Element {selector} found in tab {tab_id}"
@@ -596,18 +619,14 @@ impl super::Server {
     async fn handle_storage(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
         let key = required_str(&args, "key")?;
-        let action = args
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or("get");
+        let action = args.get("action").and_then(Value::as_str).unwrap_or("get");
         let storage_type = args
             .get("storage_type")
             .and_then(Value::as_str)
             .unwrap_or("local");
         match action {
             "get" => {
-                let val =
-                    browser::storage_get(&self.client, tab_id, key, storage_type).await?;
+                let val = browser::storage_get(&self.client, tab_id, key, storage_type).await?;
                 Ok(vec![Content::text(val.unwrap_or_else(|| "null".into()))])
             }
             "set" => {
@@ -672,9 +691,7 @@ impl super::Server {
             }
         }
         browser::delete_cookies(&self.client, tab_id, params).await?;
-        Ok(vec![Content::text(format!(
-            "Deleted cookies named {name}"
-        ))])
+        Ok(vec![Content::text(format!("Deleted cookies named {name}"))])
     }
 
     async fn handle_emulate_device(&self, args: Value) -> anyhow::Result<Vec<Content>> {
@@ -703,14 +720,16 @@ impl super::Server {
 
     async fn handle_network_monitor(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
-        let duration_ms = optional_u64(&args, "duration_ms")?.unwrap_or(5_000);
+        let duration_ms =
+            optional_duration_ms(&args, "duration_ms", MAX_CAPTURE_MS)?.unwrap_or(5_000);
         let result = browser::network_monitor(&self.client, tab_id, duration_ms).await?;
         Ok(vec![Content::text(serde_json::to_string_pretty(&result)?)])
     }
 
     async fn handle_console_logs(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
-        let duration_ms = optional_u64(&args, "duration_ms")?.unwrap_or(5_000);
+        let duration_ms =
+            optional_duration_ms(&args, "duration_ms", MAX_CAPTURE_MS)?.unwrap_or(5_000);
         let result = browser::console_logs(&self.client, tab_id, duration_ms).await?;
         Ok(vec![Content::text(serde_json::to_string_pretty(&result)?)])
     }
@@ -718,7 +737,7 @@ impl super::Server {
     async fn handle_wait_for_url(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
         let pattern = required_str(&args, "pattern")?;
-        let timeout_ms = optional_u64(&args, "timeout_ms")?.unwrap_or(10_000);
+        let timeout_ms = optional_duration_ms(&args, "timeout_ms", MAX_WAIT_MS)?.unwrap_or(10_000);
         browser::wait_for_url(&self.client, tab_id, pattern, timeout_ms).await?;
         Ok(vec![Content::text(format!(
             "URL matched {pattern} in tab {tab_id}"

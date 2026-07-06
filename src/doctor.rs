@@ -44,16 +44,15 @@ pub async fn run_diagnostics() -> DiagnosticResult {
                                     Ok(Ok(raw)) => {
                                         // Try to extract browser version
                                         let info_str = raw.get();
-                                        let browser = serde_json::from_str::<
-                                            serde_json::Value,
-                                        >(info_str)
-                                        .ok()
-                                        .and_then(|v| {
-                                            v.get("browserVersion")
-                                                .or_else(|| v.get("product"))
-                                                .and_then(|v| v.as_str())
-                                                .map(String::from)
-                                        });
+                                        let browser =
+                                            serde_json::from_str::<serde_json::Value>(info_str)
+                                                .ok()
+                                                .and_then(|v| {
+                                                    v.get("browserVersion")
+                                                        .or_else(|| v.get("product"))
+                                                        .and_then(|v| v.as_str())
+                                                        .map(String::from)
+                                                });
                                         (true, browser)
                                     }
                                     _ => (false, None),

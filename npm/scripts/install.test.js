@@ -1,9 +1,13 @@
 const assert = require("assert");
+const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const { embeddedChecksum, findChecksum, parseChecksumLine, sha256 } = require("./install");
+const { embeddedChecksum, findChecksum, install, parseChecksumLine, resolveWindowsArch, sha256 } = require("./install");
+const { requiredFilesForEnv } = require("./check-package");
 
 const hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const binary = Buffer.from("fake binary");
+const binaryHash = sha256(binary);
 
 assert.deepStrictEqual(parseChecksumLine(`${hash} *codex-browser-bridge.exe`), {
   hash,
@@ -30,21 +34,123 @@ assert.deepStrictEqual(findChecksum(entries.map((entry) => `${entry.hash} *${ent
 });
 assert.strictEqual(findChecksum(`${hash} *codex-browser-bridge.exe`, "missing.exe"), undefined);
 
-const checksumFile = path.join(__dirname, "..", "checksums.json");
-const originalChecksumFile = fs.existsSync(checksumFile) ? fs.readFileSync(checksumFile, "utf8") : null;
-try {
-  fs.writeFileSync(checksumFile, JSON.stringify({ files: { "codex-browser-bridge.exe": hash } }));
-  assert.deepStrictEqual(embeddedChecksum("codex-browser-bridge.exe"), {
-    hash,
-    file: "codex-browser-bridge.exe",
-  });
-  assert.strictEqual(embeddedChecksum("missing.exe"), null);
-} finally {
-  if (originalChecksumFile === null) {
-    fs.rmSync(checksumFile, { force: true });
-  } else {
-    fs.writeFileSync(checksumFile, originalChecksumFile);
+const tmp = fs.mkdtempSync(path.join(require("os").tmpdir(), "codex-bridge-install-"));
+
+async function run() {
+  try {
+    fs.writeFileSync(
+      path.join(tmp, "checksums.json"),
+      JSON.stringify({ files: { "codex-browser-bridge.exe": hash } })
+    );
+    assert.deepStrictEqual(embeddedChecksum("codex-browser-bridge.exe", tmp), {
+      hash,
+      file: "codex-browser-bridge.exe",
+    });
+    assert.strictEqual(embeddedChecksum("missing.exe", tmp), null);
+
+    assert.strictEqual(sha256(Buffer.from("hello")), "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+    assert.strictEqual(resolveWindowsArch("win32", "x64"), "amd64");
+    assert.strictEqual(resolveWindowsArch("win32", "arm64"), "arm64");
+    assert.throws(() => resolveWindowsArch("linux", "x64"), /only supports Windows/);
+    assert.throws(() => resolveWindowsArch("win32", "ia32"), /does not ship/);
+
+    assert.deepStrictEqual(requiredFilesForEnv({}), [
+      "package.json",
+      "scripts/install.js",
+      "bin/codex-browser-bridge.js",
+      "skills/codex-browser/SKILL.md",
+    ]);
+    assert.deepStrictEqual(requiredFilesForEnv({ CODEX_BRIDGE_REQUIRE_CHECKSUMS: "1" }), [
+      "package.json",
+      "scripts/install.js",
+      "bin/codex-browser-bridge.js",
+      "skills/codex-browser/SKILL.md",
+      "checksums.json",
+    ]);
+
+    const installRoot = path.join(tmp, "install-root");
+    const outDir = path.join(tmp, "bin");
+    fs.mkdirSync(installRoot);
+    fs.writeFileSync(
+      path.join(installRoot, "checksums.json"),
+      JSON.stringify({ files: { "codex-browser-bridge.exe": binaryHash } })
+    );
+    const embeddedCalls = [];
+    const embeddedResult = await install({
+      platform: "win32",
+      arch: "x64",
+      env: {},
+      packageRoot: installRoot,
+      binDir: outDir,
+      version: "1.9.1",
+      log: () => {},
+      requestBuffer: async (url) => {
+        embeddedCalls.push(url);
+        return binary;
+      },
+    });
+    assert.strictEqual(embeddedResult.asset, "codex-browser-bridge.exe");
+    assert.strictEqual(embeddedCalls.length, 1);
+    assert.ok(embeddedCalls[0].endsWith("/v1.9.1/codex-browser-bridge.exe"));
+    assert.deepStrictEqual(fs.readFileSync(path.join(outDir, "codex-browser-bridge.exe")), binary);
+
+    const fetchedRoot = path.join(tmp, "fetched-root");
+    const fetchedOut = path.join(tmp, "fetched-bin");
+    fs.mkdirSync(fetchedRoot);
+    const fetchedCalls = [];
+    await install({
+      platform: "win32",
+      arch: "arm64",
+      env: {
+        CODEX_BRIDGE_ALLOW_DEV_DOWNLOADS: "1",
+        CODEX_BRIDGE_REPO: "owner/repo",
+        CODEX_BRIDGE_TAG: "v9.9.9-test.1",
+      },
+      packageRoot: fetchedRoot,
+      binDir: fetchedOut,
+      version: "1.9.1",
+      log: () => {},
+      requestBuffer: async (url) => {
+        fetchedCalls.push(url);
+        if (url.endsWith("checksums.txt")) {
+          return Buffer.from(`${binaryHash} *codex-browser-bridge-arm64.exe\n`);
+        }
+        return binary;
+      },
+    });
+    assert.deepStrictEqual(fetchedCalls, [
+      "https://github.com/owner/repo/releases/download/v9.9.9-test.1/checksums.txt",
+      "https://github.com/owner/repo/releases/download/v9.9.9-test.1/codex-browser-bridge-arm64.exe",
+    ]);
+
+    const wrapperExe = path.join(__dirname, "..", "bin", "codex-browser-bridge.exe");
+    if (!fs.existsSync(wrapperExe)) {
+      const wrapper = spawnSync(process.execPath, [path.join(__dirname, "..", "bin", "codex-browser-bridge.js")], {
+        encoding: "utf8",
+      });
+      assert.strictEqual(wrapper.status, 1);
+      assert.match(wrapper.stderr, /codex-browser-bridge\.exe is missing/);
+    }
+
+    await assert.rejects(
+      install({
+        platform: "win32",
+        arch: "x64",
+        env: {},
+        packageRoot: fetchedRoot,
+        binDir: path.join(tmp, "bad-bin"),
+        version: "1.9.1",
+        log: () => {},
+        requestBuffer: async (url) => (url.endsWith("checksums.txt") ? Buffer.from(`${hash} *codex-browser-bridge.exe\n`) : binary),
+      }),
+      /checksum mismatch/
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
 
-assert.strictEqual(sha256(Buffer.from("hello")), "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+run().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

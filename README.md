@@ -86,7 +86,7 @@ Find the login button and click it.
 
 For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
 
-### 3. Install the agent skill (recommended)
+### Install the agent skill (recommended)
 
 The npm package includes a skill that teaches agents how to use all 52
 tools effectively. After install, copy it to your skills directory:
@@ -102,6 +102,43 @@ cp -r node_modules/@delicious233/codex-browser-bridge/skills/codex-browser .clau
 **👤 For agents reading this:** to self-install, run the copy command above
 against your own skills directory. The skill is at
 `skills/codex-browser/SKILL.md` inside the installed npm package.
+
+## Configuration
+
+Configuration precedence is:
+
+1. CLI flags
+2. config file
+3. environment variables
+4. built-in defaults
+
+The default config file is `.codex-browser-bridge.toml` in the current working directory. Set `CODEX_BRIDGE_CONFIG` to use another path:
+
+```toml
+profile = "full"                 # basic | network | full
+upload_base = "C:/Users/me/Downloads"
+```
+
+The same settings can be provided in MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "codex-browser": {
+      "command": "codex-browser-bridge",
+      "args": ["--mode", "mcp", "--profile", "network"],
+      "transport": "stdio",
+      "env": {
+        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\me\\Downloads"
+      }
+    }
+  }
+}
+```
+
+`CODEX_BRIDGE_UPLOAD_BASE` limits `codex_file_input` to a specific directory. Set it explicitly when enabling file uploads; MCP clients do not always launch servers from a predictable working directory.
+
+`codex://tabs` is available as an MCP resource for clients that support resources. It returns tabs owned by the current bridge session, not every Chrome tab. The prompt templates `login` and `extract-table` are also exposed for clients that support MCP prompts.
 
 ## All 52 MCP Tools
 
@@ -202,7 +239,7 @@ codex-browser-bridge --mode discover
 codex-browser-bridge --mode cli
 
 # With tool profiles
-codex-browser-bridge --mode mcp --profile basic     # 33 tools
+codex-browser-bridge --mode mcp --profile basic     # 34 tools
 codex-browser-bridge --mode mcp --profile network   # 50 tools
 codex-browser-bridge --mode mcp --profile full      # all 52 (default)
 ```
@@ -232,7 +269,8 @@ This tool gives an agent access to your active browser session.
 - Avoid using on pages with passwords, payments, or admin consoles
 - Redact tab titles, URLs, DOM text, screenshots before sharing output
 - `codex_file_input` enforces path traversal prevention (canonicalize + prefix check, 10 MB limit)
-- Cookie values redacted by default; CDP allowlist blocks dangerous domains
+- Navigation only accepts `http://` and `https://` URLs
+- Cookie values redacted by default; raw CDP is allowlist-protected and blocks sensitive browser, target, debugger, navigation, cookie, and destructive storage operations
 
 ## Development
 
@@ -264,9 +302,9 @@ src/
 
 See [ROADMAP.md](ROADMAP.md). Highlights:
 
-- `codex_network_monitor` — request/response inspection
-- `codex_emulate_device` — mobile viewport emulation
-- `codex_storage` — localStorage / sessionStorage access
+- winget and scoop manifests
+- optional live E2E harness for Codex Desktop + Chrome (`scripts/live-e2e.ps1`)
+- typed tool result schemas
 - v2.0.0: Cross-platform (macOS / Linux via Unix domain sockets)
 
 ## Related
@@ -276,6 +314,7 @@ See [ROADMAP.md](ROADMAP.md). Highlights:
 - [ROADMAP.md](ROADMAP.md) — Full roadmap with SUPER scores
 - [CHANGELOG.md](CHANGELOG.md) — Release history
 - [CONTRIBUTING.md](CONTRIBUTING.md) — Dev setup and conventions
+- [docs/release-process.md](docs/release-process.md) — Tag, changelog, GitHub Release, and npm publishing rules
 
 ## License
 

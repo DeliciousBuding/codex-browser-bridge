@@ -38,9 +38,8 @@ type PendingMap = HashMap<u64, oneshot::Sender<Response>>;
 /// discovery and dial; tests inject a mock returning a `tokio::io::duplex()`
 /// pair. Kept as a boxed-future closure (no async_trait) to avoid adding a
 /// trait layer for a single use.
-type ConnectionFactory = Arc<
-    dyn Fn() -> Pin<Box<dyn Future<Output = Result<PipeStream>> + Send>> + Send + Sync,
->;
+type ConnectionFactory =
+    Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<PipeStream>> + Send>> + Send + Sync>;
 
 /// A live subscription to a CDP event stream (e.g. "Network.", "Runtime.consoleAPICalled").
 /// Subscribers receive the event `params` object as a JSON Value.
@@ -153,7 +152,8 @@ impl Client {
                 // reconnect and retry exactly once on the fresh connection.
                 tracing::debug!(method, error = %err, "request failed, reconnecting + retrying once");
                 self.force_reconnect().await?;
-                self.send_request_once(method, params, request_timeout).await
+                self.send_request_once(method, params, request_timeout)
+                    .await
             }
             Err(err) => Err(err),
         }
@@ -399,7 +399,14 @@ impl Client {
         let tab_lock = self.tab_lock(tab_id).await;
         let _guard = tab_lock.lock().await;
 
-        let already_attached = self.inner.attached_tabs.lock().await.get(&tab_id).copied().unwrap_or(false);
+        let already_attached = self
+            .inner
+            .attached_tabs
+            .lock()
+            .await
+            .get(&tab_id)
+            .copied()
+            .unwrap_or(false);
 
         if already_attached {
             // Sticky attach: skip detach+attach, go direct to CDP.
@@ -814,13 +821,16 @@ mod cdp_error_tests {
 
     #[test]
     fn check_cdp_error_detects_error_envelope() {
-        let raw = RawValue::from_string(
-            r#"{"error":{"code":-32000,"message":"Target closed"}}"#.into(),
-        )
-        .unwrap();
+        let raw =
+            RawValue::from_string(r#"{"error":{"code":-32000,"message":"Target closed"}}"#.into())
+                .unwrap();
         let err = check_cdp_error("Page.navigate", &raw).unwrap_err();
         match err {
-            BridgeError::Cdp { method, code, message } => {
+            BridgeError::Cdp {
+                method,
+                code,
+                message,
+            } => {
                 assert_eq!(method, "Page.navigate");
                 assert_eq!(code, -32000);
                 assert_eq!(message, "Target closed");
@@ -839,10 +849,9 @@ mod cdp_error_tests {
     fn check_cdp_error_sanitizes_newlines_in_message() {
         // Newlines in CDP error messages are escaped (matching RPC error handling),
         // so they can't smuggle log injection through the surfaced message.
-        let raw = RawValue::from_string(
-            r#"{"error":{"code":1,"message":"line1\nline2\rline3"}}"#.into(),
-        )
-        .unwrap();
+        let raw =
+            RawValue::from_string(r#"{"error":{"code":1,"message":"line1\nline2\rline3"}}"#.into())
+                .unwrap();
         let err = check_cdp_error("x", &raw).unwrap_err();
         let msg = match err {
             BridgeError::Cdp { message, .. } => message,

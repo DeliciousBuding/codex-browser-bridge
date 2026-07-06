@@ -3,7 +3,11 @@
     "codex-browser": {
       "command": "codex-browser-bridge",
       "args": ["--mode", "mcp"],
-      "transport": "stdio"
+      "transport": "stdio",
+      "env": {
+        "CODEX_BRIDGE_PROFILE": "network",
+        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\YOUR_USER\\Downloads"
+      }
     }
   }
 }

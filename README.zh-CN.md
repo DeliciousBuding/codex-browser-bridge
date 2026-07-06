@@ -88,6 +88,36 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 
 > 💡 **Agent skill 已内置。** 仓库 [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) 包含 LLM agent 使用全部 52 个工具的操作手册。将其 symlink 或复制到 agent 的 skills 目录即可（`~/.claude/skills/`、`~/.codex/skills/` 等）。
 
+## 配置
+
+配置优先级：CLI 参数 > 配置文件 > 环境变量 > 默认值。
+
+默认配置文件是当前工作目录下的 `.codex-browser-bridge.toml`。也可以用 `CODEX_BRIDGE_CONFIG` 指定路径：
+
+```toml
+profile = "full"                 # basic | network | full
+upload_base = "C:/Users/me/Downloads"
+```
+
+MCP 客户端配置中也可以设置环境变量：
+
+```json
+{
+  "mcpServers": {
+    "codex-browser": {
+      "command": "codex-browser-bridge",
+      "args": ["--mode", "mcp", "--profile", "network"],
+      "transport": "stdio",
+      "env": {
+        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\me\\Downloads"
+      }
+    }
+  }
+}
+```
+
+`CODEX_BRIDGE_UPLOAD_BASE` 会限制 `codex_file_input` 只能上传该目录下的文件。建议显式设置，因为不同 MCP 客户端启动 server 的工作目录不一定一致。
+
 ## 全部 52 个 MCP 工具
 
 ### 标签管理 `[Tabs]`
@@ -187,7 +217,7 @@ codex-browser-bridge --mode discover
 codex-browser-bridge --mode cli
 
 # 工具 profile
-codex-browser-bridge --mode mcp --profile basic     # 33 个工具
+codex-browser-bridge --mode mcp --profile basic     # 34 个工具
 codex-browser-bridge --mode mcp --profile network   # 50 个工具
 codex-browser-bridge --mode mcp --profile full      # 全部 52 个（默认）
 ```
@@ -217,7 +247,8 @@ Codex Desktop → Chrome Extension → Chrome 标签页
 - 避免在含密码、支付信息或管理后台的页面使用
 - 分享截图/DOM/日志前脱敏
 - `codex_file_input` 强制路径穿越防护（canonicalize + 前缀检查，10 MB 限制）
-- Cookie 值默认脱敏；CDP allowlist 阻止危险域
+- 导航只接受 `http://` 和 `https://` URL
+- Cookie 值默认脱敏；raw CDP 使用 allowlist，并阻止 browser/target/debugger/navigation/cookie/destructive storage 等敏感操作
 
 ## 开发
 
@@ -249,9 +280,9 @@ src/
 
 详见 [ROADMAP.md](ROADMAP.md)。亮点：
 
-- `codex_network_monitor` — 请求/响应检查
-- `codex_emulate_device` — 移动端视口模拟
-- `codex_storage` — localStorage / sessionStorage 访问
+- winget / scoop 安装清单
+- 可选真实 E2E harness（Codex Desktop + Chrome）
+- typed tool result schemas
 - v2.0.0: 跨平台（macOS / Linux via Unix domain socket）
 
 ## 相关资源
@@ -261,6 +292,8 @@ src/
 - [ROADMAP.md](ROADMAP.md) — 完整路线图（含 SUPER 评分）
 - [CHANGELOG.md](CHANGELOG.md) — 发布历史
 - [CONTRIBUTING.md](CONTRIBUTING.md) — 开发配置与规范
+- [docs/release-process.md](docs/release-process.md) — tag、changelog、GitHub Release、npm 发布规则
+- [scripts/live-e2e.ps1](scripts/live-e2e.ps1) — 可选真实 Codex Desktop + Chrome E2E 冒烟测试
 
 ## 许可证
 

@@ -2,24 +2,22 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{BridgeError, Result};
 
-/// Validate a URL scheme against dangerous protocols.
-/// Moved from browser.rs — centralized security module.
+/// Validate URL schemes accepted by navigation-like tools.
 pub fn validate_url(raw_url: &str) -> Result<()> {
-    let lower = raw_url.trim().to_ascii_lowercase();
-    for scheme in [
-        "file:",
-        "javascript:",
-        "data:",
-        "vbscript:",
-        "about:",
-        "chrome:",
-        "edge:",
-    ] {
-        if lower.starts_with(scheme) {
-            return Err(BridgeError::User(format!("blocked URL scheme {scheme:?}")));
-        }
+    let trimmed = raw_url.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        return Ok(());
     }
-    Ok(())
+
+    let scheme = trimmed
+        .split_once(':')
+        .map(|(scheme, _)| scheme)
+        .filter(|scheme| !scheme.is_empty())
+        .unwrap_or("missing");
+    Err(BridgeError::User(format!(
+        "blocked URL scheme {scheme:?}; only http:// and https:// are allowed"
+    )))
 }
 
 /// Validate a file path for upload safety.

@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   rust:
     runs-on: windows-latest
@@ -63,18 +66,10 @@ jobs:
       - name: Check npm package contents
         shell: bash
         run: |
+          rm -rf npm/skills
+          cp -r skills npm/skills
           cd npm
-          npm pack --dry-run --json > pack.json
-          node - <<'NODE'
-          const fs = require("fs");
-          const pack = JSON.parse(fs.readFileSync("pack.json", "utf8"))[0];
-          const files = new Set(pack.files.map((f) => f.path));
-          for (const required of ["package.json", "scripts/install.js", "bin/codex-browser-bridge.js"]) {
-            if (!files.has(required)) {
-              throw new Error(`npm package is missing ${required}`);
-            }
-          }
-          NODE
+          npm run check:package
 
   test-lib:
     # The reconnect tests in client.rs use tokio duplex mocks under
@@ -87,9 +82,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.85.0
         with:
           components: clippy
-      - name: Test lib (incl. reconnect tests)
+      - name: Test non-Windows harness
         shell: bash
-        run: cargo test --locked --lib
-      - name: Clippy lib
+        run: cargo test --locked
+      - name: Clippy non-Windows harness
         shell: bash
-        run: cargo clippy --locked --lib -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings

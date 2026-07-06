@@ -39,6 +39,22 @@ fn validate_url_blocks_dangerous_schemes_case_insensitively() {
 }
 
 #[test]
+fn validate_url_allows_only_http_and_https() {
+    for url in [
+        "ftp://example.com/file",
+        "blob:https://example.com/id",
+        "filesystem:https://example.com/tmp",
+        "view-source:https://example.com",
+        "chrome-extension://extension/page.html",
+        "example.com/no-scheme",
+    ] {
+        assert!(validate_url(url).is_err(), "{url}");
+    }
+
+    assert!(validate_url("HTTPS://EXAMPLE.COM/path").is_ok());
+}
+
+#[test]
 fn decode_tabs_normalizes_string_and_numeric_ids() {
     let raw =
         RawValue::from_string(r#"[{"id":1,"url":"u"},{"id":"2","title":"t"}]"#.into()).unwrap();

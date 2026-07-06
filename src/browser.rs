@@ -5,6 +5,26 @@ use tokio::time::{sleep, Duration, Instant};
 use crate::client::Client;
 use crate::error::{BridgeError, Result};
 
+const MAX_WAIT_MS: u64 = 60_000;
+const MAX_CAPTURE_MS: u64 = 30_000;
+const MAX_FORM_DELAY_MS: u64 = 1_000;
+
+fn bounded_duration_ms(name: &str, value: u64, default_ms: u64, max_ms: u64) -> Result<u64> {
+    let value = if value == 0 { default_ms } else { value };
+    if value > max_ms {
+        return Err(BridgeError::User(format!(
+            "{name} must be <= {max_ms} milliseconds"
+        )));
+    }
+    Ok(value)
+}
+
+fn deadline_from_now(timeout_ms: u64) -> Result<Instant> {
+    Instant::now()
+        .checked_add(Duration::from_millis(timeout_ms))
+        .ok_or_else(|| BridgeError::User("timeout_ms is too large".into()))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tab {
     #[serde(skip)]
@@ -149,8 +169,8 @@ pub async fn reload(client: &Client, tab_id: &str) -> Result<()> {
 
 pub async fn wait_for_load(client: &Client, tab_id: &str, timeout_ms: u64) -> Result<String> {
     let id = parse_tab_id("wait_for_load", tab_id)?;
-    let timeout_ms = if timeout_ms == 0 { 10_000 } else { timeout_ms };
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let timeout_ms = bounded_duration_ms("timeout_ms", timeout_ms, 10_000, MAX_WAIT_MS)?;
+    let deadline = deadline_from_now(timeout_ms)?;
     let mut last = String::new();
 
     loop {
@@ -289,8 +309,8 @@ pub async fn wait_for_element(
     timeout_ms: u64,
 ) -> Result<()> {
     let id = parse_tab_id("wait_for_element", tab_id)?;
-    let timeout_ms = if timeout_ms == 0 { 10_000 } else { timeout_ms };
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let timeout_ms = bounded_duration_ms("timeout_ms", timeout_ms, 10_000, MAX_WAIT_MS)?;
+    let deadline = deadline_from_now(timeout_ms)?;
     let escaped = selector.replace('\\', "\\\\").replace('`', "\\`");
     let expr = format!("document.querySelector(`{escaped}`) !== null");
 
@@ -331,8 +351,8 @@ pub async fn wait_for_url(
     timeout_ms: u64,
 ) -> Result<()> {
     let id = parse_tab_id("wait_for_url", tab_id)?;
-    let timeout_ms = if timeout_ms == 0 { 10_000 } else { timeout_ms };
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let timeout_ms = bounded_duration_ms("timeout_ms", timeout_ms, 10_000, MAX_WAIT_MS)?;
+    let deadline = deadline_from_now(timeout_ms)?;
     let pat_json = serde_json::to_string(pattern).unwrap_or_else(|_| "null".into());
     let expr = format!("location.href.indexOf({pat_json}) >= 0");
 
@@ -535,7 +555,9 @@ pub async fn screenshot_element(client: &Client, tab_id: &str, selector: &str) -
         .await?;
     let rect_str = runtime_value_string(&raw)?
         .filter(|s| s != "null")
-        .ok_or_else(|| BridgeError::User(format!("element {selector:?} not found or has zero size")))?;
+        .ok_or_else(|| {
+            BridgeError::User(format!("element {selector:?} not found or has zero size"))
+        })?;
     #[derive(Deserialize)]
     struct Rect {
         x: f64,
@@ -621,13 +643,9 @@ struct NetEntry {
 /// Capture `Network.*` events for a duration and pair request↔response into a
 /// structured, agent-friendly list. Enables Network domain, collects for
 /// `duration_ms`, then disables.
-pub async fn network_monitor(
-    client: &Client,
-    tab_id: &str,
-    duration_ms: u64,
-) -> Result<Value> {
+pub async fn network_monitor(client: &Client, tab_id: &str, duration_ms: u64) -> Result<Value> {
     let id = parse_tab_id("network_monitor", tab_id)?;
-    let duration_ms = if duration_ms == 0 { 5_000 } else { duration_ms };
+    let duration_ms = bounded_duration_ms("duration_ms", duration_ms, 5_000, MAX_CAPTURE_MS)?;
     let (sub_id, mut rx) = client.subscribe_events("Network.", 512).await;
     if let Err(err) = client.execute_cdp(id, "Network.enable", None).await {
         client.unsubscribe_events(sub_id).await;
@@ -671,8 +689,16 @@ fn pair_network_events(events: &[Value]) -> Vec<NetEntry> {
                     }
                     let entry = NetEntry {
                         request_id: rid.clone(),
-                        url: req.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                        method: req.get("method").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        url: req
+                            .get("url")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        method: req
+                            .get("method")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
                         resource_type: params
                             .and_then(|p| p.get("type"))
                             .and_then(|v| v.as_str())
@@ -713,13 +739,9 @@ fn pair_network_events(events: &[Value]) -> Vec<NetEntry> {
 
 /// Capture `console.*` log calls for a duration. Enables Runtime, collects
 /// `Runtime.consoleAPICalled` events, then disables. Returns raw log params.
-pub async fn console_logs(
-    client: &Client,
-    tab_id: &str,
-    duration_ms: u64,
-) -> Result<Value> {
+pub async fn console_logs(client: &Client, tab_id: &str, duration_ms: u64) -> Result<Value> {
     let id = parse_tab_id("console_logs", tab_id)?;
-    let duration_ms = if duration_ms == 0 { 5_000 } else { duration_ms };
+    let duration_ms = bounded_duration_ms("duration_ms", duration_ms, 5_000, MAX_CAPTURE_MS)?;
     let (sub_id, mut rx) = client
         .subscribe_events("Runtime.consoleAPICalled", 512)
         .await;
@@ -750,7 +772,10 @@ pub async fn performance_metrics(client: &Client, tab_id: &str) -> Result<Value>
     let id = parse_tab_id("performance_metrics", tab_id)?;
     client.execute_cdp(id, "Performance.enable", None).await?;
     let raw = client.execute_cdp(id, "Performance.getMetrics", None).await;
-    client.execute_cdp(id, "Performance.disable", None).await.ok();
+    client
+        .execute_cdp(id, "Performance.disable", None)
+        .await
+        .ok();
     let raw = raw?;
     serde_json::from_str(raw.get())
         .map_err(|err| BridgeError::Protocol(format!("parse performance metrics: {err}")))
@@ -928,6 +953,29 @@ const BLOCKED_CDP_DOMAINS: &[&str] = &[
     "Storage.clearDataForOrigin",
 ];
 
+const BLOCKED_CDP_METHODS: &[&str] = &[
+    "Page.navigate",
+    "Page.navigateToHistoryEntry",
+    "Network.getAllCookies",
+    "Network.getCookies",
+    "Network.setCookie",
+    "Network.setCookies",
+    "Storage.getCookies",
+    "Storage.setCookies",
+];
+
+const ALLOWED_CDP_PREFIXES: &[&str] = &[
+    "Accessibility.",
+    "CSS.",
+    "DOM.",
+    "Input.",
+    "Log.",
+    "Network.",
+    "Page.",
+    "Performance.",
+    "Runtime.",
+];
+
 /// Execute any CDP method with arbitrary params. The universal CDP escape hatch.
 /// Blocks dangerous CDP domains (Browser, Debugger, Target, etc.) for security.
 pub async fn execute_cdp_generic(
@@ -938,14 +986,40 @@ pub async fn execute_cdp_generic(
 ) -> Result<Box<RawValue>> {
     for blocked in BLOCKED_CDP_DOMAINS {
         if method.starts_with(blocked) || method == blocked.trim_end_matches('.') {
-            return Err(BridgeError::User(format!(
-                "blocked CDP method: {method} ({}is not allowed for security)",
-                if blocked.ends_with('.') { "domain " } else { "" }
-            )));
+            return blocked_cdp_method(method, blocked);
         }
     }
+    validate_generic_cdp_method(method)?;
     let id = parse_tab_id("execute_cdp", tab_id)?;
     client.execute_cdp(id, method, params).await
+}
+
+fn validate_generic_cdp_method(method: &str) -> Result<()> {
+    for blocked in BLOCKED_CDP_METHODS {
+        if method == *blocked {
+            return blocked_cdp_method(method, blocked);
+        }
+    }
+    if ALLOWED_CDP_PREFIXES
+        .iter()
+        .any(|prefix| method.starts_with(prefix))
+    {
+        return Ok(());
+    }
+    Err(BridgeError::User(format!(
+        "blocked CDP method: {method} (method is not in the generic CDP allowlist)"
+    )))
+}
+
+fn blocked_cdp_method<T>(method: &str, blocked: &str) -> Result<T> {
+    Err(BridgeError::User(format!(
+        "blocked CDP method: {method} ({}is not allowed for security)",
+        if blocked.ends_with('.') {
+            "domain "
+        } else {
+            ""
+        }
+    )))
 }
 
 // ── Page Assets (extension capability: pageAssets) ────────────
@@ -969,9 +1043,7 @@ pub struct PageResource {
 
 pub async fn get_resource_tree(client: &Client, tab_id: &str) -> Result<Vec<PageResource>> {
     let id = parse_tab_id("page_assets", tab_id)?;
-    let raw = client
-        .execute_cdp(id, "Page.getResourceTree", None)
-        .await?;
+    let raw = client.execute_cdp(id, "Page.getResourceTree", None).await?;
     parse_resource_tree(&raw)
 }
 
@@ -1026,11 +1098,7 @@ pub async fn get_cookies(
     parse_cookies(&raw)
 }
 
-pub async fn set_cookie(
-    client: &Client,
-    tab_id: &str,
-    params: Value,
-) -> Result<()> {
+pub async fn set_cookie(client: &Client, tab_id: &str, params: Value) -> Result<()> {
     let id = parse_tab_id("network_set_cookie", tab_id)?;
     client
         .execute_cdp(id, "Network.setCookie", Some(params))
@@ -1067,7 +1135,11 @@ pub async fn find_elements(
             }
         }
         if let Some(name_filter) = name {
-            if !node.name.to_ascii_lowercase().contains(&name_filter.to_ascii_lowercase()) {
+            if !node
+                .name
+                .to_ascii_lowercase()
+                .contains(&name_filter.to_ascii_lowercase())
+            {
                 continue;
             }
         }
@@ -1087,11 +1159,7 @@ pub async fn find_elements(
 
 /// Click an element by its accessibility backend node ID.
 /// Reuses the existing DOM.resolveNode → DOM.getBoxModel → Input dispatch pipeline.
-pub async fn click_ax_element(
-    client: &Client,
-    tab_id: &str,
-    node_id: &str,
-) -> Result<()> {
+pub async fn click_ax_element(client: &Client, tab_id: &str, node_id: &str) -> Result<()> {
     dom_cua_click(client, tab_id, node_id).await
 }
 
@@ -1144,12 +1212,7 @@ fn parse_ax_tree(raw: &str) -> Result<Vec<ParsedAxNode>> {
 // ── Composite ───────────────────────────────────────────────────
 
 /// Navigate to URL and wait for page load. Reduces 2 MCP calls to 1.
-pub async fn nav_and_wait(
-    client: &Client,
-    tab_id: &str,
-    url: &str,
-    timeout_ms: u64,
-) -> Result<()> {
+pub async fn nav_and_wait(client: &Client, tab_id: &str, url: &str, timeout_ms: u64) -> Result<()> {
     navigate(client, tab_id, url).await?;
     wait_for_load(client, tab_id, timeout_ms).await?;
     Ok(())
@@ -1178,6 +1241,7 @@ pub async fn form_fill(
     let obj = fields.as_object().ok_or_else(|| {
         BridgeError::User("fields must be an object mapping selector to value".into())
     })?;
+    let delay_ms = bounded_duration_ms("delay_ms", delay_ms, 0, MAX_FORM_DELAY_MS)?;
     for (selector, value) in obj {
         if let Some(val_str) = value.as_str() {
             fill(client, tab_id, selector, val_str).await?;
@@ -1234,9 +1298,8 @@ pub async fn file_input(
         subtype: Option<String>,
     }
 
-    let eval: EvaluateResult = serde_json::from_str(raw.get()).map_err(|err| {
-        BridgeError::Protocol(format!("parse Runtime.evaluate result: {err}"))
-    })?;
+    let eval: EvaluateResult = serde_json::from_str(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("parse Runtime.evaluate result: {err}")))?;
 
     let object_id = eval
         .result
@@ -1274,7 +1337,11 @@ pub async fn handle_dialog(
         params.insert("promptText".into(), json!(text));
     }
     client
-        .execute_cdp(id, "Page.handleJavaScriptDialog", Some(serde_json::Value::Object(params)))
+        .execute_cdp(
+            id,
+            "Page.handleJavaScriptDialog",
+            Some(serde_json::Value::Object(params)),
+        )
         .await
         .map(|_| ())
 }
@@ -1713,7 +1780,10 @@ mod tests {
     #[test]
     fn runtime_value_string_extracts_string_value() {
         let raw = RawValue::from_string(r#"{"result":{"value":"hello"}}"#.into()).unwrap();
-        assert_eq!(runtime_value_string(&raw).unwrap(), Some("hello".to_string()));
+        assert_eq!(
+            runtime_value_string(&raw).unwrap(),
+            Some("hello".to_string())
+        );
     }
 
     #[test]
@@ -1728,5 +1798,28 @@ mod tests {
         let raw = RawValue::from_string(r#"{"result":{}}"#.into()).unwrap();
         assert_eq!(runtime_value_string(&raw).unwrap(), None);
     }
-}
 
+    #[test]
+    fn generic_cdp_rejects_navigation_cookie_and_unknown_methods() {
+        for method in [
+            "Page.navigate",
+            "Page.navigateToHistoryEntry",
+            "Network.getCookies",
+            "Storage.getCookies",
+            "Browser.getVersion",
+        ] {
+            assert!(validate_generic_cdp_method(method).is_err(), "{method}");
+        }
+    }
+
+    #[test]
+    fn generic_cdp_allows_known_low_level_methods() {
+        for method in [
+            "Runtime.evaluate",
+            "DOM.getDocument",
+            "Page.captureScreenshot",
+        ] {
+            assert!(validate_generic_cdp_method(method).is_ok(), "{method}");
+        }
+    }
+}

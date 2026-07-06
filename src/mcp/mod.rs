@@ -3,14 +3,16 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::client::Client;
 
-use self::types::{error_response, result_response, RpcRequest, Tool};
-use self::schema::{registered_tools, tools_to_values};
 use self::profiles::ToolProfile;
+use self::schema::{registered_tools, tools_to_values};
+use self::types::{error_response, result_response, RpcRequest, Tool};
 
-pub mod types;
-pub mod schema;
 pub mod handlers;
 pub mod profiles;
+pub mod schema;
+pub mod types;
+
+const MAX_MCP_LINE_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone)]
 pub struct Server {
@@ -24,14 +26,28 @@ impl Server {
     pub fn new(client: Client) -> Self {
         let profile = ToolProfile::from_env();
         let all = registered_tools();
-        let tools = all.into_iter().filter(|t| profile.includes(t.name)).collect();
-        Self { client, tools, profile }
+        let tools = all
+            .into_iter()
+            .filter(|t| profile.includes(t.name))
+            .collect();
+        Self {
+            client,
+            tools,
+            profile,
+        }
     }
 
     pub fn new_with_profile(client: Client, profile: ToolProfile) -> Self {
         let all = registered_tools();
-        let tools = all.into_iter().filter(|t| profile.includes(t.name)).collect();
-        Self { client, tools, profile }
+        let tools = all
+            .into_iter()
+            .filter(|t| profile.includes(t.name))
+            .collect();
+        Self {
+            client,
+            tools,
+            profile,
+        }
     }
 
     pub async fn run_stdio(self) -> anyhow::Result<()> {
@@ -42,13 +58,28 @@ impl Server {
         let mut buf = Vec::with_capacity(8192);
 
         loop {
-            buf.clear();
-            match reader.read_until(b'\n', &mut buf).await {
+            match read_mcp_line(&mut reader, &mut buf).await {
                 Ok(0) => break, // EOF
                 Ok(_) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
+                    let response = error_response(None, -32600, "Invalid Request: line too large");
+                    stdout.write_all(response.as_bytes()).await?;
+                    stdout.write_all(b"\n").await?;
+                    stdout.flush().await?;
+                    break;
+                }
                 Err(err) => return Err(err.into()),
             }
-            let line = std::str::from_utf8(&buf).unwrap_or("").trim();
+            let line = match mcp_line_from_utf8(&buf) {
+                Ok(line) => line,
+                Err(()) => {
+                    let response = error_response(None, -32700, "Parse error");
+                    stdout.write_all(response.as_bytes()).await?;
+                    stdout.write_all(b"\n").await?;
+                    stdout.flush().await?;
+                    continue;
+                }
+            };
             if line.is_empty() {
                 continue;
             }
@@ -230,6 +261,55 @@ impl Server {
     }
 }
 
+async fn read_mcp_line<R>(reader: &mut R, buf: &mut Vec<u8>) -> std::io::Result<usize>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    buf.clear();
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return Ok(if buf.is_empty() { 0 } else { buf.len() });
+        }
+
+        if let Some(pos) = available.iter().position(|byte| *byte == b'\n') {
+            let take = pos + 1;
+            validate_mcp_line_len_after(buf.len(), take)?;
+            buf.extend_from_slice(&available[..take]);
+            reader.consume(take);
+            return Ok(buf.len());
+        }
+
+        let take = available.len();
+        validate_mcp_line_len_after(buf.len(), take)?;
+        buf.extend_from_slice(available);
+        reader.consume(take);
+    }
+}
+
+#[cfg(test)]
+fn validate_mcp_line_len(bytes: &[u8]) -> std::result::Result<(), ()> {
+    if bytes.len() > MAX_MCP_LINE_BYTES {
+        Err(())
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_mcp_line_len_after(current: usize, additional: usize) -> std::io::Result<()> {
+    match current.checked_add(additional) {
+        Some(total) if total <= MAX_MCP_LINE_BYTES => Ok(()),
+        _ => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "MCP line exceeds maximum size",
+        )),
+    }
+}
+
+fn mcp_line_from_utf8(buf: &[u8]) -> std::result::Result<&str, ()> {
+    std::str::from_utf8(buf).map(str::trim).map_err(|_| ())
+}
+
 #[cfg(all(test, not(windows)))]
 mod resources_prompts_tests {
     use super::*;
@@ -290,7 +370,9 @@ mod resources_prompts_tests {
             )
             .await;
         let v: Value = serde_json::from_str(&resp).unwrap();
-        let text = v["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+        let text = v["result"]["messages"][0]["content"]["text"]
+            .as_str()
+            .unwrap();
         assert!(text.contains("https://example.com/login"));
         assert!(text.contains("codex_form_fill"));
     }
@@ -303,5 +385,169 @@ mod resources_prompts_tests {
             .await;
         let v: Value = serde_json::from_str(&resp).unwrap();
         assert_eq!(v["error"]["code"], -32602);
+    }
+}
+
+#[cfg(test)]
+mod stdio_tests {
+    use super::*;
+
+    #[test]
+    fn mcp_line_from_utf8_rejects_invalid_input() {
+        assert!(mcp_line_from_utf8(b"{\"jsonrpc\":\"2.0\"}\n").is_ok());
+        assert!(mcp_line_from_utf8(&[0xff, b'\n']).is_err());
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+mod tools_call_tests {
+    use super::*;
+    use crate::client::Client;
+    use serde_json::json;
+    use tokio::io::duplex;
+
+    fn test_server(profile: ToolProfile) -> Server {
+        let (client_end, _server) = duplex(4096);
+        Server::new_with_profile(Client::from_stream(client_end).unwrap(), profile)
+    }
+
+    async fn call(server: &Server, request: Value) -> Value {
+        let response = server
+            .handle_jsonrpc_line(&request.to_string())
+            .await
+            .expect("request has an id");
+        serde_json::from_str(&response).expect("response is valid JSON")
+    }
+
+    #[tokio::test]
+    async fn tools_call_rejects_invalid_params_shape() {
+        let server = test_server(ToolProfile::Full);
+        let response = call(
+            &server,
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":[]}),
+        )
+        .await;
+
+        assert_eq!(response["error"]["code"], -32602);
+    }
+
+    #[tokio::test]
+    async fn tools_call_rejects_non_object_arguments() {
+        let server = test_server(ToolProfile::Full);
+        let response = call(
+            &server,
+            json!({
+                "jsonrpc":"2.0",
+                "id":1,
+                "method":"tools/call",
+                "params":{"name":"codex_find_element","arguments":[]}
+            }),
+        )
+        .await;
+
+        assert_eq!(response["error"]["code"], -32602);
+    }
+
+    #[tokio::test]
+    async fn tools_call_reports_unknown_or_profile_filtered_tools() {
+        let full = test_server(ToolProfile::Full);
+        let unknown = call(
+            &full,
+            json!({
+                "jsonrpc":"2.0",
+                "id":1,
+                "method":"tools/call",
+                "params":{"name":"codex_nope","arguments":{}}
+            }),
+        )
+        .await;
+        assert_eq!(unknown["error"]["code"], -32601);
+
+        let basic = test_server(ToolProfile::Basic);
+        let filtered = call(
+            &basic,
+            json!({
+                "jsonrpc":"2.0",
+                "id":2,
+                "method":"tools/call",
+                "params":{"name":"codex_execute_cdp","arguments":{"tab_id":"1","method":"Runtime.evaluate"}}
+            }),
+        )
+        .await;
+        assert_eq!(filtered["error"]["code"], -32601);
+    }
+
+    #[tokio::test]
+    async fn handler_validation_errors_return_mcp_tool_error() {
+        let server = test_server(ToolProfile::Full);
+        let response = call(
+            &server,
+            json!({
+                "jsonrpc":"2.0",
+                "id":1,
+                "method":"tools/call",
+                "params":{"name":"codex_find_element","arguments":{"tab_id":"1"}}
+            }),
+        )
+        .await;
+
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("At least one of 'role' or 'name' is required"));
+    }
+
+    #[tokio::test]
+    async fn handler_rejects_fractional_integers_and_malformed_string_arrays() {
+        let server = test_server(ToolProfile::Full);
+        let fractional = call(
+            &server,
+            json!({
+                "jsonrpc":"2.0",
+                "id":1,
+                "method":"tools/call",
+                "params":{
+                    "name":"codex_find_element",
+                    "arguments":{"tab_id":"1","role":"button","max_results":1.5}
+                }
+            }),
+        )
+        .await;
+        assert_eq!(fractional["result"]["isError"], true);
+        assert!(fractional["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("max_results must be a non-negative integer"));
+
+        let malformed_array = call(
+            &server,
+            json!({
+                "jsonrpc":"2.0",
+                "id":2,
+                "method":"tools/call",
+                "params":{
+                    "name":"codex_page_assets",
+                    "arguments":{"tab_id":"1","types":["Image",1]}
+                }
+            }),
+        )
+        .await;
+        assert_eq!(malformed_array["result"]["isError"], true);
+        assert!(malformed_array["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("types[1] must be a string"));
+    }
+}
+
+#[cfg(test)]
+mod stdio_limit_tests {
+    use super::*;
+
+    #[test]
+    fn line_too_long_is_rejected_before_json_parse() {
+        let line = " ".repeat(MAX_MCP_LINE_BYTES + 1);
+        assert_eq!(validate_mcp_line_len(line.as_bytes()), Err(()));
     }
 }

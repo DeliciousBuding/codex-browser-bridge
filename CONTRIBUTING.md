@@ -35,7 +35,11 @@ cargo clippy --locked -- -D warnings  # lint
 cargo build --locked --release  # release build
 ```
 
-The full test suite is hermetic. It uses mock named pipes to simulate the Codex pipe, so `cargo test --locked` runs without Codex Desktop. E2E tests in `tests/cdp_tools_e2e.rs` use real Windows named pipe pairs.
+The default test suite is hermetic. It uses mock pipe streams to simulate the Codex pipe, so `cargo test --locked` runs without Codex Desktop. Non-Windows mock E2E tests in `tests/cdp_tools_e2e.rs` run in the Ubuntu CI harness. Optional live E2E against a real Codex Desktop + Chrome session is available with:
+
+```powershell
+.\scripts\live-e2e.ps1 -Url https://example.com
+```
 
 ## Code style
 
@@ -54,7 +58,7 @@ The full test suite is hermetic. It uses mock named pipes to simulate the Codex 
 - Branch from `main`.
 - Reference the related issue in the PR description, if any.
 - Add or update tests for behavior changes.
-- Update `CHANGELOG.md` under `## [Unreleased]`.
+- Update `CHANGELOG.md` with a release-ready section when preparing a release.
 - Update both `README.md` and `README.zh-CN.md` if you add or remove tools.
 
 ## Adding a new MCP tool
@@ -62,18 +66,18 @@ The full test suite is hermetic. It uses mock named pipes to simulate the Codex 
 Four places to touch:
 
 1. `src/browser.rs`: add the browser helper (CDP wrapper, parsing logic)
-2. `src/mcp.rs`: add `ToolHandler` variant, handler function, and tool registration in `registered_tools()`
-3. `tests/cdp_tools_e2e.rs`: add an e2e test with `client_server_pair()` + mock server
+2. `src/mcp/types.rs`, `src/mcp/handlers.rs`, `src/mcp/schema.rs`, and `src/mcp/profiles.rs`: add the handler variant, dispatch, schema, and profile membership
+3. `tests/` or module tests: add coverage for parameter validation, CDP response parsing, and mock transport behavior where practical
 4. `src/browser.rs` test module: add unit tests for CDP response parsing
 
 Then document the tool in both READMEs and update `CHANGELOG.md`.
 
 ## Releasing
 
-Maintainer-only:
+Maintainer-only. See [docs/release-process.md](docs/release-process.md) for the full contract.
 
 1. Bump version in `Cargo.toml` and `npm/package.json`.
-2. Move `## [Unreleased]` notes in `CHANGELOG.md` to the new version section.
+2. Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md`.
 3. Open a `release/vX.Y.Z` PR and merge it.
 4. Tag from `main`: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
 5. The release workflow builds Windows binaries (x64 + arm64), generates checksums, publishes a GitHub Release, embeds those checksums into the npm package, and publishes npm with provenance.

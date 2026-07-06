@@ -147,16 +147,24 @@ pub(super) fn optional_u64(args: &Value, name: &str) -> anyhow::Result<Option<u6
     match args.get(name) {
         Some(value) => value
             .as_u64()
-            .or_else(|| {
-                value
-                    .as_f64()
-                    .filter(|value| *value >= 0.0)
-                    .map(|value| value as u64)
-            })
             .map(Some)
-            .ok_or_else(|| anyhow::anyhow!("{name} must be a number")),
+            .ok_or_else(|| anyhow::anyhow!("{name} must be a non-negative integer")),
         None => Ok(None),
     }
+}
+
+pub(super) fn optional_duration_ms(
+    args: &Value,
+    name: &str,
+    max_ms: u64,
+) -> anyhow::Result<Option<u64>> {
+    let Some(value) = optional_u64(args, name)? else {
+        return Ok(None);
+    };
+    if value > max_ms {
+        return Err(anyhow::anyhow!("{name} must be <= {max_ms} milliseconds"));
+    }
+    Ok(Some(value))
 }
 
 pub(super) fn optional_bool(args: &Value, name: &str) -> anyhow::Result<Option<bool>> {
@@ -169,14 +177,21 @@ pub(super) fn optional_bool(args: &Value, name: &str) -> anyhow::Result<Option<b
     }
 }
 
-pub(super) fn optional_str_array(args: &Value, name: &str) -> Option<Vec<String>> {
-    args.get(name)
-        .and_then(|value| value.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
+pub(super) fn optional_str_array(args: &Value, name: &str) -> anyhow::Result<Option<Vec<String>>> {
+    let Some(value) = args.get(name) else {
+        return Ok(None);
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("{name} must be an array of strings"))?;
+    let mut out = Vec::with_capacity(values.len());
+    for (index, value) in values.iter().enumerate() {
+        let item = value
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("{name}[{index}] must be a string"))?;
+        out.push(item.to_string());
+    }
+    Ok(Some(out))
 }
 
 pub(super) fn required_string_vec(args: &Value, name: &str) -> anyhow::Result<Vec<String>> {
@@ -312,5 +327,32 @@ mod tests {
     fn required_string_vec_rejects_empty_items() {
         assert!(required_string_vec(&json!({"keys": ["a", ""]}), "keys").is_err());
         assert!(required_string_vec(&json!({"keys": ["a", "b"]}), "keys").is_ok());
+    }
+
+    #[test]
+    fn bounded_duration_rejects_extreme_values() {
+        assert!(
+            optional_duration_ms(&json!({"timeout_ms": u64::MAX}), "timeout_ms", 60_000).is_err()
+        );
+        assert!(optional_duration_ms(&json!({"timeout_ms": 1.5}), "timeout_ms", 60_000).is_err());
+        assert_eq!(
+            optional_duration_ms(&json!({"timeout_ms": 1_500}), "timeout_ms", 60_000).unwrap(),
+            Some(1_500)
+        );
+    }
+
+    #[test]
+    fn optional_string_arrays_reject_malformed_values() {
+        assert_eq!(optional_str_array(&json!({}), "types").unwrap(), None);
+        assert_eq!(
+            optional_str_array(&json!({"types": ["Image", "Script"]}), "types").unwrap(),
+            Some(vec!["Image".to_string(), "Script".to_string()])
+        );
+        assert_eq!(
+            optional_str_array(&json!({"types": []}), "types").unwrap(),
+            Some(Vec::new())
+        );
+        assert!(optional_str_array(&json!({"types": "Image"}), "types").is_err());
+        assert!(optional_str_array(&json!({"types": ["Image", 1]}), "types").is_err());
     }
 }

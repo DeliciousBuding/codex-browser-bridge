@@ -14,6 +14,9 @@ concurrency:
   group: supply-chain-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   cargo-deny:
     name: cargo-deny (advisories · licenses · bans · sources)

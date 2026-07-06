@@ -6,7 +6,8 @@ const crypto = require("crypto");
 const https = require("https");
 
 const defaultRepo = "DeliciousBuding/codex-browser-bridge";
-const binDir = path.join(__dirname, "..", "bin");
+const packageRoot = path.join(__dirname, "..");
+const binDir = path.join(packageRoot, "bin");
 const packageJson = require("../package.json");
 
 function requestBuffer(url) {
@@ -48,8 +49,8 @@ function findChecksum(text, asset) {
     .find((entry) => entry && entry.file === asset);
 }
 
-function embeddedChecksum(asset) {
-  const file = path.join(__dirname, "..", "checksums.json");
+function embeddedChecksum(asset, root = packageRoot) {
+  const file = path.join(root, "checksums.json");
   if (!fs.existsSync(file)) return null;
   const checksums = JSON.parse(fs.readFileSync(file, "utf8"));
   if (!checksums || !checksums.files || typeof checksums.files[asset] !== "string") {
@@ -61,37 +62,43 @@ function embeddedChecksum(asset) {
   };
 }
 
-async function main() {
-  if (process.platform !== "win32") {
-    console.error("codex-browser-bridge only supports Windows (requires named pipes).");
-    process.exit(1);
+function resolveWindowsArch(platform, cpu) {
+  if (platform !== "win32") {
+    throw new Error("codex-browser-bridge only supports Windows (requires named pipes).");
   }
-
-  let arch;
-  switch (process.arch) {
+  switch (cpu) {
     case "x64":
-      arch = "amd64";
-      break;
+      return "amd64";
     case "arm64":
-      arch = "arm64";
-      break;
+      return "arm64";
     default:
-      console.error(`codex-browser-bridge does not ship a Windows binary for ${process.arch}.`);
-      process.exit(1);
+      throw new Error(`codex-browser-bridge does not ship a Windows binary for ${cpu}.`);
   }
+}
 
-  const devDownloads = process.env.CODEX_BRIDGE_ALLOW_DEV_DOWNLOADS === "1";
-  const repo = devDownloads && process.env.CODEX_BRIDGE_REPO ? process.env.CODEX_BRIDGE_REPO : defaultRepo;
-  const tag = devDownloads && process.env.CODEX_BRIDGE_TAG ? process.env.CODEX_BRIDGE_TAG : `v${packageJson.version}`;
+async function install(options = {}) {
+  const platform = options.platform || process.platform;
+  const cpu = options.arch || process.arch;
+  const env = options.env || process.env;
+  const root = options.packageRoot || packageRoot;
+  const outDir = options.binDir || binDir;
+  const version = options.version || packageJson.version;
+  const fetchBuffer = options.requestBuffer || requestBuffer;
+  const log = options.log || console.log;
+
+  const arch = resolveWindowsArch(platform, cpu);
+  const devDownloads = env.CODEX_BRIDGE_ALLOW_DEV_DOWNLOADS === "1";
+  const repo = devDownloads && env.CODEX_BRIDGE_REPO ? env.CODEX_BRIDGE_REPO : defaultRepo;
+  const tag = devDownloads && env.CODEX_BRIDGE_TAG ? env.CODEX_BRIDGE_TAG : `v${version}`;
   const exeName = "codex-browser-bridge.exe";
   const asset = arch === "arm64" ? "codex-browser-bridge-arm64.exe" : "codex-browser-bridge.exe";
 
   const base = `https://github.com/${repo}/releases/download/${tag}`;
 
-  let checksum = embeddedChecksum(asset);
+  let checksum = embeddedChecksum(asset, root);
   if (!checksum) {
     const checksumsURL = `${base}/checksums.txt`;
-    const checksums = await requestBuffer(checksumsURL).catch((err) => {
+    const checksums = await fetchBuffer(checksumsURL).catch((err) => {
       throw new Error(`could not download checksums for ${tag}: ${err.message}`);
     });
     checksum = findChecksum(checksums.toString("utf8"), asset);
@@ -99,22 +106,27 @@ async function main() {
   }
 
   // Download binary
-  console.log(`Downloading codex-browser-bridge ${tag} (${arch})...`);
-  const binary = await requestBuffer(`${base}/${asset}`);
+  log(`Downloading codex-browser-bridge ${tag} (${arch})...`);
+  const binary = await fetchBuffer(`${base}/${asset}`);
 
   // Verify checksum
   const actual = sha256(binary);
   if (actual !== checksum.hash) throw new Error(`checksum mismatch: expected ${checksum.hash}, got ${actual}`);
 
   // Install
-  fs.mkdirSync(binDir, { recursive: true });
-  const target = path.join(binDir, exeName);
+  fs.mkdirSync(outDir, { recursive: true });
+  const target = path.join(outDir, exeName);
   fs.writeFileSync(target, binary);
-  console.log(`Installed: ${target}`);
-  const skillDir = path.join(__dirname, "..", "skills", "codex-browser");
+  log(`Installed: ${target}`);
+  const skillDir = path.join(root, "skills", "codex-browser");
   if (fs.existsSync(skillDir)) {
-    console.log(`Skill: ${skillDir}\n  → copy to ~/.claude/skills/ to activate the agent skill`);
+    log(`Skill: ${skillDir}\n  → copy to ~/.claude/skills/ to activate the agent skill`);
   }
+  return { target, asset, tag, repo };
+}
+
+async function main() {
+  await install();
 }
 
 if (require.main === module) {
@@ -127,6 +139,8 @@ if (require.main === module) {
 module.exports = {
   embeddedChecksum,
   findChecksum,
+  install,
   parseChecksumLine,
+  resolveWindowsArch,
   sha256,
 };

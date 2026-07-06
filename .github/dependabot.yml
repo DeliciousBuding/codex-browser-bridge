@@ -16,3 +16,8 @@ updates:
     groups:
       rust-dependencies:
         patterns: ["*"]
+    ignore:
+      # criterion 0.8.x requires rustc 1.86; this repo currently declares and
+      # tests MSRV 1.85. Revisit when Cargo.toml rust-version is raised.
+      - dependency-name: "criterion"
+        update-types: ["version-update:semver-minor"]

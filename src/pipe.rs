@@ -48,7 +48,8 @@ pub async fn dial_named_pipe(path: &str) -> Result<PipeStream> {
     let _ = path;
     Err(crate::error::BridgeError::User(
         "codex-browser-bridge only supports Windows named pipes. \
-         On macOS/Linux, consider using WSL or a Windows VM.".into(),
+         On macOS/Linux, consider using WSL or a Windows VM."
+            .into(),
     ))
 }
 
