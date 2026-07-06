@@ -38,7 +38,7 @@ impl ToolProfile {
     }
 }
 
-// Basic: essential tab + nav + dom + screenshot + interaction (~32 tools)
+// Basic: essential tab + nav + dom + screenshot + interaction (34 tools)
 const BASIC_TOOLS: &[&str] = &[
     "codex_list_tabs",
     "codex_create_tab",
@@ -76,7 +76,7 @@ const BASIC_TOOLS: &[&str] = &[
     "codex_doctor",
 ];
 
-// Network: Basic + cookies + CDP + file upload + dialog + storage + pdf + emulate (~47 tools)
+// Network: Basic + cookies + CDP + file upload + dialog + storage + pdf + emulate (~51 tools)
 const NETWORK_TOOLS: &[&str] = &[
     "codex_list_tabs",
     "codex_create_tab",
@@ -113,6 +113,7 @@ const NETWORK_TOOLS: &[&str] = &[
     "codex_cua_type",
     "codex_cua_keypress",
     "codex_cua_scroll",
+    "codex_execute_cdp",
     "codex_network_cookies",
     "codex_network_set_cookie",
     "codex_delete_cookies",
@@ -129,3 +130,18 @@ const NETWORK_TOOLS: &[&str] = &[
     "codex_get_info",
     "codex_doctor",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::ToolProfile;
+
+    #[test]
+    fn network_profile_includes_safe_cdp_escape_hatch() {
+        assert!(ToolProfile::Network.includes("codex_execute_cdp"));
+    }
+
+    #[test]
+    fn basic_profile_keeps_debug_surface_out() {
+        assert!(!ToolProfile::Basic.includes("codex_execute_cdp"));
+    }
+}

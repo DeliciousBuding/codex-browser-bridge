@@ -752,7 +752,7 @@ mod tools_call_tests {
                 "jsonrpc":"2.0",
                 "id":2,
                 "method":"tools/call",
-                "params":{"name":"codex_execute_cdp","arguments":{"tab_id":"1","method":"Runtime.evaluate"}}
+                    "params":{"name":"codex_execute_cdp","arguments":{"tab_id":"1","method":"DOM.getDocument"}}
             }),
         )
         .await;

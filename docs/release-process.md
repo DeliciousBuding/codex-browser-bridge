@@ -41,7 +41,7 @@ Use only sections that have entries. Keep pending changes under `Unreleased`, th
 
 The release workflow must:
 
-1. Check Rust, clippy, Rust tests, npm tests, and npm package contents before creating assets.
+1. Check Windows Rust, clippy, Rust tests, Ubuntu mock harness tests, npm tests, and npm package contents before creating assets.
 2. Build Windows x64 and arm64 binaries.
 3. Generate `checksums.txt`.
 4. Create a GitHub Release from the changelog section.

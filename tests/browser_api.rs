@@ -5,7 +5,7 @@ use codex_browser_bridge::{
     },
     browser_test_support::{is_tab_gone_error, is_transient_load_error},
     error::BridgeError,
-    security::validate_url,
+    security::{validate_file_path, validate_url},
 };
 use serde_json::value::RawValue;
 
@@ -52,6 +52,13 @@ fn validate_url_allows_only_http_and_https() {
     }
 
     assert!(validate_url("HTTPS://EXAMPLE.COM/path").is_ok());
+}
+
+#[test]
+fn validate_file_path_rejects_relative_paths() {
+    let cwd = std::env::current_dir().unwrap();
+    let err = validate_file_path("Cargo.toml", &cwd).unwrap_err();
+    assert!(err.to_string().contains("Upload path must be absolute"));
 }
 
 #[test]

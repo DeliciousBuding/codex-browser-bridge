@@ -396,6 +396,17 @@ impl Client {
         method: &str,
         params: Option<Value>,
     ) -> Result<Box<RawValue>> {
+        self.execute_cdp_with_timeout(tab_id, method, params, DEFAULT_REQUEST_TIMEOUT)
+            .await
+    }
+
+    pub async fn execute_cdp_with_timeout(
+        &self,
+        tab_id: i64,
+        method: &str,
+        params: Option<Value>,
+        request_timeout: Duration,
+    ) -> Result<Box<RawValue>> {
         let tab_lock = self.tab_lock(tab_id).await;
         let _guard = tab_lock.lock().await;
 
@@ -414,7 +425,7 @@ impl Client {
             // fast; silence past this point means the tab is likely background-
             // throttled by Chrome and we should fall through rather than burn
             // the full 60s budget on a doomed wait.
-            let sticky_deadline = Instant::now() + STICKY_FAST_TIMEOUT;
+            let sticky_deadline = Instant::now() + STICKY_FAST_TIMEOUT.min(request_timeout);
             match self
                 .execute_cdp_raw_until(tab_id, method, params.clone(), sticky_deadline)
                 .await
@@ -430,7 +441,7 @@ impl Client {
 
         // Full attach flow. Reset the deadline so re-attach and retry get a fresh
         // budget even if the sticky fast-path just consumed STICKY_FAST_TIMEOUT.
-        let deadline = Instant::now() + DEFAULT_REQUEST_TIMEOUT;
+        let deadline = Instant::now() + request_timeout;
         self.detach_tab_until(tab_id, deadline).await.ok();
         self.attach_tab_until(tab_id, deadline)
             .await
@@ -702,6 +713,16 @@ mod reconnect_tests {
             .unwrap();
     }
 
+    async fn reply_ok_and_return_request(server: &mut DuplexStream) -> Value {
+        let frame = decode_frame(server).await.unwrap();
+        let req: Value = serde_json::from_slice(&frame).unwrap();
+        let id = req["id"].as_u64().unwrap();
+        encode_frame(server, &json!({"id": id, "result": {}}))
+            .await
+            .unwrap();
+        req
+    }
+
     #[tokio::test]
     async fn normal_roundtrip_tracks_pending() {
         let (client, mut server) = test_client(4096).await;
@@ -716,6 +737,38 @@ mod reconnect_tests {
         reply_ok(&mut server).await;
         let result = handle.await.unwrap();
         assert!(result.is_ok());
+        assert_eq!(client.pending_len_for_test().await, 0);
+    }
+
+    #[tokio::test]
+    async fn execute_cdp_timeout_cleans_pending() {
+        let (client, mut server) = test_client(4096).await;
+        let handle = tokio::spawn({
+            let client = client.clone();
+            async move {
+                client
+                    .execute_cdp_with_timeout(
+                        7,
+                        "Page.getResourceContent",
+                        None,
+                        Duration::from_millis(40),
+                    )
+                    .await
+            }
+        });
+
+        let detach = reply_ok_and_return_request(&mut server).await;
+        assert_eq!(detach["method"], "detach");
+        let attach = reply_ok_and_return_request(&mut server).await;
+        assert_eq!(attach["method"], "attach");
+
+        let frame = decode_frame(&mut server).await.unwrap();
+        let req: Value = serde_json::from_slice(&frame).unwrap();
+        assert_eq!(req["method"], "executeCdp");
+        assert_eq!(client.pending_len_for_test().await, 1);
+
+        let err = handle.await.unwrap().unwrap_err();
+        assert!(matches!(err, BridgeError::Timeout(_)), "got: {err}");
         assert_eq!(client.pending_len_for_test().await, 0);
     }
 

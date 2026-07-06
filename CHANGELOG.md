@@ -4,20 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Changed
-
-- Made `codex_file_input` require an explicit `CODEX_BRIDGE_UPLOAD_BASE` instead of falling back to the process working directory.
-- Routed npm prerelease publishes to the `next` dist-tag while keeping stable releases on `latest`.
-
-### Fixed
-
-- Tightened raw CDP execution from broad domain prefixes to an explicit method allowlist.
-- Added page asset content fetch timeouts and skipped unknown-size resources before requesting content.
-
 ## [1.10.0] - 2026-07-06
 
 ### Changed
 
+- Made `codex_file_input` require an explicit `CODEX_BRIDGE_UPLOAD_BASE` instead of falling back to the process working directory.
+- Routed npm prerelease publishes to the `next` dist-tag while keeping stable releases on `latest`.
 - Tightened navigation URL validation to only allow `http://` and `https://`.
 - Added bounded duration validation for MCP waits, captures, and form-fill delays.
 - Restricted generic CDP execution to an explicit low-level allowlist and blocked raw methods that bypass dedicated safety wrappers.
@@ -28,6 +20,10 @@ All notable changes to this project will be documented in this file.
 - Bounded MCP stdio line reads to reject oversized JSON-RPC messages before unbounded buffer growth.
 - Validated cookie-tool URL filters with the same `http://` and `https://` scheme boundary used by navigation.
 - Skipped page asset content fetches when advertised resource sizes already exceed the configured byte budget.
+- Tightened raw CDP execution from broad domain prefixes to an explicit method allowlist.
+- Added page asset content fetch timeouts and skipped unknown-size resources before requesting content.
+- Added the Ubuntu mock harness to the release workflow gate before asset creation.
+- Made explicit config paths authoritative, rejected relative upload paths, cleaned pending CDP requests on page asset timeouts, and normalized fetched asset content to base64.
 - Fixed npm package content checks so CI and release jobs verify the bundled agent skill before publish.
 - Included README and LICENSE in the npm package tarball.
 - Aligned Dependabot with the Rust 1.85 MSRV by holding back `criterion` minor updates that require newer Rust.

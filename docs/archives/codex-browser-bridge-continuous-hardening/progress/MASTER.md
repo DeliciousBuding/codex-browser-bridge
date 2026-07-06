@@ -34,7 +34,7 @@
 ## Current Status
 
 **Active Phase**: PR CI hardening
-**Active Task**: Bridge runtime metadata, security review follow-ups, and npm release gates implemented; awaiting PR #15 CI rerun.
+**Active Task**: Multi-client config, raw CDP, page asset timeout cleanup, changelog release hygiene, and release harness gates implemented; awaiting PR #15 CI rerun.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -79,6 +79,8 @@ adaptive:
 | 2026-07-07 | Bridge runtime metadata | S | 5/5 | 1 | Extended `codex_get_info` with additive bridge runtime metadata while preserving top-level extension fields and avoiding raw upload path leakage. |
 | 2026-07-07 | Trusted Publishing toolchain gate | S | 5/5 | 0 | Added an explicit npm >= 11.5.1 publish-job check and documented the npm CLI prerequisite for OIDC Trusted Publishing. |
 | 2026-07-07 | Review follow-ups for CDP, assets, upload, prerelease publishing | M | 5/5 | 3 | Replaced broad raw CDP prefixes with an explicit method allowlist, required explicit upload base for file input, bounded page asset content fetches by known size and timeout, preserved extension-owned `bridge` metadata, and routed npm prereleases to `next`. |
+| 2026-07-07 | Release Ubuntu harness gate | S | 5/5 | 0 | Added the non-Windows mock harness test and clippy job to the release workflow before asset creation. |
+| 2026-07-07 | Multi-client config and resource cleanup follow-ups | M | 5/5 | 4 | Made explicit config paths authoritative, added CDP to the network profile, rejected relative upload paths, moved timeout cleanup into the Client path for page asset fetches, normalized asset content to base64, removed stateful/raw Runtime methods from generic CDP, and moved ship-bound changelog entries into 1.10.0. |
 
 ## Quick Status Commands
 
@@ -112,3 +114,5 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | runtime-info | Added agent-facing runtime diagnostics for profile, tool count, response caps, and upload-base configured status. |
 | 2026-07-07 | release-toolchain | Added a publish-job npm CLI version gate for npm Trusted Publishing compatibility. |
 | 2026-07-07 | review-hardening | Addressed subagent findings for raw CDP scope, page asset fetch budgets, file upload opt-in, metadata field compatibility, and npm prerelease dist-tags. |
+| 2026-07-07 | release-harness-gate | Added Ubuntu mock harness checks to the release workflow dependency chain. |
+| 2026-07-07 | config-resource-followups | Addressed subagent findings for CODEX_BRIDGE_CONFIG fallback, network profile CDP visibility, relative upload paths, Client pending cleanup on timeouts, base64 page asset content, raw CDP stateful methods, and 1.10.0 changelog hygiene. |

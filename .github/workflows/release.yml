@@ -52,8 +52,24 @@ jobs:
           cd npm
           npm run check:package
 
+  test-lib:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: clippy
+      - name: Test non-Windows harness
+        shell: bash
+        run: cargo test --locked
+      - name: Clippy non-Windows harness
+        shell: bash
+        run: cargo clippy --locked --all-targets -- -D warnings
+
   release:
-    needs: [test]
+    needs: [test, test-lib]
     runs-on: windows-latest
     permissions:
       contents: write

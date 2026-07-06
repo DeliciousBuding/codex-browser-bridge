@@ -99,7 +99,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 
 | Tool | What it does |
 |------|-------------|
-| `codex_execute_cdp` | Raw CDP command. Explicit allowlist only; browser/target/debugger/navigation/cookie/destructive storage operations are blocked. |
+| `codex_execute_cdp` | Raw CDP diagnostics. Explicit allowlist only; browser/target/debugger/navigation/cookie/event-producing enable/arbitrary Runtime JS/destructive storage operations are blocked. |
 
 ### Session (4 tools)
 
@@ -209,7 +209,7 @@ If a tool you expect is missing, the server may be running a reduced profile. Th
 | Profile | Count | Scope |
 |---------|:-----:|-------|
 | `basic` | 34 | tabs, nav, dom, screenshot, bring_to_front, core interaction, doctor |
-| `network` | 50 | basic + cookies, CDP, file upload, dialog |
+| `network` | 51 | basic + cookies, CDP, file upload, dialog |
 | `full` | 52 | everything (default) |
 
 ## Security
@@ -218,4 +218,4 @@ If a tool you expect is missing, the server may be running a reduced profile. Th
 - File paths must be absolute and within the upload directory.
 - Screenshots and DOM snapshots may contain sensitive page content.
 - Navigation accepts only `http://` and `https://` URLs.
-- Use raw CDP only when no dedicated tool exists; sensitive methods are blocked.
+- Use raw CDP only when no dedicated tool exists; sensitive and stateful methods are blocked.

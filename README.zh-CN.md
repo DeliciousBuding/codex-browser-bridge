@@ -45,7 +45,7 @@
 - 上传文件到 `<input type=file>` 元素
 - 处理 JavaScript 弹窗（alert / confirm / prompt）
 - 读取和设置浏览器 Cookie
-- 执行原始 CDP 命令（Chrome DevTools Protocol 逃生口）
+- 执行明确 allowlist 允许的 CDP 诊断命令（Chrome DevTools Protocol 逃生口）
 - 通过 `codex_doctor` 自检诊断
 
 适用于需要真实浏览器会话的场景——后台管理系统、已登录的 Web 应用、本地开发服务器、文档网站。
@@ -92,7 +92,7 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 
 配置优先级：CLI 参数 > 配置文件 > 环境变量 > 默认值。
 
-默认配置文件是当前工作目录下的 `.codex-browser-bridge.toml`。也可以用 `CODEX_BRIDGE_CONFIG` 指定路径：
+默认配置文件是当前工作目录下的 `.codex-browser-bridge.toml`。也可以用 `CODEX_BRIDGE_CONFIG` 指定显式路径；设置后不会再回退读取工作目录配置：
 
 ```toml
 profile = "full"                 # basic | network | full
@@ -205,7 +205,7 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 ### CDP 逃生口 `[CDP]`
 | 工具 | 说明 |
 |------|------|
-| `codex_execute_cdp` | 执行明确 allowlist 允许的低风险 CDP 命令 |
+| `codex_execute_cdp` | 执行明确 allowlist 允许的 CDP 诊断命令 |
 
 ### 会话 `[Session]`
 | 工具 | 说明 |
@@ -229,7 +229,7 @@ codex-browser-bridge --mode cli
 
 # 工具 profile
 codex-browser-bridge --mode mcp --profile basic     # 34 个工具
-codex-browser-bridge --mode mcp --profile network   # 50 个工具
+codex-browser-bridge --mode mcp --profile network   # 51 个工具
 codex-browser-bridge --mode mcp --profile full      # 全部 52 个（默认）
 
 # 限制大 MCP 输出
@@ -262,7 +262,7 @@ Codex Desktop → Chrome Extension → Chrome 标签页
 - 分享截图/DOM/日志前脱敏
 - `codex_file_input` 强制路径穿越防护（canonicalize + 前缀检查，10 MB 限制）
 - 导航只接受 `http://` 和 `https://` URL
-- Cookie 值默认脱敏；raw CDP 使用 allowlist，并阻止 browser/target/debugger/navigation/cookie/screenshot/PDF/file upload/page-resource content/destructive storage 等敏感操作
+- Cookie 值默认脱敏；raw CDP 使用 allowlist，并阻止 browser/target/debugger/navigation/cookie/screenshot/PDF/file upload/event-producing enable/arbitrary Runtime JS/page-resource content/destructive storage 等敏感操作
 
 ## 开发
 

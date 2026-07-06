@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json::{json, value::RawValue, Value};
-use tokio::time::{timeout, Duration, Instant};
+use tokio::time::{Duration, Instant};
 
 use crate::browser;
 use crate::security;
@@ -415,13 +415,16 @@ impl super::Server {
                 let remaining = fetch_deadline.saturating_duration_since(Instant::now());
                 let per_resource_timeout =
                     remaining.min(Duration::from_millis(PAGE_ASSET_FETCH_TIMEOUT_MS));
-                match timeout(
+                match browser::get_resource_content_with_timeout(
+                    &self.client,
+                    tab_id,
+                    &frame_id,
+                    &resource.url,
                     per_resource_timeout,
-                    browser::get_resource_content(&self.client, tab_id, &frame_id, &resource.url),
                 )
                 .await
                 {
-                    Ok(Ok(content)) => {
+                    Ok(content) => {
                         let content_bytes = content.len() as u64;
                         if total_bytes.saturating_add(content_bytes) > max_total_bytes {
                             truncated = true;
@@ -431,20 +434,14 @@ impl super::Server {
                         total_bytes += content_bytes;
                         resource.content = Some(content);
                     }
-                    Ok(Err(err)) => {
+                    Err(err) => {
                         resource.failed = Some(true);
+                        if matches!(err, crate::error::BridgeError::Timeout(_)) {
+                            truncated = true;
+                            limit_reason = Some("fetch_timeout");
+                        }
                         tracing::debug!(
                             "resource content fetch failed for {} (frame={}): {err}",
-                            sanitize_for_log(&resource.url),
-                            sanitize_for_log(&frame_id),
-                        );
-                    }
-                    Err(_) => {
-                        resource.failed = Some(true);
-                        truncated = true;
-                        limit_reason = Some("fetch_timeout");
-                        tracing::debug!(
-                            "resource content fetch timed out for {} (frame={})",
                             sanitize_for_log(&resource.url),
                             sanitize_for_log(&frame_id),
                         );

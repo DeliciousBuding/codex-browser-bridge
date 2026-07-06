@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, value::RawValue, Value};
 use tokio::time::{sleep, Duration, Instant};
@@ -966,16 +967,11 @@ const ALLOWED_CDP_METHODS: &[&str] = &[
     "DOM.resolveNode",
     "Log.clear",
     "Log.disable",
-    "Log.enable",
     "Network.disable",
-    "Network.enable",
     "Page.getFrameTree",
     "Page.getLayoutMetrics",
     "Performance.disable",
-    "Performance.enable",
     "Performance.getMetrics",
-    "Runtime.callFunctionOn",
-    "Runtime.evaluate",
     "Runtime.getProperties",
 ];
 
@@ -1054,6 +1050,25 @@ pub async fn get_resource_content(
             id,
             "Page.getResourceContent",
             Some(json!({ "frameId": frame_id, "url": url })),
+        )
+        .await?;
+    extract_resource_content(&raw)
+}
+
+pub async fn get_resource_content_with_timeout(
+    client: &Client,
+    tab_id: &str,
+    frame_id: &str,
+    url: &str,
+    timeout: Duration,
+) -> Result<String> {
+    let id = parse_tab_id("page_assets", tab_id)?;
+    let raw = client
+        .execute_cdp_with_timeout(
+            id,
+            "Page.getResourceContent",
+            Some(json!({ "frameId": frame_id, "url": url })),
+            timeout,
         )
         .await?;
     extract_resource_content(&raw)
@@ -1402,6 +1417,8 @@ fn extract_resource_content(raw: &RawValue) -> Result<String> {
     struct ResourceContent {
         #[serde(default)]
         content: String,
+        #[serde(default, rename = "base64Encoded")]
+        base64_encoded: bool,
     }
 
     let result: ResourceContent = serde_json::from_str(raw.get())
@@ -1410,7 +1427,11 @@ fn extract_resource_content(raw: &RawValue) -> Result<String> {
     if result.content.is_empty() {
         return Err(BridgeError::Protocol("resource content is empty".into()));
     }
-    Ok(result.content)
+    if result.base64_encoded {
+        Ok(result.content)
+    } else {
+        Ok(general_purpose::STANDARD.encode(result.content.as_bytes()))
+    }
 }
 
 fn parse_cookies(raw: &RawValue) -> Result<Vec<Cookie>> {
@@ -1720,6 +1741,7 @@ mod tests {
             "DOM.setFileInputFiles",
             "Network.getRequestPostData",
             "Network.getResponseBody",
+            "Network.enable",
             "Network.getCookies",
             "Network.setCookie",
             "Page.close",
@@ -1728,11 +1750,13 @@ mod tests {
             "Page.navigate",
             "Page.navigateToHistoryEntry",
             "Page.printToPDF",
+            "Performance.enable",
+            "Runtime.callFunctionOn",
+            "Runtime.evaluate",
         ] {
             assert!(validate_generic_cdp_method(method).is_err(), "{method}");
         }
 
-        assert!(validate_generic_cdp_method("Runtime.evaluate").is_ok());
         assert!(validate_generic_cdp_method("DOM.getDocument").is_ok());
     }
 
@@ -1817,6 +1841,19 @@ mod tests {
     }
 
     #[test]
+    fn resource_content_is_normalized_to_base64() {
+        let text =
+            RawValue::from_string(r#"{"content":"hello","base64Encoded":false}"#.to_string())
+                .unwrap();
+        assert_eq!(extract_resource_content(&text).unwrap(), "aGVsbG8=");
+
+        let encoded =
+            RawValue::from_string(r#"{"content":"aGVsbG8=","base64Encoded":true}"#.to_string())
+                .unwrap();
+        assert_eq!(extract_resource_content(&encoded).unwrap(), "aGVsbG8=");
+    }
+
+    #[test]
     fn generic_cdp_rejects_navigation_cookie_and_unknown_methods() {
         for method in [
             "Page.navigate",
@@ -1832,11 +1869,10 @@ mod tests {
     #[test]
     fn generic_cdp_allows_known_low_level_methods() {
         for method in [
-            "Runtime.evaluate",
             "DOM.getDocument",
-            "Network.enable",
             "Page.getLayoutMetrics",
             "Performance.getMetrics",
+            "Runtime.getProperties",
         ] {
             assert!(validate_generic_cdp_method(method).is_ok(), "{method}");
         }

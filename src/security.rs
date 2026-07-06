@@ -23,12 +23,21 @@ pub fn validate_url(raw_url: &str) -> Result<()> {
 /// Validate a file path for upload safety.
 ///
 /// Checks (in order):
-/// 1. Canonicalize (resolves `..`, `.`, symlinks, UNC prefixes on Windows)
-/// 2. Must reside under `allowed_base` (path traversal prevention)
-/// 3. Must be a regular file (not directory, not device)
-/// 4. Must be ≤ 10 MB
-/// 5. Must be readable
+/// 1. Must be absolute (no working-directory dependent uploads)
+/// 2. Canonicalize (resolves `..`, `.`, symlinks, UNC prefixes on Windows)
+/// 3. Must reside under `allowed_base` (path traversal prevention)
+/// 4. Must be a regular file (not directory, not device)
+/// 5. Must be ≤ 10 MB
+/// 6. Must be readable
 pub fn validate_file_path(path: &str, allowed_base: &Path) -> Result<PathBuf> {
+    let raw_path = Path::new(path);
+    if !raw_path.is_absolute() {
+        return Err(BridgeError::User(format!(
+            "Upload path must be absolute: '{}'",
+            sanitize_for_log(path)
+        )));
+    }
+
     let canonical = std::fs::canonicalize(path).map_err(|e| {
         BridgeError::User(format!(
             "Cannot resolve path '{}' (use absolute paths within the allowed directory): {e}",

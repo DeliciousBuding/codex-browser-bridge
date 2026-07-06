@@ -49,7 +49,7 @@ client at the Windows executable:
 ### Profiles
 
 - `basic`: core tab/navigation/DOM/input tools plus `codex_doctor`
-- `network`: basic plus cookies, storage, file upload, dialogs, CDP, PDF, and network logs
+- `network`: basic plus cookies, storage, file upload, dialogs, CDP diagnostics, PDF, and network logs
 - `full`: all tools, default
 
 Use `CODEX_BRIDGE_PROFILE` or `--profile`.

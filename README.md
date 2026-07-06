@@ -45,7 +45,7 @@ No browser profile copying. No WebDriver. No remote setup. It connects to the Co
 - Upload files to `<input type=file>` elements
 - Handle JavaScript dialogs (alert / confirm / prompt)
 - Read and set browser cookies
-- Run allowlisted low-risk CDP commands (Chrome DevTools Protocol diagnostics escape hatch)
+- Run explicitly allowlisted CDP diagnostics (Chrome DevTools Protocol escape hatch)
 - Self-diagnose with `codex_doctor`
 
 Useful when an agent needs to work with pages that require a real browser session — dashboards, logged-in web apps, local dev servers, documentation sites.
@@ -112,7 +112,7 @@ Configuration precedence is:
 3. environment variables
 4. built-in defaults
 
-The default config file is `.codex-browser-bridge.toml` in the current working directory. Set `CODEX_BRIDGE_CONFIG` to use another path:
+The default config file is `.codex-browser-bridge.toml` in the current working directory. Set `CODEX_BRIDGE_CONFIG` to use an explicit path; when it is set, the bridge does not fall back to the working-directory config:
 
 ```toml
 profile = "full"                 # basic | network | full
@@ -232,7 +232,7 @@ JavaScript, CDP, or screenshot payloads by accident:
 ### CDP Escape Hatch `[CDP]`
 | Tool | Description |
 |------|-------------|
-| `codex_execute_cdp` | Execute explicitly allowlisted low-risk CDP commands |
+| `codex_execute_cdp` | Execute explicitly allowlisted CDP diagnostics |
 
 ### Session `[Session]`
 | Tool | Description |
@@ -256,7 +256,7 @@ codex-browser-bridge --mode cli
 
 # With tool profiles
 codex-browser-bridge --mode mcp --profile basic     # 34 tools
-codex-browser-bridge --mode mcp --profile network   # 50 tools
+codex-browser-bridge --mode mcp --profile network   # 51 tools
 codex-browser-bridge --mode mcp --profile full      # all 52 (default)
 
 # Bound large MCP outputs
@@ -289,7 +289,7 @@ This tool gives an agent access to your active browser session.
 - Redact tab titles, URLs, DOM text, screenshots before sharing output
 - `codex_file_input` enforces path traversal prevention (canonicalize + prefix check, 10 MB limit)
 - Navigation only accepts `http://` and `https://` URLs
-- Cookie values redacted by default; raw CDP is allowlist-protected and blocks sensitive browser, target, debugger, navigation, cookie, screenshot, PDF, file upload, page-resource content, and destructive storage operations
+- Cookie values redacted by default; raw CDP is allowlist-protected and blocks sensitive browser, target, debugger, navigation, cookie, screenshot, PDF, file upload, event-producing enable calls, arbitrary Runtime JS, page-resource content, and destructive storage operations
 
 ## Development
 
