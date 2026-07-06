@@ -97,6 +97,8 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 ```toml
 profile = "full"                 # basic | network | full
 upload_base = "C:/Users/me/Downloads"
+max_text_bytes = 1048576
+max_image_bytes = 3145728
 ```
 
 MCP 客户端配置中也可以设置环境变量：
@@ -109,7 +111,9 @@ MCP 客户端配置中也可以设置环境变量：
       "args": ["--mode", "mcp", "--profile", "network"],
       "transport": "stdio",
       "env": {
-        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\me\\Downloads"
+        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\me\\Downloads",
+        "CODEX_BRIDGE_MAX_TEXT_BYTES": "1048576",
+        "CODEX_BRIDGE_MAX_IMAGE_BYTES": "3145728"
       }
     }
   }
@@ -123,6 +127,7 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 - `CODEX_BRIDGE_MAX_TEXT_BYTES` 限制每个 text content，默认 `1048576`。
 - `CODEX_BRIDGE_MAX_IMAGE_BYTES` 限制每个 base64 image content，默认 `3145728`。
 - 两者都有 8 MiB 硬上限。文本截断会带原始字节数标记；超大图片返回文本摘要，不返回无效的半截 base64。
+- 也可以在 `.codex-browser-bridge.toml` 中使用 `max_text_bytes` / `max_image_bytes`，或用 CLI 参数 `--max-text-bytes` / `--max-image-bytes`。
 
 ## 全部 52 个 MCP 工具
 
@@ -226,6 +231,9 @@ codex-browser-bridge --mode cli
 codex-browser-bridge --mode mcp --profile basic     # 34 个工具
 codex-browser-bridge --mode mcp --profile network   # 50 个工具
 codex-browser-bridge --mode mcp --profile full      # 全部 52 个（默认）
+
+# 限制大 MCP 输出
+codex-browser-bridge --mode mcp --max-text-bytes 1048576 --max-image-bytes 3145728
 ```
 
 ## 架构

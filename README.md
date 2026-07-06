@@ -117,6 +117,8 @@ The default config file is `.codex-browser-bridge.toml` in the current working d
 ```toml
 profile = "full"                 # basic | network | full
 upload_base = "C:/Users/me/Downloads"
+max_text_bytes = 1048576
+max_image_bytes = 3145728
 ```
 
 The same settings can be provided in MCP client config:
@@ -129,7 +131,9 @@ The same settings can be provided in MCP client config:
       "args": ["--mode", "mcp", "--profile", "network"],
       "transport": "stdio",
       "env": {
-        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\me\\Downloads"
+        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\me\\Downloads",
+        "CODEX_BRIDGE_MAX_TEXT_BYTES": "1048576",
+        "CODEX_BRIDGE_MAX_IMAGE_BYTES": "3145728"
       }
     }
   }
@@ -146,6 +150,9 @@ JavaScript, CDP, or screenshot payloads by accident:
 - Both settings are clamped to an 8 MiB hard ceiling. Truncated text includes an
   explicit marker with the original byte count; oversized images return a text
   summary instead of invalid partial base64.
+- The same limits can be set in `.codex-browser-bridge.toml` as
+  `max_text_bytes` and `max_image_bytes`, or via CLI flags
+  `--max-text-bytes` and `--max-image-bytes`.
 
 `codex://tabs` is available as an MCP resource for clients that support resources. It returns tabs owned by the current bridge session, not every Chrome tab. The prompt templates `login` and `extract-table` are also exposed for clients that support MCP prompts.
 
@@ -251,6 +258,9 @@ codex-browser-bridge --mode cli
 codex-browser-bridge --mode mcp --profile basic     # 34 tools
 codex-browser-bridge --mode mcp --profile network   # 50 tools
 codex-browser-bridge --mode mcp --profile full      # all 52 (default)
+
+# Bound large MCP outputs
+codex-browser-bridge --mode mcp --max-text-bytes 1048576 --max-image-bytes 3145728
 ```
 
 ## Architecture

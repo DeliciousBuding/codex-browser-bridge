@@ -19,6 +19,12 @@ pub struct Config {
     /// Base directory `codex_file_input` may upload from.
     #[serde(default)]
     pub upload_base: Option<String>,
+    /// Maximum bytes per MCP text content item.
+    #[serde(default)]
+    pub max_text_bytes: Option<usize>,
+    /// Maximum bytes per MCP base64 image content item.
+    #[serde(default)]
+    pub max_image_bytes: Option<usize>,
 }
 
 impl Config {
@@ -64,11 +70,15 @@ mod tests {
             r#"
             profile = "network"
             upload_base = "C:/uploads"
+            max_text_bytes = 2097152
+            max_image_bytes = 4194304
             "#,
         )
         .unwrap();
         assert_eq!(cfg.profile.as_deref(), Some("network"));
         assert_eq!(cfg.upload_base.as_deref(), Some("C:/uploads"));
+        assert_eq!(cfg.max_text_bytes, Some(2_097_152));
+        assert_eq!(cfg.max_image_bytes, Some(4_194_304));
     }
 
     #[test]
@@ -76,6 +86,8 @@ mod tests {
         let cfg: Config = toml::from_str("").unwrap();
         assert!(cfg.profile.is_none());
         assert!(cfg.upload_base.is_none());
+        assert!(cfg.max_text_bytes.is_none());
+        assert!(cfg.max_image_bytes.is_none());
     }
 
     #[test]
