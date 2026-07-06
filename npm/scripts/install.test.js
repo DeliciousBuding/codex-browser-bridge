@@ -1,8 +1,10 @@
 const assert = require("assert");
+const { EventEmitter } = require("events");
 const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const { embeddedChecksum, findChecksum, install, parseChecksumLine, resolveWindowsArch, sha256 } = require("./install");
+const { PassThrough } = require("stream");
+const { embeddedChecksum, findChecksum, install, parseChecksumLine, requestBuffer, resolveWindowsArch, sha256 } = require("./install");
 const { requiredFilesForEnv } = require("./check-package");
 
 const hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -36,6 +38,30 @@ assert.strictEqual(findChecksum(`${hash} *codex-browser-bridge.exe`, "missing.ex
 
 const tmp = fs.mkdtempSync(path.join(require("os").tmpdir(), "codex-bridge-install-"));
 
+function fakeGet(routes) {
+  return (url, _options, callback) => {
+    const req = new EventEmitter();
+    req.destroy = (err) => {
+      if (err) process.nextTick(() => req.emit("error", err));
+    };
+    process.nextTick(() => {
+      const route = typeof routes === "function" ? routes(url) : routes[url];
+      if (!route) {
+        req.emit("error", new Error(`unexpected URL: ${url}`));
+        return;
+      }
+      const res = new PassThrough();
+      res.statusCode = route.statusCode || 200;
+      res.headers = route.headers || {};
+      callback(res);
+      if (route.body !== undefined) {
+        res.end(route.body);
+      }
+    });
+    return req;
+  };
+}
+
 async function run() {
   try {
     fs.writeFileSync(
@@ -54,14 +80,40 @@ async function run() {
     assert.throws(() => resolveWindowsArch("linux", "x64"), /only supports Windows/);
     assert.throws(() => resolveWindowsArch("win32", "ia32"), /does not ship/);
 
+    await assert.rejects(
+      requestBuffer("https://example.test/loop", {
+        get: fakeGet(() => ({ statusCode: 302, headers: { location: "/loop" } })),
+        maxRedirects: 2,
+      }),
+      /too many redirects/
+    );
+    await assert.rejects(
+      requestBuffer("https://example.test/large-header", {
+        get: fakeGet({ "https://example.test/large-header": { headers: { "content-length": "5" }, body: Buffer.alloc(1) } }),
+        maxBytes: 4,
+      }),
+      /download too large: 5 bytes/
+    );
+    await assert.rejects(
+      requestBuffer("https://example.test/large-body", {
+        get: fakeGet({ "https://example.test/large-body": { body: Buffer.alloc(5) } }),
+        maxBytes: 4,
+      }),
+      /download too large: exceeded 4 bytes/
+    );
+
     assert.deepStrictEqual(requiredFilesForEnv({}), [
       "package.json",
+      "README.md",
+      "LICENSE",
       "scripts/install.js",
       "bin/codex-browser-bridge.js",
       "skills/codex-browser/SKILL.md",
     ]);
     assert.deepStrictEqual(requiredFilesForEnv({ CODEX_BRIDGE_REQUIRE_CHECKSUMS: "1" }), [
       "package.json",
+      "README.md",
+      "LICENSE",
       "scripts/install.js",
       "bin/codex-browser-bridge.js",
       "skills/codex-browser/SKILL.md",
@@ -82,7 +134,7 @@ async function run() {
       env: {},
       packageRoot: installRoot,
       binDir: outDir,
-      version: "1.9.1",
+      version: "1.10.0",
       log: () => {},
       requestBuffer: async (url) => {
         embeddedCalls.push(url);
@@ -91,7 +143,7 @@ async function run() {
     });
     assert.strictEqual(embeddedResult.asset, "codex-browser-bridge.exe");
     assert.strictEqual(embeddedCalls.length, 1);
-    assert.ok(embeddedCalls[0].endsWith("/v1.9.1/codex-browser-bridge.exe"));
+    assert.ok(embeddedCalls[0].endsWith("/v1.10.0/codex-browser-bridge.exe"));
     assert.deepStrictEqual(fs.readFileSync(path.join(outDir, "codex-browser-bridge.exe")), binary);
 
     const fetchedRoot = path.join(tmp, "fetched-root");
@@ -108,7 +160,7 @@ async function run() {
       },
       packageRoot: fetchedRoot,
       binDir: fetchedOut,
-      version: "1.9.1",
+      version: "1.10.0",
       log: () => {},
       requestBuffer: async (url) => {
         fetchedCalls.push(url);
@@ -139,7 +191,7 @@ async function run() {
         env: {},
         packageRoot: fetchedRoot,
         binDir: path.join(tmp, "bad-bin"),
-        version: "1.9.1",
+        version: "1.10.0",
         log: () => {},
         requestBuffer: async (url) => (url.endsWith("checksums.txt") ? Buffer.from(`${hash} *codex-browser-bridge.exe\n`) : binary),
       }),

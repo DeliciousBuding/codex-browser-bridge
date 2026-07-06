@@ -9,23 +9,70 @@ const defaultRepo = "DeliciousBuding/codex-browser-bridge";
 const packageRoot = path.join(__dirname, "..");
 const binDir = path.join(packageRoot, "bin");
 const packageJson = require("../package.json");
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60000;
+const DEFAULT_MAX_REDIRECTS = 5;
+const DEFAULT_MAX_BYTES = 64 * 1024 * 1024;
 
-function requestBuffer(url) {
+function requestBuffer(url, options = {}) {
+  const maxBytes = options.maxBytes || DEFAULT_MAX_BYTES;
+  const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+  const timeoutMs = options.timeoutMs || DEFAULT_DOWNLOAD_TIMEOUT_MS;
+  const get = options.get || https.get;
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { "User-Agent": "codex-browser-bridge-npm" }, timeout: 60000 }, (res) => {
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+    const req = get(url, { headers: { "User-Agent": "codex-browser-bridge-npm" }, timeout: timeoutMs }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        requestBuffer(res.headers.location).then(resolve, reject);
+        res.resume();
+        if (maxRedirects <= 0) {
+          fail(new Error(`too many redirects: ${url}`));
+          return;
+        }
+        requestBuffer(new URL(res.headers.location, url).toString(), {
+          get,
+          maxBytes,
+          maxRedirects: maxRedirects - 1,
+          timeoutMs,
+        }).then(resolve, reject);
         return;
       }
       if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode}: ${url}`));
+        res.resume();
+        fail(new Error(`HTTP ${res.statusCode}: ${url}`));
+        return;
+      }
+      const contentLength = Number(res.headers["content-length"]);
+      if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+        res.resume();
+        fail(new Error(`download too large: ${contentLength} bytes (max ${maxBytes})`));
         return;
       }
       const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => resolve(Buffer.concat(chunks)));
-    }).on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error(`timeout: ${url}`)); });
+      let total = 0;
+      res.on("data", (c) => {
+        total += c.length;
+        if (total > maxBytes) {
+          req.destroy(new Error(`download too large: exceeded ${maxBytes} bytes`));
+          return;
+        }
+        chunks.push(c);
+      });
+      res.on("end", () => {
+        if (!settled) {
+          settled = true;
+          resolve(Buffer.concat(chunks));
+        }
+      });
+      res.on("error", fail);
+    }).on("error", fail);
+    req.on("timeout", () => {
+      req.destroy();
+      fail(new Error(`timeout: ${url}`));
+    });
   });
 }
 
@@ -98,7 +145,7 @@ async function install(options = {}) {
   let checksum = embeddedChecksum(asset, root);
   if (!checksum) {
     const checksumsURL = `${base}/checksums.txt`;
-    const checksums = await fetchBuffer(checksumsURL).catch((err) => {
+    const checksums = await fetchBuffer(checksumsURL, { maxBytes: 1024 * 1024 }).catch((err) => {
       throw new Error(`could not download checksums for ${tag}: ${err.message}`);
     });
     checksum = findChecksum(checksums.toString("utf8"), asset);
@@ -141,6 +188,7 @@ module.exports = {
   findChecksum,
   install,
   parseChecksumLine,
+  requestBuffer,
   resolveWindowsArch,
   sha256,
 };

@@ -5,6 +5,8 @@ const { execSync } = require("child_process");
 function requiredFilesForEnv(env = process.env) {
   const required = [
     "package.json",
+    "README.md",
+    "LICENSE",
     "scripts/install.js",
     "bin/codex-browser-bridge.js",
     "skills/codex-browser/SKILL.md",

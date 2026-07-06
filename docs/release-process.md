@@ -79,8 +79,9 @@ cd npm && npm test
 Then verify package contents from the repository root:
 
 ```bash
-rm -rf npm/skills
-cp -r skills npm/skills
 cd npm
 npm run check:package
 ```
+
+`npm prepack` stages the root `README.md`, `LICENSE`, and `skills/` directory into
+the npm package before `npm pack`, `npm publish`, or `npm run check:package`.

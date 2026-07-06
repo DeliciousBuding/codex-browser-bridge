@@ -49,8 +49,6 @@ jobs:
       - name: Check npm package contents
         shell: bash
         run: |
-          rm -rf npm/skills
-          cp -r skills npm/skills
           cd npm
           npm run check:package
 
@@ -223,8 +221,6 @@ jobs:
       - name: Check npm package contents
         shell: bash
         run: |
-          rm -rf npm/skills
-          cp -r skills npm/skills
           cd npm
           CODEX_BRIDGE_REQUIRE_CHECKSUMS=1 npm run check:package
 

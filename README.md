@@ -45,7 +45,7 @@ No browser profile copying. No WebDriver. No remote setup. It connects to the Co
 - Upload files to `<input type=file>` elements
 - Handle JavaScript dialogs (alert / confirm / prompt)
 - Read and set browser cookies
-- Run raw CDP commands (Chrome DevTools Protocol escape hatch)
+- Run allowlisted low-risk CDP commands (Chrome DevTools Protocol diagnostics escape hatch)
 - Self-diagnose with `codex_doctor`
 
 Useful when an agent needs to work with pages that require a real browser session — dashboards, logged-in web apps, local dev servers, documentation sites.
@@ -216,7 +216,7 @@ The same settings can be provided in MCP client config:
 ### CDP Escape Hatch `[CDP]`
 | Tool | Description |
 |------|-------------|
-| `codex_execute_cdp` | Execute any CDP command (allowlist-protected) |
+| `codex_execute_cdp` | Execute allowlisted low-risk CDP commands |
 
 ### Session `[Session]`
 | Tool | Description |
@@ -270,7 +270,7 @@ This tool gives an agent access to your active browser session.
 - Redact tab titles, URLs, DOM text, screenshots before sharing output
 - `codex_file_input` enforces path traversal prevention (canonicalize + prefix check, 10 MB limit)
 - Navigation only accepts `http://` and `https://` URLs
-- Cookie values redacted by default; raw CDP is allowlist-protected and blocks sensitive browser, target, debugger, navigation, cookie, and destructive storage operations
+- Cookie values redacted by default; raw CDP is allowlist-protected and blocks sensitive browser, target, debugger, navigation, cookie, screenshot, PDF, file upload, page-resource content, and destructive storage operations
 
 ## Development
 

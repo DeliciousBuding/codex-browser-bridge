@@ -539,6 +539,49 @@ mod tools_call_tests {
             .unwrap()
             .contains("types[1] must be a string"));
     }
+
+    #[tokio::test]
+    async fn cookie_tools_reject_non_http_urls_before_cdp() {
+        let server = test_server(ToolProfile::Full);
+
+        let read = call(
+            &server,
+            json!({
+                "jsonrpc":"2.0",
+                "id":1,
+                "method":"tools/call",
+                "params":{
+                    "name":"codex_network_cookies",
+                    "arguments":{"tab_id":"1","urls":["file:///C:/secret"]}
+                }
+            }),
+        )
+        .await;
+        assert_eq!(read["result"]["isError"], true);
+        assert!(read["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("only http:// and https:// are allowed"));
+
+        let delete = call(
+            &server,
+            json!({
+                "jsonrpc":"2.0",
+                "id":2,
+                "method":"tools/call",
+                "params":{
+                    "name":"codex_delete_cookies",
+                    "arguments":{"tab_id":"1","name":"sid","url":"chrome://settings"}
+                }
+            }),
+        )
+        .await;
+        assert_eq!(delete["result"]["isError"], true);
+        assert!(delete["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("only http:// and https:// are allowed"));
+    }
 }
 
 #[cfg(test)]

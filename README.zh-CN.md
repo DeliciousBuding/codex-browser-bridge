@@ -194,7 +194,7 @@ MCP 客户端配置中也可以设置环境变量：
 ### CDP 逃生口 `[CDP]`
 | 工具 | 说明 |
 |------|------|
-| `codex_execute_cdp` | 执行任意 CDP 命令（allowlist 保护） |
+| `codex_execute_cdp` | 执行 allowlist 允许的低风险 CDP 命令 |
 
 ### 会话 `[Session]`
 | 工具 | 说明 |
@@ -248,7 +248,7 @@ Codex Desktop → Chrome Extension → Chrome 标签页
 - 分享截图/DOM/日志前脱敏
 - `codex_file_input` 强制路径穿越防护（canonicalize + 前缀检查，10 MB 限制）
 - 导航只接受 `http://` 和 `https://` URL
-- Cookie 值默认脱敏；raw CDP 使用 allowlist，并阻止 browser/target/debugger/navigation/cookie/destructive storage 等敏感操作
+- Cookie 值默认脱敏；raw CDP 使用 allowlist，并阻止 browser/target/debugger/navigation/cookie/screenshot/PDF/file upload/page-resource content/destructive storage 等敏感操作
 
 ## 开发
 

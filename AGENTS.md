@@ -16,7 +16,7 @@
 - 每个 CDP 操作封装为一个 `pub async fn`，接受 `&Client` + 参数
 - CDP 响应解析用私有函数，返回 `Result<T>`
 - 使用 `#[derive(Deserialize)]` 私有结构体解析 CDP 响应
-- `execute_cdp_generic()` 是通用 CDP 入口
+- `execute_cdp_generic()` 是低风险 raw CDP 入口；高风险能力必须走专用受控工具
 
 ### 2. MCP 层（`src/mcp/` 目录）
 - `types.rs`：`ToolHandler` 枚举新增 variant（当前 52 个工具）
@@ -94,4 +94,4 @@ src/
 - 文件操作经过 `security::validate_file_path` 路径穿越检查
 - Cookie 值默认脱敏
 - URL 导航只允许 `http://` / `https://`
-- CDP allowlist 阻止 Browser/Debugger/Target/Emulation/Security/Tracing 域，以及 navigation/cookie/destructive storage 等敏感 raw CDP 方法
+- CDP allowlist 阻止 Browser/Debugger/Target/Emulation/Security/Tracing 域，以及 navigation/cookie/screenshot/PDF/file upload/page-resource content/destructive storage 等敏感 raw CDP 方法

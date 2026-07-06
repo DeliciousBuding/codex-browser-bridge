@@ -1,7 +1,8 @@
 param(
     [string]$BridgePath = "",
     [string]$Url = "https://example.com",
-    [int]$TimeoutMs = 15000
+    [int]$TimeoutMs = 15000,
+    [int]$RequestTimeoutMs = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +23,10 @@ if (-not (Test-Path -LiteralPath $BridgePath)) {
 
 if (-not (Test-Path -LiteralPath $BridgePath)) {
     throw "Bridge binary not found: $BridgePath"
+}
+
+if ($RequestTimeoutMs -le 0) {
+    $RequestTimeoutMs = [Math]::Max($TimeoutMs + 5000, 10000)
 }
 
 Write-Host "Running doctor..."
@@ -66,7 +71,16 @@ function Invoke-Mcp {
     $script:proc.StandardInput.WriteLine($json)
     $script:proc.StandardInput.Flush()
 
-    $line = $script:proc.StandardOutput.ReadLine()
+    $lineTask = $script:proc.StandardOutput.ReadLineAsync()
+    if (-not $lineTask.Wait($script:RequestTimeoutMs)) {
+        if (-not $script:proc.HasExited) {
+            $script:proc.Kill()
+        }
+        $stderr = $script:proc.StandardError.ReadToEnd()
+        throw "MCP response timed out after $script:RequestTimeoutMs ms for $Method. stderr: $stderr"
+    }
+
+    $line = $lineTask.Result
     if (-not $line) {
         $stderr = $script:proc.StandardError.ReadToEnd()
         throw "MCP process closed before response. stderr: $stderr"

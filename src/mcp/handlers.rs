@@ -361,6 +361,15 @@ impl super::Server {
 
             let mut total_bytes = 0_u64;
             for resource in resources.iter_mut() {
+                if let Some(resource_size) = resource.size {
+                    if total_bytes.saturating_add(resource_size) > max_total_bytes {
+                        truncated = true;
+                        limit_reason = Some("max_total_bytes");
+                        resource.failed = Some(true);
+                        break;
+                    }
+                }
+
                 let frame_id = resource.frame_id.clone();
                 match browser::get_resource_content(&self.client, tab_id, &frame_id, &resource.url)
                     .await
@@ -404,6 +413,12 @@ impl super::Server {
         let tab_id = required_str(&args, "tab_id")?;
         let urls: Option<Vec<String>> = optional_str_array(&args, "urls")?;
         let redact = optional_bool(&args, "redact_values")?.unwrap_or(true);
+
+        if let Some(urls) = urls.as_deref() {
+            for url in urls {
+                security::validate_url(url)?;
+            }
+        }
 
         let mut cookies = browser::get_cookies(&self.client, tab_id, urls.as_deref()).await?;
 
@@ -681,6 +696,7 @@ impl super::Server {
         let mut params = json!({ "name": name });
         if let Some(obj) = params.as_object_mut() {
             if let Some(url) = args.get("url").and_then(Value::as_str) {
+                security::validate_url(url)?;
                 obj.insert("url".into(), json!(url));
             }
             if let Some(domain) = args.get("domain").and_then(Value::as_str) {

@@ -4,17 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-07-06
+
 ### Changed
 
 - Tightened navigation URL validation to only allow `http://` and `https://`.
 - Added bounded duration validation for MCP waits, captures, and form-fill delays.
-- Restricted generic CDP execution to an explicit low-level allowlist.
+- Restricted generic CDP execution to an explicit low-level allowlist and blocked raw methods that bypass dedicated safety wrappers.
 - Added `codex_doctor` to the `basic` tool profile.
 
 ### Fixed
 
 - Bounded MCP stdio line reads to reject oversized JSON-RPC messages before unbounded buffer growth.
+- Validated cookie-tool URL filters with the same `http://` and `https://` scheme boundary used by navigation.
+- Skipped page asset content fetches when advertised resource sizes already exceed the configured byte budget.
 - Fixed npm package content checks so CI and release jobs verify the bundled agent skill before publish.
+- Included README and LICENSE in the npm package tarball.
 - Aligned Dependabot with the Rust 1.85 MSRV by holding back `criterion` minor updates that require newer Rust.
 
 ### Documentation

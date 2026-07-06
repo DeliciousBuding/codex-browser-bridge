@@ -954,8 +954,12 @@ const BLOCKED_CDP_DOMAINS: &[&str] = &[
 ];
 
 const BLOCKED_CDP_METHODS: &[&str] = &[
+    "DOM.setFileInputFiles",
+    "Page.captureScreenshot",
+    "Page.getResourceContent",
     "Page.navigate",
     "Page.navigateToHistoryEntry",
+    "Page.printToPDF",
     "Network.getAllCookies",
     "Network.getCookies",
     "Network.setCookie",
@@ -1719,6 +1723,25 @@ mod tests {
         assert!(nodes.is_empty());
     }
 
+    #[test]
+    fn generic_cdp_blocks_methods_that_bypass_dedicated_safety_tools() {
+        for method in [
+            "DOM.setFileInputFiles",
+            "Network.getCookies",
+            "Network.setCookie",
+            "Page.captureScreenshot",
+            "Page.getResourceContent",
+            "Page.navigate",
+            "Page.navigateToHistoryEntry",
+            "Page.printToPDF",
+        ] {
+            assert!(validate_generic_cdp_method(method).is_err(), "{method}");
+        }
+
+        assert!(validate_generic_cdp_method("Runtime.evaluate").is_ok());
+        assert!(validate_generic_cdp_method("DOM.getDocument").is_ok());
+    }
+
     // ── network_monitor event pairing (pair_network_events) ──
 
     #[test]
@@ -1814,11 +1837,7 @@ mod tests {
 
     #[test]
     fn generic_cdp_allows_known_low_level_methods() {
-        for method in [
-            "Runtime.evaluate",
-            "DOM.getDocument",
-            "Page.captureScreenshot",
-        ] {
+        for method in ["Runtime.evaluate", "DOM.getDocument", "Network.enable"] {
             assert!(validate_generic_cdp_method(method).is_ok(), "{method}");
         }
     }
