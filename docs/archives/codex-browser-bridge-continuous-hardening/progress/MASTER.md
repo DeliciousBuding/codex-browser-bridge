@@ -33,8 +33,8 @@
 
 ## Current Status
 
-**Active Phase**: Release recoverability hardening
-**Active Task**: PR #15 includes the live E2E timeout gate at `e1a5d06`; hardening release reruns, tag-SHA validation, changelog-note validation, and npm installability ordering.
+**Active Phase**: PR #15 finalization
+**Active Task**: PR #15 is green at `1d3192f`; code, harness, CI, release, npm, docs, and progress hardening are implemented pending final draft/merge and external npm Trusted Publisher setup.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -101,9 +101,9 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 
 ## Next Steps
 
-1. Commit and push release recoverability hardening to PR #15.
-2. Watch GitHub CI, especially the new Windows fake bridge timeout step and release workflow lint.
-3. Configure npm Trusted Publisher before the first tokenless release publish.
+1. Decide whether to undraft and merge PR #15.
+2. Configure npm Trusted Publisher before the first tokenless release publish.
+3. After PR #15 lands, revisit failing Dependabot PR #14 against the updated MSRV/release baseline.
 
 ## Session Log
 
@@ -128,3 +128,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | live-e2e-timeout-cleanup | Hardened live E2E timeout cleanup so killed bridge processes do not cause secondary hangs. |
 | 2026-07-07 | live-e2e-timeout-gate | Added a CI/release fake bridge timeout harness for live E2E cleanup regressions. |
 | 2026-07-07 | release-recoverability | Hardened release reruns, exact tag-SHA checkout, changelog-note validation, npm installability ordering, and release-workflow action pinning. |
+| 2026-07-07 | remote-ci-green | PR #15 was mergeable and all remote checks were green at `1d3192f`; remaining gates are draft status, merge decision, and npm Trusted Publisher setup. |
