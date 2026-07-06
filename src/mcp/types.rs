@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+const DEFAULT_MAX_TEXT_CONTENT_BYTES: usize = 1_048_576;
+const DEFAULT_MAX_IMAGE_CONTENT_BYTES: usize = 3_145_728;
+const MAX_CONFIGURABLE_CONTENT_BYTES: usize = 8 * 1024 * 1024;
+const MIN_CONFIGURABLE_CONTENT_BYTES: usize = 1024;
+
 #[derive(Clone, Copy)]
 pub(super) enum ToolHandler {
     ListTabs,
@@ -104,6 +109,7 @@ impl Tool {
 
 impl Content {
     pub(super) fn text(text: String) -> Self {
+        let text = bounded_text(text, max_text_content_bytes());
         Self {
             kind: "text",
             text: Some(text),
@@ -113,6 +119,13 @@ impl Content {
     }
 
     pub(super) fn image(data: String, mime_type: &'static str) -> Self {
+        let limit = max_image_content_bytes();
+        if data.len() > limit {
+            return Self::text(format!(
+                "Image omitted because it is {} bytes base64, above CODEX_BRIDGE_MAX_IMAGE_BYTES={limit}. Retry with jpeg/webp quality or a narrower element screenshot.",
+                data.len()
+            ));
+        }
         Self {
             kind: "image",
             text: None,
@@ -120,6 +133,74 @@ impl Content {
             mime_type: Some(mime_type),
         }
     }
+
+    pub(super) fn image_or_summary(data: String, mime_type: &'static str, label: &str) -> Self {
+        let limit = max_image_content_bytes();
+        if data.len() <= limit {
+            return Self::image(data, mime_type);
+        }
+        Self::text(format!(
+            "{label} omitted because it is {} bytes base64, above CODEX_BRIDGE_MAX_IMAGE_BYTES={limit}. Retry with jpeg/webp quality or a narrower element screenshot.",
+            data.len()
+        ))
+    }
+}
+
+pub(super) fn bounded_text_for_mcp(text: String) -> String {
+    bounded_text(text, max_text_content_bytes())
+}
+
+fn max_text_content_bytes() -> usize {
+    configured_content_bytes(
+        "CODEX_BRIDGE_MAX_TEXT_BYTES",
+        DEFAULT_MAX_TEXT_CONTENT_BYTES,
+    )
+}
+
+fn max_image_content_bytes() -> usize {
+    configured_content_bytes(
+        "CODEX_BRIDGE_MAX_IMAGE_BYTES",
+        DEFAULT_MAX_IMAGE_CONTENT_BYTES,
+    )
+}
+
+fn configured_content_bytes(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .map(|value| {
+            value.clamp(
+                MIN_CONFIGURABLE_CONTENT_BYTES,
+                MAX_CONFIGURABLE_CONTENT_BYTES,
+            )
+        })
+        .unwrap_or(default)
+}
+
+fn bounded_text(mut text: String, max_bytes: usize) -> String {
+    let original_bytes = text.len();
+    if original_bytes <= max_bytes {
+        return text;
+    }
+
+    let mut marker = format!(
+        "\n\n[truncated by codex-browser-bridge: original_bytes={original_bytes}, max_bytes={max_bytes}]"
+    );
+    if marker.len() > max_bytes {
+        marker = "\n\n[truncated by codex-browser-bridge]".to_string();
+    }
+    if marker.len() > max_bytes {
+        marker.truncate(max_bytes);
+    }
+    let body_limit = max_bytes.saturating_sub(marker.len());
+    let mut cutoff = body_limit.min(text.len());
+    while cutoff > 0 && !text.is_char_boundary(cutoff) {
+        cutoff -= 1;
+    }
+    text.truncate(cutoff);
+    text.push_str(&marker);
+    text
 }
 
 // ---- arg extractors ----
@@ -282,7 +363,7 @@ pub(crate) fn text_error_envelope_for_test(id: Value, message: &str) -> String {
 #[allow(dead_code)]
 pub(crate) fn screenshot_content_for_test(data: String) -> Value {
     serde_json::to_value(vec![
-        Content::image(data.clone(), "image/png"),
+        Content::image_or_summary(data.clone(), "image/png", "Screenshot"),
         Content::text(format!(
             "Screenshot captured for tab 7 ({} bytes base64)",
             data.len()
@@ -354,5 +435,49 @@ mod tests {
         );
         assert!(optional_str_array(&json!({"types": "Image"}), "types").is_err());
         assert!(optional_str_array(&json!({"types": ["Image", 1]}), "types").is_err());
+    }
+
+    #[test]
+    fn text_content_is_bounded_without_splitting_utf8() {
+        let text = format!("{}您好", "a".repeat(DEFAULT_MAX_TEXT_CONTENT_BYTES));
+        let content = Content::text(text);
+        let value = serde_json::to_value(content).unwrap();
+        let bounded = value["text"].as_str().unwrap();
+
+        assert!(bounded.contains("truncated by codex-browser-bridge"));
+        assert!(bounded.is_char_boundary(bounded.len()));
+        assert!(bounded.len() < DEFAULT_MAX_TEXT_CONTENT_BYTES + 256);
+    }
+
+    #[test]
+    fn oversized_image_content_becomes_text_summary() {
+        let data = "a".repeat(DEFAULT_MAX_IMAGE_CONTENT_BYTES + 1);
+        let content = Content::image_or_summary(data, "image/png", "Screenshot");
+        let value = serde_json::to_value(content).unwrap();
+
+        assert_eq!(value["type"], "text");
+        assert!(value["data"].is_null());
+        assert!(value["text"]
+            .as_str()
+            .unwrap()
+            .contains("Screenshot omitted"));
+    }
+
+    #[test]
+    fn direct_image_constructor_is_bounded() {
+        let data = "a".repeat(DEFAULT_MAX_IMAGE_CONTENT_BYTES + 1);
+        let content = Content::image(data, "image/png");
+        let value = serde_json::to_value(content).unwrap();
+
+        assert_eq!(value["type"], "text");
+        assert!(value["text"].as_str().unwrap().contains("Image omitted"));
+    }
+
+    #[test]
+    fn bounded_text_respects_tiny_limits() {
+        let bounded = bounded_text("abcdef".repeat(500), 16);
+
+        assert!(bounded.len() <= 16);
+        assert!(bounded.is_char_boundary(bounded.len()));
     }
 }

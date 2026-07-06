@@ -95,3 +95,4 @@ src/
 - Cookie 值默认脱敏
 - URL 导航只允许 `http://` / `https://`
 - CDP allowlist 阻止 Browser/Debugger/Target/Emulation/Security/Tracing 域，以及 navigation/cookie/screenshot/PDF/file upload/page-resource content/destructive storage 等敏感 raw CDP 方法
+- MCP 输出统一经过 `Content` 层上限：`CODEX_BRIDGE_MAX_TEXT_BYTES` 默认 1 MiB，`CODEX_BRIDGE_MAX_IMAGE_BYTES` 默认 3 MiB，配置值最高 8 MiB；不要在单个 handler 里绕过该出口。

@@ -118,6 +118,12 @@ MCP 客户端配置中也可以设置环境变量：
 
 `CODEX_BRIDGE_UPLOAD_BASE` 会限制 `codex_file_input` 只能上传该目录下的文件。建议显式设置，因为不同 MCP 客户端启动 server 的工作目录不一定一致。
 
+MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScript、CDP 或截图 payload：
+
+- `CODEX_BRIDGE_MAX_TEXT_BYTES` 限制每个 text content，默认 `1048576`。
+- `CODEX_BRIDGE_MAX_IMAGE_BYTES` 限制每个 base64 image content，默认 `3145728`。
+- 两者都有 8 MiB 硬上限。文本截断会带原始字节数标记；超大图片返回文本摘要，不返回无效的半截 base64。
+
 ## 全部 52 个 MCP 工具
 
 ### 标签管理 `[Tabs]`
@@ -144,7 +150,7 @@ MCP 客户端配置中也可以设置环境变量：
 ### DOM 与无障碍 `[DOM]`
 | 工具 | 说明 |
 |------|------|
-| `codex_dom_snapshot` | 完整无障碍树（含 nodeId） |
+| `codex_dom_snapshot` | 完整无障碍树（含 nodeId），大响应可能截断 |
 | `codex_dom_get_visible` | 人类可读的可见 DOM 树 |
 | `codex_dom_click` | 通过无障碍 nodeId 点击 |
 | `codex_find_element` | 按 ARIA role + name 查找元素 |
@@ -155,12 +161,12 @@ MCP 客户端配置中也可以设置环境变量：
 |------|------|
 | `codex_get_url` | 当前标签 URL |
 | `codex_get_title` | 当前页面标题 |
-| `codex_evaluate` | 执行 JavaScript，返回 JSON 结果 |
+| `codex_evaluate` | 执行 JavaScript，返回有上限的 JSON 结果 |
 | `codex_page_assets` | 列出页面资源（图片/CSS/JS/字体） |
 | `codex_console_logs` | 捕获一段时间内的 console 输出 |
 | `codex_emulate_device` | 模拟移动端视口（`reset=true` 清除） |
-| `codex_screenshot` | 截取视口 PNG 截图 |
-| `codex_screenshot_element` | 截取单个元素 |
+| `codex_screenshot` | 截取视口截图，超大图片返回摘要 |
+| `codex_screenshot_element` | 截取单个元素，超大图片返回摘要 |
 | `codex_print_pdf` | 渲染页面为 PDF |
 | `codex_bring_to_front` | 激活后台标签（修复截图超时） |
 | `codex_dialog` | 处理 alert / confirm / prompt |

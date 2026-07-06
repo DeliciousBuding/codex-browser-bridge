@@ -138,6 +138,15 @@ The same settings can be provided in MCP client config:
 
 `CODEX_BRIDGE_UPLOAD_BASE` limits `codex_file_input` to a specific directory. Set it explicitly when enabling file uploads; MCP clients do not always launch servers from a predictable working directory.
 
+Large MCP responses are bounded so agents do not receive multi-megabyte DOM,
+JavaScript, CDP, or screenshot payloads by accident:
+
+- `CODEX_BRIDGE_MAX_TEXT_BYTES` caps each text content item. Default: `1048576`.
+- `CODEX_BRIDGE_MAX_IMAGE_BYTES` caps each base64 image content item. Default: `3145728`.
+- Both settings are clamped to an 8 MiB hard ceiling. Truncated text includes an
+  explicit marker with the original byte count; oversized images return a text
+  summary instead of invalid partial base64.
+
 `codex://tabs` is available as an MCP resource for clients that support resources. It returns tabs owned by the current bridge session, not every Chrome tab. The prompt templates `login` and `extract-table` are also exposed for clients that support MCP prompts.
 
 ## All 52 MCP Tools
@@ -166,7 +175,7 @@ The same settings can be provided in MCP client config:
 ### DOM & Accessibility `[DOM]`
 | Tool | Description |
 |------|-------------|
-| `codex_dom_snapshot` | Full accessibility tree with node IDs |
+| `codex_dom_snapshot` | Full accessibility tree with node IDs; large responses may be truncated |
 | `codex_dom_get_visible` | Human-readable visible DOM tree |
 | `codex_dom_click` | Click by accessibility node ID |
 | `codex_find_element` | Find elements by ARIA role + name |
@@ -177,12 +186,12 @@ The same settings can be provided in MCP client config:
 |------|-------------|
 | `codex_get_url` | Current tab URL |
 | `codex_get_title` | Current page title |
-| `codex_evaluate` | Execute JavaScript, return JSON result |
+| `codex_evaluate` | Execute JavaScript, return bounded JSON result |
 | `codex_page_assets` | List page resources (images, CSS, JS, fonts) |
 | `codex_console_logs` | Capture console output for a window |
 | `codex_emulate_device` | Emulate mobile viewport (`reset=true` to clear) |
-| `codex_screenshot` | Capture viewport PNG screenshot |
-| `codex_screenshot_element` | Capture a single element by selector |
+| `codex_screenshot` | Capture viewport screenshot; oversized images return a summary |
+| `codex_screenshot_element` | Capture a single element by selector; oversized images return a summary |
 | `codex_print_pdf` | Render page to PDF |
 | `codex_bring_to_front` | Activate a background tab (fixes screenshot timeouts) |
 | `codex_dialog` | Handle alert / confirm / prompt |

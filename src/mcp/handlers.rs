@@ -209,7 +209,7 @@ impl super::Server {
         let quality = optional_u64(&args, "quality")?;
         let data = browser::screenshot(&self.client, tab_id, full_page, format, quality).await?;
         Ok(vec![
-            Content::image(data.clone(), mime_for(format)),
+            Content::image_or_summary(data.clone(), mime_for(format), "Screenshot"),
             Content::text(format!(
                 "Screenshot captured for tab {tab_id} ({} bytes base64, {format})",
                 data.len()
@@ -682,7 +682,7 @@ impl super::Server {
         let selector = required_str(&args, "selector")?;
         let data = browser::screenshot_element(&self.client, tab_id, selector).await?;
         Ok(vec![
-            Content::image(data.clone(), "image/png"),
+            Content::image_or_summary(data.clone(), "image/png", "Element screenshot"),
             Content::text(format!(
                 "Element screenshot of {selector} in tab {tab_id} ({} bytes base64)",
                 data.len()

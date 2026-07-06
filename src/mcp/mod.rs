@@ -5,7 +5,7 @@ use crate::client::Client;
 
 use self::profiles::ToolProfile;
 use self::schema::{registered_tools, tools_to_values};
-use self::types::{error_response, result_response, RpcRequest, Tool};
+use self::types::{bounded_text_for_mcp, error_response, result_response, RpcRequest, Tool};
 
 pub mod handlers;
 pub mod profiles;
@@ -170,7 +170,9 @@ impl Server {
         }
         match crate::browser::list_tabs(&self.client).await {
             Ok(tabs) => {
-                let text = serde_json::to_string(&tabs).unwrap_or_else(|_| "[]".into());
+                let text = bounded_text_for_mcp(
+                    serde_json::to_string(&tabs).unwrap_or_else(|_| "[]".into()),
+                );
                 result_response(
                     id,
                     json!({
@@ -314,11 +316,56 @@ fn mcp_line_from_utf8(buf: &[u8]) -> std::result::Result<&str, ()> {
 mod resources_prompts_tests {
     use super::*;
     use crate::client::Client;
-    use tokio::io::duplex;
+    use crate::protocol;
+    use tokio::io::{duplex, DuplexStream};
 
     fn test_server() -> Server {
-        let (client_end, _server) = duplex(4096);
-        Server::new(Client::from_stream(client_end).unwrap())
+        test_server_with_pipe().0
+    }
+
+    fn test_server_with_pipe() -> (Server, DuplexStream) {
+        let (client_end, server_end) = duplex(2 * 1024 * 1024);
+        (
+            Server::new(Client::from_stream(client_end).unwrap()),
+            server_end,
+        )
+    }
+
+    async fn next_request(server: &mut DuplexStream) -> Value {
+        let frame = protocol::decode_frame(server).await.unwrap();
+        serde_json::from_slice(&frame).unwrap()
+    }
+
+    async fn reply_result(server: &mut DuplexStream, request: &Value, result: Value) {
+        protocol::encode_frame(server, &json!({"id": request["id"], "result": result}))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn resources_read_tabs_text_is_bounded() {
+        let (server, mut pipe) = test_server_with_pipe();
+        let read_task = tokio::spawn(async move {
+            server
+                .handle_resources_read(json!(1), Some(json!({"uri": "codex://tabs"})))
+                .await
+        });
+
+        let request = next_request(&mut pipe).await;
+        assert_eq!(request["method"], "getTabs");
+        reply_result(
+            &mut pipe,
+            &request,
+            json!([{"id":1,"title":"x".repeat(2_000_000),"url":"https://example.com"}]),
+        )
+        .await;
+
+        let response = read_task.await.unwrap();
+        let v: Value = serde_json::from_str(&response).unwrap();
+        let text = v["result"]["contents"][0]["text"].as_str().unwrap();
+
+        assert!(text.contains("truncated by codex-browser-bridge"));
+        assert!(text.len() < 1_050_000);
     }
 
     #[tokio::test]
