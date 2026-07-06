@@ -2,7 +2,7 @@
 
 > **Task**: Stability, security, harness, CI/CD, release, npm, and multi-agent UX hardening.
 > **Started**: 2026-07-06
-> **Last Updated**: 2026-07-06
+> **Last Updated**: 2026-07-07
 > **Mode**: LOCAL_ONLY
 > **Repo**: DeliciousBuding/codex-browser-bridge
 
@@ -33,8 +33,8 @@
 
 ## Current Status
 
-**Active Phase**: PR CI hardening
-**Active Task**: Multi-client config, raw CDP, page asset timeout cleanup, changelog release hygiene, and release harness gates implemented; awaiting PR #15 CI rerun.
+**Active Phase**: Release atomicity hardening
+**Active Task**: PR #15 CI is green at `dd66fa2`; adding draft GitHub Release staging and checksum artifact handoff so npm publish succeeds before the public GitHub Release is published.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -81,6 +81,7 @@ adaptive:
 | 2026-07-07 | Review follow-ups for CDP, assets, upload, prerelease publishing | M | 5/5 | 3 | Replaced broad raw CDP prefixes with an explicit method allowlist, required explicit upload base for file input, bounded page asset content fetches by known size and timeout, preserved extension-owned `bridge` metadata, and routed npm prereleases to `next`. |
 | 2026-07-07 | Release Ubuntu harness gate | S | 5/5 | 0 | Added the non-Windows mock harness test and clippy job to the release workflow before asset creation. |
 | 2026-07-07 | Multi-client config and resource cleanup follow-ups | M | 5/5 | 4 | Made explicit config paths authoritative, added CDP to the network profile, rejected relative upload paths, moved timeout cleanup into the Client path for page asset fetches, normalized asset content to base64, removed stateful/raw Runtime methods from generic CDP, and moved ship-bound changelog entries into 1.10.0. |
+| 2026-07-07 | Release atomicity hardening | S | 5/5 | 1 | Stage GitHub Release assets as a draft, pass checksums to npm via workflow artifact, then publish the GitHub Release only after npm succeeds. |
 
 ## Quick Status Commands
 
@@ -95,8 +96,8 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 
 ## Next Steps
 
-1. Commit the hardening branch and open a PR when ready.
-2. Watch GitHub CI, especially Ubuntu mock E2E and release workflow syntax.
+1. Commit and push the release atomicity follow-up to PR #15.
+2. Watch GitHub CI, especially release workflow syntax and existing Rust/npm/supply-chain gates.
 3. Configure npm Trusted Publisher before the first tokenless release publish.
 
 ## Session Log
@@ -116,3 +117,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | review-hardening | Addressed subagent findings for raw CDP scope, page asset fetch budgets, file upload opt-in, metadata field compatibility, and npm prerelease dist-tags. |
 | 2026-07-07 | release-harness-gate | Added Ubuntu mock harness checks to the release workflow dependency chain. |
 | 2026-07-07 | config-resource-followups | Addressed subagent findings for CODEX_BRIDGE_CONFIG fallback, network profile CDP visibility, relative upload paths, Client pending cleanup on timeouts, base64 page asset content, raw CDP stateful methods, and 1.10.0 changelog hygiene. |
+| 2026-07-07 | release-atomicity | Added draft GitHub Release staging and checksum artifact handoff so npm publish must succeed before release assets become public. |

@@ -126,6 +126,7 @@ dependency under an unlisted license fails the check and forces review) + bans
 
 ## Release
 
-Tagging `v*` triggers `release.yml`: test → build x64 + arm64 → GitHub Release
-with checksums → npm publish (`--provenance`). The npm package embeds release
-checksums and downloads the matching binary on install.
+Tagging `v*` triggers `release.yml`: test → build x64 + arm64 → checksums and
+attestations → draft GitHub Release → npm publish (`--provenance`) → publish
+the GitHub Release. The npm package embeds release checksums and downloads the
+matching binary on install.

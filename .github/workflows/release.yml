@@ -138,6 +138,13 @@ jobs:
         shell: bash
         run: sha256sum codex-browser-bridge*.exe > checksums.txt
 
+      - name: Upload release checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-checksums
+          path: checksums.txt
+          retention-days: 7
+
       - name: Generate artifact attestation
         uses: actions/attest@v4
         with:
@@ -164,12 +171,14 @@ jobs:
             git log --oneline --no-merges "$prev"..HEAD > release_notes.txt
           fi
 
-      - name: Create GitHub Release
+      - name: Create draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
+            --draft \
+            --verify-tag \
             --title "${{ steps.version.outputs.tag }}" \
             --notes-file release_notes.txt \
             codex-browser-bridge.exe \
@@ -225,15 +234,18 @@ jobs:
             echo "dist_tag=latest" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Download release checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: release-checksums
+          path: npm
+
       - name: Embed release checksums
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
           TAG_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          rm -f npm/checksums.txt npm/checksums.json
-          gh release download "$TAG" --pattern checksums.txt --dir npm
+          rm -f npm/checksums.json
           node - <<'NODE'
           const fs = require("fs");
           const path = require("path");
@@ -266,3 +278,16 @@ jobs:
         run: |
           cd npm
           npm publish --access public --tag "${{ steps.npm-version.outputs.dist_tag }}"
+
+  publish-release:
+    needs: [publish-npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        shell: bash
+        run: gh release edit "$TAG" --draft=false

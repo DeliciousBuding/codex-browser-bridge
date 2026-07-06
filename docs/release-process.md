@@ -44,11 +44,12 @@ The release workflow must:
 1. Check Windows Rust, clippy, Rust tests, Ubuntu mock harness tests, npm tests, and npm package contents before creating assets.
 2. Build Windows x64 and arm64 binaries.
 3. Generate `checksums.txt`.
-4. Create a GitHub Release from the changelog section.
-5. Embed release checksums into the npm package.
-6. Bundle `skills/codex-browser/SKILL.md` into the npm package before `npm pack` or `npm publish`.
-7. Publish npm via Trusted Publishing/OIDC, with no long-lived npm write token in GitHub secrets.
-8. Generate GitHub artifact attestations for the Windows binaries and checksum file.
+4. Generate GitHub artifact attestations for the Windows binaries and checksum file.
+5. Stage the checksum file as a workflow artifact for npm package embedding.
+6. Create a draft GitHub Release from the changelog section and upload assets there.
+7. Embed release checksums into the npm package and bundle `skills/codex-browser/SKILL.md` before `npm pack` or `npm publish`.
+8. Publish npm via Trusted Publishing/OIDC, with no long-lived npm write token in GitHub secrets.
+9. Publish the GitHub Release only after npm publish succeeds, so binary assets and the npm package become public atomically.
 
 ## npm Trusted Publishing
 

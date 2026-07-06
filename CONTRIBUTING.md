@@ -80,4 +80,4 @@ Maintainer-only. See [docs/release-process.md](docs/release-process.md) for the 
 2. Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md`.
 3. Open a `release/vX.Y.Z` PR and merge it.
 4. Tag from `main`: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
-5. The release workflow builds Windows binaries (x64 + arm64), generates checksums, publishes a GitHub Release, embeds those checksums into the npm package, and publishes npm with provenance.
+5. The release workflow builds Windows binaries (x64 + arm64), generates checksums and attestations, stages a draft GitHub Release, embeds those checksums into the npm package, publishes npm with provenance, then publishes the GitHub Release.
