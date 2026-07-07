@@ -84,9 +84,9 @@ npm i -g @delicious233/codex-browser-bridge
 找到登录按钮并点击它。
 ```
 
-Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
+Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。npm 包内也会随包发布这些 `examples/` 模板。
 
-> 💡 **Agent skill 已内置。** 仓库 [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) 包含 LLM agent 使用全部 52 个工具的操作手册。将其 symlink 或复制到 agent 的 skills 目录即可（`~/.claude/skills/`、`~/.codex/skills/` 等）。
+> 💡 **Agent skill 已内置。** 仓库 [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) 包含 LLM agent 使用全部 52 个工具的操作手册。将其 symlink 或复制到 agent 的 skills 目录即可（`~/.claude/skills/`、`~/.codex/skills/` 等）。npm 包内的 `examples/` 目录包含多客户端 MCP 配置模板。
 
 ## 配置
 

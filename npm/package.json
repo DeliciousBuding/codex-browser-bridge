@@ -19,6 +19,7 @@
     "bin/codex-browser-bridge.js",
     "checksums.json",
     "scripts/install.js",
+    "examples/",
     "skills/"
   ],
   "repository": {

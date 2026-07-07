@@ -84,7 +84,8 @@ Open https://example.com and take a screenshot.
 Find the login button and click it.
 ```
 
-For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
+For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/). The npm
+package also ships these examples under `examples/`.
 
 ### Install the agent skill (recommended)
 
@@ -101,7 +102,8 @@ cp -r node_modules/@delicious233/codex-browser-bridge/skills/codex-browser .clau
 
 **👤 For agents reading this:** to self-install, run the copy command above
 against your own skills directory. The skill is at
-`skills/codex-browser/SKILL.md` inside the installed npm package.
+`skills/codex-browser/SKILL.md` inside the installed npm package, and
+multi-client MCP config templates are under `examples/`.
 
 ## Configuration
 

@@ -31,6 +31,7 @@ All notable changes to this project will be documented in this file.
 - Added workflow concurrency controls to cancel stale PR validation runs and serialize same-tag release runs.
 - Retired per-tab client locks on tab close/finalize and normalized invalid page asset sizes as unknown to avoid long-lived agent sessions accumulating stale state or fetching misleadingly sized resources.
 - Hardened the live E2E script timeout path and added a CI-covered fake bridge timeout harness so killed MCP bridge processes do not trigger blocking stderr reads or follow-up cleanup requests.
+- Bundled multi-client MCP config examples in the npm package and expanded postinstall hints for Claude Code, Cursor, OpenClaw, Hermes Agent, and skill-aware agents.
 - Made explicit config paths authoritative, rejected relative upload paths, cleaned pending CDP requests on page asset timeouts, and normalized fetched asset content to base64.
 - Fixed npm package content checks so CI and release jobs verify the bundled agent skill before publish.
 - Included README and LICENSE in the npm package tarball.

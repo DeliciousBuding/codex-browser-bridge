@@ -4,7 +4,16 @@ const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { PassThrough } = require("stream");
-const { embeddedChecksum, findChecksum, install, parseChecksumLine, requestBuffer, resolveWindowsArch, sha256 } = require("./install");
+const {
+  embeddedChecksum,
+  findChecksum,
+  install,
+  logInstallHints,
+  parseChecksumLine,
+  requestBuffer,
+  resolveWindowsArch,
+  sha256,
+} = require("./install");
 const { requiredFilesForEnv } = require("./check-package");
 
 const hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -108,6 +117,11 @@ async function run() {
       "LICENSE",
       "scripts/install.js",
       "bin/codex-browser-bridge.js",
+      "examples/README.md",
+      "examples/claude-code.json",
+      "examples/cursor.json",
+      "examples/hermes-agent.json",
+      "examples/openclaw.json",
       "skills/codex-browser/SKILL.md",
     ]);
     assert.deepStrictEqual(requiredFilesForEnv({ CODEX_BRIDGE_REQUIRE_CHECKSUMS: "1" }), [
@@ -116,6 +130,11 @@ async function run() {
       "LICENSE",
       "scripts/install.js",
       "bin/codex-browser-bridge.js",
+      "examples/README.md",
+      "examples/claude-code.json",
+      "examples/cursor.json",
+      "examples/hermes-agent.json",
+      "examples/openclaw.json",
       "skills/codex-browser/SKILL.md",
       "checksums.json",
     ]);
@@ -128,6 +147,7 @@ async function run() {
       JSON.stringify({ files: { "codex-browser-bridge.exe": binaryHash } })
     );
     const embeddedCalls = [];
+    const installLogs = [];
     const embeddedResult = await install({
       platform: "win32",
       arch: "x64",
@@ -135,7 +155,7 @@ async function run() {
       packageRoot: installRoot,
       binDir: outDir,
       version: "1.10.0",
-      log: () => {},
+      log: (line) => installLogs.push(line),
       requestBuffer: async (url) => {
         embeddedCalls.push(url);
         return binary;
@@ -145,6 +165,19 @@ async function run() {
     assert.strictEqual(embeddedCalls.length, 1);
     assert.ok(embeddedCalls[0].endsWith("/v1.10.0/codex-browser-bridge.exe"));
     assert.deepStrictEqual(fs.readFileSync(path.join(outDir, "codex-browser-bridge.exe")), binary);
+    assert.ok(installLogs.some((line) => line.includes(`Installed: ${path.join(outDir, "codex-browser-bridge.exe")}`)));
+
+    const hintsRoot = path.join(tmp, "hints-root");
+    fs.mkdirSync(path.join(hintsRoot, "skills", "codex-browser"), { recursive: true });
+    fs.mkdirSync(path.join(hintsRoot, "examples"), { recursive: true });
+    const hintLogs = [];
+    logInstallHints(hintsRoot, (line) => hintLogs.push(line));
+    const hintText = hintLogs.join("\n");
+    assert.match(hintText, /Claude Code/);
+    assert.match(hintText, /Other skill-aware agents/);
+    assert.match(hintText, /OpenClaw/);
+    assert.match(hintText, /Hermes Agent/);
+    assert.match(hintText, /examples/);
 
     const fetchedRoot = path.join(tmp, "fetched-root");
     const fetchedOut = path.join(tmp, "fetched-bin");

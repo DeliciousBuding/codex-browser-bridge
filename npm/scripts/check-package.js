@@ -9,6 +9,11 @@ function requiredFilesForEnv(env = process.env) {
     "LICENSE",
     "scripts/install.js",
     "bin/codex-browser-bridge.js",
+    "examples/README.md",
+    "examples/claude-code.json",
+    "examples/cursor.json",
+    "examples/hermes-agent.json",
+    "examples/openclaw.json",
     "skills/codex-browser/SKILL.md",
   ];
 

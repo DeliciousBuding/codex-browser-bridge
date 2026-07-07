@@ -123,6 +123,23 @@ function resolveWindowsArch(platform, cpu) {
   }
 }
 
+function logInstallHints(root, log) {
+  const skillDir = path.join(root, "skills", "codex-browser");
+  const examplesDir = path.join(root, "examples");
+  if (fs.existsSync(skillDir)) {
+    log(
+      [
+        `Skill: ${skillDir}`,
+        "  -> Claude Code: copy or symlink to ~/.claude/skills/",
+        "  -> Other skill-aware agents: copy or symlink into that agent's skills directory",
+      ].join("\n")
+    );
+  }
+  if (fs.existsSync(examplesDir)) {
+    log(`MCP config examples: ${examplesDir} (Claude Code, Cursor, OpenClaw, Hermes Agent)`);
+  }
+}
+
 async function install(options = {}) {
   const platform = options.platform || process.platform;
   const cpu = options.arch || process.arch;
@@ -165,10 +182,7 @@ async function install(options = {}) {
   const target = path.join(outDir, exeName);
   fs.writeFileSync(target, binary);
   log(`Installed: ${target}`);
-  const skillDir = path.join(root, "skills", "codex-browser");
-  if (fs.existsSync(skillDir)) {
-    log(`Skill: ${skillDir}\n  → copy to ~/.claude/skills/ to activate the agent skill`);
-  }
+  logInstallHints(root, log);
   return { target, asset, tag, repo };
 }
 
@@ -187,6 +201,7 @@ module.exports = {
   embeddedChecksum,
   findChecksum,
   install,
+  logInstallHints,
   parseChecksumLine,
   requestBuffer,
   resolveWindowsArch,

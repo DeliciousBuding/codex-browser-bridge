@@ -49,7 +49,7 @@ The release workflow must:
 6. Stage the checksum file as a workflow artifact for npm package embedding.
 7. Create or update a draft GitHub Release from the changelog section and upload assets with clobber semantics so reruns can recover from partial failures.
 8. Publish the GitHub Release before npm publish so the npm installer can download public binary assets as soon as the package is visible.
-9. Embed release checksums into the npm package and bundle `skills/codex-browser/SKILL.md` before `npm pack` or `npm publish`.
+9. Embed release checksums into the npm package and bundle `skills/codex-browser/SKILL.md` plus `examples/` before `npm pack` or `npm publish`.
 10. Publish npm via Trusted Publishing/OIDC, with no long-lived npm write token in GitHub secrets.
 
 ## npm Trusted Publishing
@@ -87,5 +87,6 @@ cd npm
 npm run check:package
 ```
 
-`npm prepack` stages the root `README.md`, `LICENSE`, and `skills/` directory into
-the npm package before `npm pack`, `npm publish`, or `npm run check:package`.
+`npm prepack` stages the root `README.md`, `LICENSE`, `skills/`, and `examples/`
+directories into the npm package before `npm pack`, `npm publish`, or
+`npm run check:package`.
