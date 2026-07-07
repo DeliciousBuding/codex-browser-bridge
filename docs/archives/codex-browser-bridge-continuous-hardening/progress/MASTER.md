@@ -34,7 +34,7 @@
 ## Current Status
 
 **Active Phase**: PR #15 finalization
-**Active Task**: PR #15 final review follow-ups: lazy/offline MCP startup so initialize, tools/list, and codex_doctor remain reachable when the browser pipe is initially unavailable.
+**Active Task**: PR #15 final review follow-ups: verified reconnect selection so stale/dialable pipes must pass a short getInfo probe before being treated as healthy.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -101,6 +101,7 @@ adaptive:
 | 2026-07-07 | Deadline and cookie validation follow-ups | S | 5/5 | 2 | Rejected expired CDP deadlines before writing side-effecting frames and validated cookie name/value/domain/path/sameSite before set/delete cookie tools touch the browser pipe. |
 | 2026-07-07 | Monitor event capture byte budget | S | 5/5 | 2 | Added a shared 256 KiB drain budget for network/console monitor events, preserved raw observed counts after truncation, filtered network capture to pairable request/response events, and recorded follow-up findings for subscription-time byte bounds plus lazy MCP startup. |
 | 2026-07-07 | Lazy MCP startup | M | 5/5 | 2 | Added an initially offline Client path for MCP mode so metadata and doctor tools are available before a browser pipe exists; first browser request reconnects through the existing bounded reconnect path, and explicit pipe reconnects now keep the same pipe target. |
+| 2026-07-07 | Verified reconnect selection | S | 5/5 | 1 | Reconnect now probes a newly dialed pipe with bounded getInfo before marking it healthy, skips stale/bad dialable pipes, and keeps the existing connection-epoch protection for stale read-loop exits. |
 
 ## Quick Status Commands
 
@@ -115,9 +116,9 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 
 ## Next Steps
 
-1. Push the latest lazy MCP startup follow-up.
+1. Push the latest verified reconnect selection follow-up.
 2. Wait for PR #15 checks to return green again.
-3. Consider the next minimal stability slice from subagent review: verified reconnect selection with getInfo, absolute MCP install hints for GUI/scheduled agents, and richer doctor install/lifecycle diagnostics.
+3. Consider the next minimal stability slice from subagent review: absolute MCP install hints for GUI/scheduled agents, richer doctor install/lifecycle diagnostics, and subscription-time event byte bounds.
 4. Decide whether to undraft and merge PR #15.
 5. Configure npm Trusted Publisher before the first tokenless release publish.
 6. After PR #15 lands, revisit Dependabot PR #14 against the updated MSRV/release baseline.
@@ -161,3 +162,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | deadline-cookie-validation | Addressed subagent findings for late CDP writes after expired deadlines and malformed cookie fields reaching CDP. |
 | 2026-07-07 | monitor-event-budget | Bounded network/console monitor event processing by bytes, kept truncation metadata agent-visible, prevented noisy unpairable Network events from hiding request/response pairs, and queued deeper MCP startup/reconnect work from the incident review. |
 | 2026-07-07 | lazy-mcp-startup | Addressed the incident path where MCP server startup exited before codex_doctor/tools could be used when the browser pipe was absent; MCP mode now starts offline and connects on first browser request. |
+| 2026-07-07 | verified-reconnect-selection | Reconnect now rejects dialable but unhealthy pipes before swapping them into normal browser requests. |

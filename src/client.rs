@@ -31,6 +31,7 @@ const RECONNECT_BACKOFFS: [Duration; 3] = [
 /// After a reconnect cycle fully fails, refuse further reconnect attempts for
 /// this long so a dead Codex Desktop does not cause a busy-loop of failed dials.
 const RECONNECT_COOLDOWN: Duration = Duration::from_secs(5);
+const RECONNECT_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 type PendingMap = HashMap<u64, oneshot::Sender<Response>>;
 
@@ -330,6 +331,19 @@ impl Client {
                     *self.inner.reconnect_cooldown_until.lock().await = None;
                     self.inner.alive.store(true, Ordering::Release);
                     self.spawn_read_loop(reader, epoch);
+                    if let Err(err) = self
+                        .send_request_once("getInfo", None, RECONNECT_HEALTH_CHECK_TIMEOUT)
+                        .await
+                    {
+                        self.close_for_health_check_failure().await;
+                        tracing::debug!(
+                            attempt = attempt + 1,
+                            error = %err,
+                            "reconnect health check failed"
+                        );
+                        last_err = Some(err);
+                        continue;
+                    }
                     tracing::info!(attempt = attempt + 1, "bridge reconnected");
                     return Ok(());
                 }
@@ -1088,6 +1102,7 @@ mod reconnect_tests {
         assert!(client.is_alive());
 
         reply_ok(&mut new_srv).await;
+        reply_ok(&mut new_srv).await;
         let result = task.await.unwrap();
         assert!(result.is_ok(), "got: {:?}", result.err());
     }
@@ -1132,8 +1147,61 @@ mod reconnect_tests {
         assert!(client.is_alive());
 
         reply_ok(&mut new_srv).await;
+        reply_ok(&mut new_srv).await;
         let result = task.await.unwrap();
         assert!(result.is_ok(), "got: {:?}", result.err());
+    }
+
+    #[tokio::test]
+    async fn reconnect_skips_pipe_that_fails_health_check() {
+        let (client_end1, server1) = duplex(4096);
+        let new_servers = Arc::new(Mutex::new(Vec::<DuplexStream>::new()));
+        let ready = Arc::new(Notify::new());
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let factory: ConnectionFactory = {
+            let new_servers = Arc::clone(&new_servers);
+            let ready = Arc::clone(&ready);
+            let call_count = Arc::clone(&call_count);
+            Arc::new(move || {
+                let new_servers = Arc::clone(&new_servers);
+                let ready = Arc::clone(&ready);
+                let call_count = Arc::clone(&call_count);
+                Box::pin(async move {
+                    let (c, s) = duplex(4096);
+                    new_servers.lock().await.push(s);
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    ready.notify_waiters();
+                    Ok(c)
+                })
+            })
+        };
+
+        let client = Client::from_stream_with_factory(client_end1, factory).unwrap();
+        drop(server1);
+        expect_alive(&client, false).await;
+
+        let task = tokio::spawn({
+            let client = client.clone();
+            async move { client.send_request("getInfo", None).await }
+        });
+
+        timeout(TEST_STATE_TIMEOUT, ready.notified())
+            .await
+            .expect("timed out waiting for first reconnect factory");
+        let mut first = new_servers.lock().await.pop().unwrap();
+        reply_error(&mut first, -32000, "stale pipe").await;
+
+        wait_until("second reconnect factory", || async {
+            call_count.load(Ordering::SeqCst) >= 2
+        })
+        .await;
+        let mut second = new_servers.lock().await.pop().unwrap();
+        reply_ok(&mut second).await;
+        reply_ok(&mut second).await;
+
+        let result = task.await.unwrap();
+        assert!(result.is_ok(), "got: {:?}", result.err());
+        assert_eq!(call_count.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
@@ -1162,11 +1230,16 @@ mod reconnect_tests {
         };
 
         let client = Client::from_stream_with_factory(client_end1, factory).unwrap();
-        client.force_reconnect().await.unwrap();
+        let reconnect_task = tokio::spawn({
+            let client = client.clone();
+            async move { client.force_reconnect().await }
+        });
         timeout(TEST_STATE_TIMEOUT, ready.notified())
             .await
             .expect("timed out waiting for reconnect factory");
         let mut new_srv = new_server.lock().await.take().unwrap();
+        reply_ok(&mut new_srv).await;
+        reconnect_task.await.unwrap().unwrap();
 
         drop(server1);
         expect_read_loop_exits(&client, 1).await;
