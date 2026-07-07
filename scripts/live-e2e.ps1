@@ -51,6 +51,30 @@ $proc = [System.Diagnostics.Process]::Start($psi)
 $nextId = 0
 $tabId = $null
 $bridgeStopped = $false
+$stderrStarted = $false
+$stderrState = [hashtable]::Synchronized(@{
+    Buffer = [System.Text.StringBuilder]::new()
+    MaxChars = 65536
+    Sync = [object]::new()
+})
+$stderrSubscription = Register-ObjectEvent -InputObject $proc -EventName ErrorDataReceived -MessageData $stderrState -Action {
+    if ($null -eq $EventArgs.Data) {
+        return
+    }
+    $state = $Event.MessageData
+    [System.Threading.Monitor]::Enter($state.Sync)
+    try {
+        [void]$state.Buffer.AppendLine($EventArgs.Data)
+        if ($state.Buffer.Length -gt $state.MaxChars) {
+            $remove = $state.Buffer.Length - $state.MaxChars
+            [void]$state.Buffer.Remove(0, $remove)
+        }
+    } finally {
+        [System.Threading.Monitor]::Exit($state.Sync)
+    }
+}
+$proc.BeginErrorReadLine()
+$stderrStarted = $true
 
 function Stop-BridgeProcess {
     if ($script:bridgeStopped) {
@@ -64,13 +88,19 @@ function Stop-BridgeProcess {
 }
 
 function Read-BridgeStderr {
-    if (-not $script:proc) {
+    if (-not $script:stderrState) {
         return ""
     }
-    if ($script:proc.HasExited) {
-        return $script:proc.StandardError.ReadToEnd()
+    [System.Threading.Monitor]::Enter($script:stderrState.Sync)
+    try {
+        $text = $script:stderrState.Buffer.ToString().Trim()
+    } finally {
+        [System.Threading.Monitor]::Exit($script:stderrState.Sync)
     }
-    return "<stderr unavailable: bridge process is still running>"
+    if ($text) {
+        return $text
+    }
+    return "<stderr empty>"
 }
 
 function Invoke-Mcp {
@@ -185,5 +215,16 @@ try {
         }
     }
     Stop-BridgeProcess
+    if ($stderrStarted) {
+        try {
+            $proc.CancelErrorRead()
+        } catch {
+            # Process may have exited while the async stderr reader was closing.
+        }
+    }
+    if ($stderrSubscription) {
+        Unregister-Event -SubscriptionId $stderrSubscription.Id -ErrorAction SilentlyContinue
+        Remove-Job -Id $stderrSubscription.Id -Force -ErrorAction SilentlyContinue
+    }
     $proc.Dispose()
 }

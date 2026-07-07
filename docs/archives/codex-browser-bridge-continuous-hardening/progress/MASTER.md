@@ -34,7 +34,7 @@
 ## Current Status
 
 **Active Phase**: PR #15 finalization
-**Active Task**: Addressing remaining resource-use review findings after PR #15 returned green at `8a370af`: attach-failure tab lock cleanup and bounded PDF streaming.
+**Active Task**: Addressing remaining harness review findings after PR #15 returned green at `107d318`: asynchronous stderr draining for live E2E and a stronger stderr-flood timeout gate.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -92,6 +92,7 @@ adaptive:
 | 2026-07-07 | npm multi-client examples | S | 5/5 | 0 | Bundled `examples/` into the npm package and expanded postinstall hints for Claude Code, Cursor, OpenClaw, Hermes Agent, and skill-aware agents. |
 | 2026-07-07 | Agent surface and URL/release follow-ups | M | 5/5 | 2 | Added CI/release agent-surface drift checks, normalized URL validation before CDP/cookie use, made Cursor/Hermes examples expose the full 52-tool profile, strengthened release changelog/action-pin checks, and added npm publish rerun idempotence. |
 | 2026-07-07 | Resource-use follow-ups | M | 5/5 | 1 | Retired idle tab locks on attach failure and changed `codex_print_pdf` to bounded `ReturnAsStream`/`IO.read` processing with `IO.close`, plus mock tests for the stream sequence and PDF size budget. |
+| 2026-07-07 | Live E2E stderr drain | S | 5/5 | 0 | Drained redirected bridge stderr asynchronously and strengthened the fake live-E2E timeout harness so stderr flood must not block initialize/create-tab before the expected tool-call timeout. |
 
 ## Quick Status Commands
 
@@ -106,7 +107,7 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 
 ## Next Steps
 
-1. Push the latest resource-use follow-ups.
+1. Push the latest live E2E stderr-drain follow-up.
 2. Wait for PR #15 checks to return green again.
 3. Decide whether to undraft and merge PR #15.
 4. Configure npm Trusted Publisher before the first tokenless release publish.
@@ -142,3 +143,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | npm-multi-client-examples | Bundled examples into npm package contents and made postinstall hints point to local examples plus skill directories. |
 | 2026-07-07 | agent-surface-url-release | Addressed follow-up review findings for malformed URL inputs, agent docs/profile drift, full-profile packaged examples, release self-checks, and npm publish rerun behavior. |
 | 2026-07-07 | resource-use-followups | Addressed remaining resource-use findings for attach-failure tab lock cleanup and bounded streamed PDF generation. |
+| 2026-07-07 | live-e2e-stderr-drain | Addressed the remaining live-E2E harness stderr backpressure risk with async stderr draining and a stronger fake-bridge gate. |
