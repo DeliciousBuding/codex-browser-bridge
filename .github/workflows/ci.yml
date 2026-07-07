@@ -16,6 +16,7 @@ concurrency:
 jobs:
   rust:
     runs-on: windows-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
@@ -29,9 +30,11 @@ jobs:
         shell: bash
         run: cargo clippy --locked -- -D warnings
       - name: Test
+        timeout-minutes: 10
         shell: bash
         run: cargo test --locked
       - name: Test live E2E timeout cleanup
+        timeout-minutes: 3
         shell: pwsh
         run: ./scripts/test-live-e2e-timeout.ps1
       - name: Install cargo-llvm-cov
@@ -41,6 +44,7 @@ jobs:
         with:
           tool: cargo-llvm-cov
       - name: Coverage
+        timeout-minutes: 10
         shell: bash
         run: |
           rustup component add llvm-tools-preview
@@ -60,6 +64,7 @@ jobs:
 
   npm:
     runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
@@ -68,6 +73,9 @@ jobs:
       - name: Check GitHub Action pins
         shell: bash
         run: node scripts/check-actions-pinned.js
+      - name: Check release automation contract
+        shell: bash
+        run: node scripts/check-release-contract.js
       - name: Check agent surface docs
         shell: bash
         run: node scripts/check-agent-surface.js
@@ -88,12 +96,14 @@ jobs:
     # The shipped binary stays Windows-only; this job only exercises
     # platform-agnostic logic (reconnect state machine, frame round-trip).
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
         with:
           components: clippy
       - name: Test non-Windows harness
+        timeout-minutes: 10
         shell: bash
         run: cargo test --locked
       - name: Clippy non-Windows harness

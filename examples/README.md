@@ -22,9 +22,17 @@ directory is the only location `codex_file_input` can upload from.
 Use the config as-is after replacing `YOUR_USER`. The binary must be in `PATH`
 or use an absolute path:
 
-```json
-"command": "D:\\Tools\\codex-browser-bridge.exe"
+```powershell
+where.exe codex-browser-bridge
 ```
+
+```json
+"command": "C:\\Users\\YOUR_USER\\AppData\\Roaming\\npm\\codex-browser-bridge.cmd"
+```
+
+GUI-launched clients do not always inherit the same `PATH` as your terminal. If
+the client reports spawn failures, paste the full `.cmd` path returned by
+`where.exe`.
 
 ### WSL
 The npm package is Windows-only (`os: win32`), so `npm i -g` from a Linux WSL

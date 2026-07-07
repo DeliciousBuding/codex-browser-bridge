@@ -126,17 +126,22 @@ function resolveWindowsArch(platform, cpu) {
 function logInstallHints(root, log) {
   const skillDir = path.join(root, "skills", "codex-browser");
   const examplesDir = path.join(root, "examples");
+  const escapedSkillDir = skillDir.replace(/"/g, '\\"');
   if (fs.existsSync(skillDir)) {
     log(
       [
         `Skill: ${skillDir}`,
-        "  -> Claude Code: copy or symlink to ~/.claude/skills/",
+        `  -> Claude Code (PowerShell): Copy-Item -Recurse -Force "${escapedSkillDir}" "$env:USERPROFILE\\.claude\\skills\\"`,
+        "  -> Claude Code (Git Bash/WSL): copy or symlink to ~/.claude/skills/",
         "  -> Other skill-aware agents: copy or symlink into that agent's skills directory",
       ].join("\n")
     );
   }
   if (fs.existsSync(examplesDir)) {
-    log(`MCP config examples: ${examplesDir} (Claude Code, Cursor, OpenClaw, Hermes Agent)`);
+    log(
+      `MCP config examples: ${examplesDir} (Claude Code, Cursor, OpenClaw, Hermes Agent)\n` +
+        "  -> If a GUI client cannot spawn the server, run: where.exe codex-browser-bridge"
+    );
   }
 }
 

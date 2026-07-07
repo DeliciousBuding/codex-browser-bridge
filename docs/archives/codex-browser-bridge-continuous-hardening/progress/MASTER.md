@@ -34,7 +34,7 @@
 ## Current Status
 
 **Active Phase**: PR #15 finalization
-**Active Task**: Addressing PR #15 npm CI portability after tarball script hygiene: package manifest inspection must work on Windows Git Bash and fail fast on stale package backups.
+**Active Task**: PR #15 final hardening follow-ups: enforce release Trusted Publishing/rerun contracts and tighten Windows multi-client install guidance.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -95,6 +95,7 @@ adaptive:
 | 2026-07-07 | Live E2E stderr drain | S | 5/5 | 0 | Drained redirected bridge stderr asynchronously and strengthened the fake live-E2E timeout harness so stderr flood must not block initialize/create-tab before the expected tool-call timeout. |
 | 2026-07-07 | npm tarball script hygiene | S | 5/5 | 0 | Made `prepack` stage a publish-only package manifest containing only `postinstall`, restored the dev manifest in `postpack`, and made package checks inspect the real tarball manifest. |
 | 2026-07-07 | npm tarball manifest portability | S | 5/5 | 1 | Made packed manifest extraction use a tarball-relative path for Windows Git Bash portability and added fail-fast handling plus tests for stale publish manifest backups. |
+| 2026-07-07 | Release contract and agent UX follow-ups | M | 5/5 | 4 | Added executable release contract checks for Trusted Publishing, main-branch manual dispatch, same-version checksum drift, npm 404 handling, and CI/release timeouts; clarified Windows skill install, GUI client PATH, upload-base, and zh-CN resource/prompt docs. |
 
 ## Quick Status Commands
 
@@ -148,3 +149,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | live-e2e-stderr-drain | Addressed the remaining live-E2E harness stderr backpressure risk with async stderr draining and a stronger fake-bridge gate. |
 | 2026-07-07 | npm-tarball-script-hygiene | Addressed published npm package script hygiene by stripping dev-only scripts from the generated tarball manifest and checking the packed manifest contents. |
 | 2026-07-07 | npm-tarball-manifest-portability | Addressed Windows Git Bash tar path handling in the npm package checker and hardened stale package-backup handling. |
+| 2026-07-07 | release-contract-agent-ux | Addressed subagent findings for same-version release rerun checksum drift, workflow_dispatch ref safety, stale release-order docs, CI timeout bounds, Windows skill install commands, GUI-client PATH failures, and zh-CN resources/prompts docs. |

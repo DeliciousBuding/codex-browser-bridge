@@ -42,15 +42,17 @@ Use only sections that have entries. Keep pending changes under `Unreleased`, th
 The release workflow must:
 
 1. Validate the annotated SemVer tag, version files, dated changelog section, and exact tag commit SHA.
+   Manual release dispatch must run from the same branch as `main`; dispatching the workflow from another branch or fork ref is rejected before any publish job receives OIDC credentials.
 2. Check Windows Rust, clippy, Rust tests, Ubuntu mock harness tests, npm tests, and npm package contents from that exact SHA before creating assets.
 3. Build Windows x64 and arm64 binaries.
 4. Generate `checksums.txt`.
 5. Generate GitHub artifact attestations for the Windows binaries and checksum file.
 6. Stage the checksum file as a workflow artifact for npm package embedding.
-7. Create or update a draft GitHub Release from the changelog section and upload assets with clobber semantics so reruns can recover from partial failures.
-8. Publish the GitHub Release before npm publish so the npm installer can download public binary assets as soon as the package is visible.
-9. Embed release checksums into the npm package and bundle `skills/codex-browser/SKILL.md` plus `examples/` before `npm pack` or `npm publish`.
-10. Publish npm via Trusted Publishing/OIDC, with no long-lived npm write token in GitHub secrets.
+7. If the npm version is already published, compare the current `checksums.txt` with the published npm package's embedded checksums before uploading release assets. Same-version reruns may only clobber GitHub Release assets when the binary hashes still match the package users already install.
+8. Create or update a draft GitHub Release from the changelog section and upload assets with clobber semantics so reruns can recover from partial failures.
+9. Publish the GitHub Release before npm publish so the npm installer can download public binary assets as soon as the package is visible.
+10. Embed release checksums into the npm package and bundle `skills/codex-browser/SKILL.md` plus `examples/` before `npm pack` or `npm publish`.
+11. Publish npm via Trusted Publishing/OIDC, with no long-lived npm write token in GitHub secrets.
 
 ## npm Trusted Publishing
 
@@ -60,7 +62,11 @@ The `publish-npm` job uses npm Trusted Publishing. Before the first release, con
 - workflow filename: `release.yml`
 - allowed action: `npm publish`
 
-The workflow uses GitHub-hosted runners, `id-token: write`, Node 24, npm >= 11.5.1, and npm's OIDC authentication path. Do not add `NODE_AUTH_TOKEN` back to the publish step unless the project intentionally reverts to token-based publishing and updates this document at the same time.
+The workflow uses GitHub-hosted runners, `id-token: write`, Node 24, npm >= 11.5.1, and npm's OIDC authentication path. `actions/setup-node` steps in the release workflow set `package-manager-cache: false` so release and publish jobs do not restore dependency caches. Do not add `NODE_AUTH_TOKEN` back to the publish step unless the project intentionally reverts to token-based publishing and updates this document at the same time.
+
+If npm publish fails after the GitHub Release is public, fix the publishing blocker and rerun the same release workflow from `main`. Do not rebuild or replace binaries manually. The rerun guard compares the already published npm package checksums, when present, against the current release assets before allowing `gh release upload --clobber`.
+
+CI and release jobs use explicit `timeout-minutes`, with tighter step timeouts around Rust tests, coverage, and the live E2E timeout harness. Keep those limits in place when editing workflows so a harness regression fails instead of consuming the default GitHub runner timeout.
 
 ## Provenance and Verification
 
@@ -77,6 +83,9 @@ Run before tagging:
 cargo fmt --check
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
+node scripts/check-actions-pinned.js
+node scripts/check-release-contract.js
+node scripts/check-agent-surface.js
 cd npm && npm test
 ```
 

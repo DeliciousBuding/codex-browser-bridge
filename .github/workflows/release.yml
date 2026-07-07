@@ -33,6 +33,10 @@ jobs:
         shell: bash
         run: node scripts/check-actions-pinned.js
 
+      - name: Check release automation contract
+        shell: bash
+        run: node scripts/check-release-contract.js
+
       - name: Validate release tag and contents
         id: validate
         shell: bash
@@ -40,6 +44,10 @@ jobs:
           RELEASE_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.ref }}" != "refs/heads/main" ]]; then
+            echo "Manual releases must be dispatched from the main branch workflow, got ${{ github.ref }}" >&2
+            exit 1
+          fi
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid release tag: $TAG" >&2
             exit 1
@@ -98,6 +106,7 @@ jobs:
   test:
     needs: validate-release
     runs-on: windows-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -105,6 +114,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "22"
+          package-manager-cache: false
       - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
         with:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
@@ -116,12 +126,14 @@ jobs:
         shell: bash
         run: cargo clippy --locked -- -D warnings
       - name: Test Rust
+        timeout-minutes: 10
         shell: bash
         run: cargo test --locked
       - name: Check agent surface docs
         shell: bash
         run: node scripts/check-agent-surface.js
       - name: Test live E2E timeout cleanup
+        timeout-minutes: 3
         shell: pwsh
         run: ./scripts/test-live-e2e-timeout.ps1
       - name: Build x64
@@ -144,6 +156,7 @@ jobs:
   test-lib:
     needs: validate-release
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -152,6 +165,7 @@ jobs:
         with:
           components: clippy
       - name: Test non-Windows harness
+        timeout-minutes: 10
         shell: bash
         run: cargo test --locked
       - name: Clippy non-Windows harness
@@ -161,6 +175,7 @@ jobs:
   release:
     needs: [validate-release, test, test-lib]
     runs-on: windows-latest
+    timeout-minutes: 30
     permissions:
       contents: write
       id-token: write
@@ -176,6 +191,11 @@ jobs:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
           components: clippy
 
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
       - name: Build
         shell: bash
         run: |
@@ -188,6 +208,52 @@ jobs:
       - name: Generate checksums
         shell: bash
         run: sha256sum codex-browser-bridge*.exe > checksums.txt
+
+      - name: Guard published npm checksum drift
+        shell: bash
+        env:
+          PACKAGE_NAME: "@delicious233/codex-browser-bridge"
+          VERSION: ${{ needs.validate-release.outputs.version }}
+        run: |
+          if ! npm view "$PACKAGE_NAME@$VERSION" version >/tmp/npm-version.txt 2>/tmp/npm-view.err; then
+            if ! grep -Eq 'E404|404 Not Found|is not in this registry' /tmp/npm-view.err; then
+              cat /tmp/npm-view.err >&2
+              exit 1
+            fi
+            echo "$PACKAGE_NAME@$VERSION is not published yet; release assets may be staged."
+            exit 0
+          fi
+          PACK_DIR="$(mktemp -d)"
+          npm pack "$PACKAGE_NAME@$VERSION" --json --pack-destination "$PACK_DIR" > "$PACK_DIR/pack.json"
+          node - "$PACK_DIR" <<'NODE'
+          const { execFileSync } = require("child_process");
+          const fs = require("fs");
+          const path = require("path");
+
+          const packDir = process.argv[2];
+          const pack = JSON.parse(fs.readFileSync(path.join(packDir, "pack.json"), "utf8"))[0];
+          const published = JSON.parse(
+            execFileSync("tar", ["-xOf", pack.filename, "package/checksums.json"], {
+              cwd: packDir,
+              encoding: "utf8",
+              stdio: ["ignore", "pipe", "inherit"],
+            })
+          );
+          const current = {};
+          for (const line of fs.readFileSync("checksums.txt", "utf8").split(/\r?\n/)) {
+            const match = line.trim().match(/^([a-fA-F0-9]{64})\s+[*]?(.+)$/);
+            if (match) current[match[2].trim()] = match[1].toLowerCase();
+          }
+          const publishedFiles = published.files || {};
+          for (const file of ["codex-browser-bridge.exe", "codex-browser-bridge-arm64.exe"]) {
+            if (!publishedFiles[file]) throw new Error(`published npm package is missing checksum for ${file}`);
+            if (publishedFiles[file] !== current[file]) {
+              throw new Error(
+                `refusing to clobber release asset ${file}: published npm checksum ${publishedFiles[file]} does not match current build ${current[file] || "<missing>"}`
+              );
+            }
+          }
+          NODE
 
       - name: Upload release checksums
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -252,6 +318,7 @@ jobs:
   publish-npm:
     needs: [validate-release, release]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
@@ -306,7 +373,7 @@ jobs:
           VERSION: ${{ needs.validate-release.outputs.version }}
           DIST_TAG: ${{ steps.npm-version.outputs.dist_tag }}
         run: |
-          if npm view "$PACKAGE_NAME@$VERSION" version >/tmp/npm-version.txt 2>/dev/null; then
+          if npm view "$PACKAGE_NAME@$VERSION" version >/tmp/npm-version.txt 2>/tmp/npm-view.err; then
             PUBLISHED_VERSION="$(cat /tmp/npm-version.txt)"
             if [ "$PUBLISHED_VERSION" != "$VERSION" ]; then
               echo "npm returned unexpected version $PUBLISHED_VERSION for $PACKAGE_NAME@$VERSION" >&2
@@ -321,6 +388,10 @@ jobs:
             echo "published=true" >> "$GITHUB_OUTPUT"
             echo "$PACKAGE_NAME@$VERSION already published with $DIST_TAG; skipping npm publish."
           else
+            if ! grep -Eq 'E404|404 Not Found|is not in this registry' /tmp/npm-view.err; then
+              cat /tmp/npm-view.err >&2
+              exit 1
+            fi
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 

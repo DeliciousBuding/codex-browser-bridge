@@ -84,6 +84,12 @@ Open https://example.com and take a screenshot.
 Find the login button and click it.
 ```
 
+If your MCP client is launched from a GUI and cannot find the command, run
+`where.exe codex-browser-bridge` in PowerShell and paste the returned
+`codex-browser-bridge.cmd` path into `command`. File upload requires
+`CODEX_BRIDGE_UPLOAD_BASE`; use the templates in [examples/](examples/) for a
+full config.
+
 For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/). The npm
 package also ships these examples under `examples/`.
 
@@ -93,11 +99,21 @@ The npm package includes a skill that teaches agents how to use all 52
 tools effectively. After install, copy it to your skills directory:
 
 ```bash
-# Global install → Claude Code skills
+# Git Bash / WSL: global install → Claude Code skills
 cp -r "$(npm root -g)/@delicious233/codex-browser-bridge/skills/codex-browser" ~/.claude/skills/
 
-# Or into a local project
+# Git Bash / WSL: or into a local project
 cp -r node_modules/@delicious233/codex-browser-bridge/skills/codex-browser .claude/skills/
+```
+
+```powershell
+# PowerShell: global install -> Claude Code skills
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills" | Out-Null
+Copy-Item -Recurse -Force "$env:APPDATA\npm\node_modules\@delicious233\codex-browser-bridge\skills\codex-browser" "$env:USERPROFILE\.claude\skills\"
+
+# PowerShell: or into a local project
+New-Item -ItemType Directory -Force ".claude\skills" | Out-Null
+Copy-Item -Recurse -Force "node_modules\@delicious233\codex-browser-bridge\skills\codex-browser" ".claude\skills\"
 ```
 
 **👤 For agents reading this:** to self-install, run the copy command above

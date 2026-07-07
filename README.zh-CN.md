@@ -84,9 +84,14 @@ npm i -g @delicious233/codex-browser-bridge
 找到登录按钮并点击它。
 ```
 
+如果 MCP 客户端从 GUI 启动后找不到命令，先在 PowerShell 运行
+`where.exe codex-browser-bridge`，再把返回的 `codex-browser-bridge.cmd`
+完整路径填到 `command`。文件上传需要设置 `CODEX_BRIDGE_UPLOAD_BASE`；
+[examples/](examples/) 里有完整配置模板。
+
 Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。npm 包内也会随包发布这些 `examples/` 模板。
 
-> 💡 **Agent skill 已内置。** 仓库 [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) 包含 LLM agent 使用全部 52 个工具的操作手册。将其 symlink 或复制到 agent 的 skills 目录即可（`~/.claude/skills/`、`~/.codex/skills/` 等）。npm 包内的 `examples/` 目录包含多客户端 MCP 配置模板。
+> 💡 **Agent skill 已内置。** 仓库 [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) 包含 LLM agent 使用全部 52 个工具的操作手册。PowerShell 用户可将 npm 包内 `skills\codex-browser` 复制到 `%USERPROFILE%\.claude\skills\`；Git Bash/WSL 用户可复制到 `~/.claude/skills/`。npm 包内的 `examples/` 目录包含多客户端 MCP 配置模板。
 
 ## 配置
 
@@ -128,6 +133,8 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 - `CODEX_BRIDGE_MAX_IMAGE_BYTES` 限制每个 base64 image content，默认 `3145728`。
 - 两者都有 8 MiB 硬上限。文本截断会带原始字节数标记；超大图片返回文本摘要，不返回无效的半截 base64。
 - 也可以在 `.codex-browser-bridge.toml` 中使用 `max_text_bytes` / `max_image_bytes`，或用 CLI 参数 `--max-text-bytes` / `--max-image-bytes`。
+
+支持 MCP resources 的客户端可以读取 `codex://tabs`，它只返回当前 bridge session 拥有的标签页，不是所有 Chrome 标签页。支持 MCP prompts 的客户端还会看到 `login` 和 `extract-table` 两个提示模板。
 
 ## 全部 52 个 MCP 工具
 

@@ -57,6 +57,10 @@ Release 时遵循 `docs/release-process.md`：确保 `Cargo.toml` 和 `npm/packa
 
 GitHub workflow 中的外部 `uses:` 必须固定到完整 commit SHA，并保留相邻版本注释；修改 workflow 后运行 `node scripts/check-actions-pinned.js`。
 
+Release/npm 发布自动化必须保持 Trusted Publishing 合同：`release.yml` 使用 GitHub-hosted runner、`id-token: write`、npm >= 11.5.1、无 `NODE_AUTH_TOKEN`、`actions/setup-node` 禁用 `package-manager-cache`，并在文档中记录 npm trusted publisher 的 `release.yml` / `npm publish` 配置。修改 release workflow、`npm/package.json` 或发布文档后运行 `node scripts/check-release-contract.js`。
+
+CI/release job 必须设置 `timeout-minutes`，长耗时测试步骤（Rust tests、coverage、live E2E timeout harness）也要有步骤级 timeout，避免 harness 回归占满 GitHub runner。
+
 工具、profile、README、skill、examples 或 npm package 清单变更后运行 `node scripts/check-agent-surface.js`，防止 agent 面文档和实际 Rust 工具注册 drift。
 
 ## 源码结构
