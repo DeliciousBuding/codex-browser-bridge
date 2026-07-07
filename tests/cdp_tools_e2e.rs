@@ -7,7 +7,10 @@ use tokio::io::{duplex, DuplexStream};
 use tokio::time::{timeout, Duration};
 
 async fn next_request(server: &mut DuplexStream) -> Value {
-    let frame = protocol::decode_frame(server).await.unwrap();
+    let frame = timeout(Duration::from_secs(2), protocol::decode_frame(server))
+        .await
+        .expect("timed out waiting for browser request")
+        .unwrap();
     serde_json::from_slice(&frame).unwrap()
 }
 
@@ -15,6 +18,15 @@ async fn reply_result(server: &mut DuplexStream, request: &Value, result: Value)
     protocol::encode_frame(server, &json!({"id": request["id"], "result": result}))
         .await
         .unwrap();
+}
+
+async fn reply_error(server: &mut DuplexStream, request: &Value, code: i64, message: &str) {
+    protocol::encode_frame(
+        server,
+        &json!({"id": request["id"], "error": {"code": code, "message": message}}),
+    )
+    .await
+    .unwrap();
 }
 
 fn test_client() -> (Client, DuplexStream) {
@@ -152,4 +164,38 @@ async fn print_pdf_uses_bounded_stream_and_closes_handle() {
     reply_result(&mut server, &close, json!({})).await;
 
     assert_eq!(pdf_task.await.unwrap().unwrap(), 12);
+}
+
+#[tokio::test]
+async fn print_pdf_closes_stream_when_read_fails() {
+    let (client, mut server) = test_client();
+
+    let pdf_task = tokio::spawn({
+        let client = client.clone();
+        async move { browser::print_pdf(&client, "7").await }
+    });
+
+    let detach = next_request(&mut server).await;
+    assert_eq!(detach["method"], "detach");
+    reply_result(&mut server, &detach, json!({})).await;
+
+    let attach = next_request(&mut server).await;
+    assert_eq!(attach["method"], "attach");
+    reply_result(&mut server, &attach, json!({})).await;
+
+    let print = next_request(&mut server).await;
+    assert_eq!(print["params"]["method"], "Page.printToPDF");
+    reply_result(&mut server, &print, json!({"stream":"pdf-stream"})).await;
+
+    let read = next_request(&mut server).await;
+    assert_eq!(read["params"]["method"], "IO.read");
+    reply_error(&mut server, &read, -32000, "stream closed").await;
+
+    let close = next_request(&mut server).await;
+    assert_eq!(close["params"]["method"], "IO.close");
+    assert_eq!(close["params"]["commandParams"]["handle"], "pdf-stream");
+    reply_result(&mut server, &close, json!({})).await;
+
+    let err = pdf_task.await.unwrap().unwrap_err();
+    assert!(err.to_string().contains("stream closed"), "got: {err}");
 }

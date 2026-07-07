@@ -36,6 +36,25 @@ function indentedBlock(lines, startPattern, nextPeerPattern) {
   return lines.slice(start, end).join("\n");
 }
 
+function collectRunBlocks(lines) {
+  const blocks = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(/^(\s*)run:\s*(.*)$/);
+    if (!match) continue;
+    const indent = match[1].length;
+    const block = [match[2]];
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const line = lines[cursor];
+      const lineIndent = line.match(/^ */)[0].length;
+      if (line.trim() && lineIndent <= indent) break;
+      block.push(line);
+      index = cursor;
+    }
+    blocks.push(block.join("\n"));
+  }
+  return blocks;
+}
+
 function countMatches(text, pattern) {
   return [...text.matchAll(pattern)].length;
 }
@@ -43,6 +62,7 @@ function countMatches(text, pattern) {
 const workflow = read(releaseWorkflowPath);
 const workflowLines = workflow.split(/\r?\n/);
 const ciWorkflow = read(path.join(root, ".github", "workflows", "ci.yml"));
+const supplyChainWorkflow = read(path.join(root, ".github", "workflows", "supply-chain.yml"));
 const docs = read(releaseDocsPath);
 const pkg = JSON.parse(read(packageJsonPath));
 
@@ -83,6 +103,29 @@ if (countMatches(workflow, /E404\|404 Not Found\|is not in this registry/g) < 2)
   fail("release.yml must treat only npm 404 results as unpublished in release and publish jobs");
 }
 
+const validateIndex = workflow.indexOf("Validate release tag input");
+const firstCheckoutIndex = workflow.indexOf("actions/checkout@");
+const firstRepoScriptIndex = workflow.indexOf("node scripts/");
+if (validateIndex < 0) {
+  fail("release.yml must validate the release tag before checkout");
+}
+if (validateIndex >= 0 && firstCheckoutIndex >= 0 && validateIndex > firstCheckoutIndex) {
+  fail("release.yml must not checkout an unvalidated manual release tag");
+}
+if (validateIndex >= 0 && firstRepoScriptIndex >= 0 && validateIndex > firstRepoScriptIndex) {
+  fail("release.yml must not run repo-local scripts before validating the release tag");
+}
+if (/ref:\s*\$\{\{\s*(github\.event\.inputs|inputs\.)/.test(workflow)) {
+  fail("release.yml checkout refs must come from validated step outputs, not raw workflow inputs");
+}
+
+for (const block of collectRunBlocks(workflowLines)) {
+  if (/\$\{\{\s*(github\.event\.inputs|inputs\.|github\.ref(?:_name)?\b)/.test(block)) {
+    fail("release.yml run blocks must route workflow inputs/ref context through env vars first");
+    break;
+  }
+}
+
 const setupNodeCount = countMatches(workflow, /actions\/setup-node@[0-9a-f]{40}/g);
 const setupNodeNoCacheCount = countMatches(workflow, /package-manager-cache:\s*false/g);
 if (setupNodeNoCacheCount < setupNodeCount) {
@@ -92,6 +135,7 @@ if (setupNodeNoCacheCount < setupNodeCount) {
 for (const [name, text, jobs] of [
   ["release.yml", workflow, ["test", "test-lib", "release", "publish-npm"]],
   ["ci.yml", ciWorkflow, ["rust", "npm", "test-lib"]],
+  ["supply-chain.yml", supplyChainWorkflow, ["cargo-deny"]],
 ]) {
   for (const job of jobs) {
     if (new RegExp(`\\n  ${job}:\\n(?:    .+\\n)*?    runs-on:[^\\n]+\\n(?:    .+\\n)*?    timeout-minutes:`).test(text)) {

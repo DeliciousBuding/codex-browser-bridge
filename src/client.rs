@@ -70,6 +70,11 @@ struct ClientInner {
     /// Active CDP event subscriptions. Routed by read_loop for frames with a `method` and no `id`.
     event_subs: Mutex<Vec<EventSubscription>>,
     next_sub_id: AtomicU64,
+    /// Monotonic generation for the active pipe. Read loops from stale
+    /// generations must not tear down a newer reconnect.
+    connection_epoch: AtomicU64,
+    #[cfg(test)]
+    read_loop_exits: AtomicU64,
     /// Connection health. Set false by the read loop on exit; set true after a
     /// successful reconnect. Read with Acquire, written with Release.
     alive: AtomicBool,
@@ -103,13 +108,16 @@ impl Client {
                 attached_tabs: Mutex::new(HashMap::new()),
                 event_subs: Mutex::new(Vec::new()),
                 next_sub_id: AtomicU64::new(1),
+                connection_epoch: AtomicU64::new(1),
+                #[cfg(test)]
+                read_loop_exits: AtomicU64::new(0),
                 alive: AtomicBool::new(true),
                 reconnect_lock: Mutex::new(()),
                 reconnect_cooldown_until: Mutex::new(None),
                 connection_factory: factory,
             }),
         };
-        client.spawn_read_loop(reader);
+        client.spawn_read_loop(reader, 1);
         Ok(client)
     }
 
@@ -280,13 +288,14 @@ impl Client {
             match (self.inner.connection_factory)().await {
                 Ok(stream) => {
                     let (reader, writer) = split(stream);
+                    let epoch = self.inner.connection_epoch.fetch_add(1, Ordering::AcqRel) + 1;
                     *self.inner.writer.lock().await = Some(writer);
                     // New connection has no CDP debugger sessions — drop the cache so
                     // execute_cdp falls back to a full attach instead of trusting a stale entry.
                     self.inner.attached_tabs.lock().await.clear();
                     *self.inner.reconnect_cooldown_until.lock().await = None;
                     self.inner.alive.store(true, Ordering::Release);
-                    self.spawn_read_loop(reader);
+                    self.spawn_read_loop(reader, epoch);
                     tracing::info!(attempt = attempt + 1, "bridge reconnected");
                     return Ok(());
                 }
@@ -306,7 +315,7 @@ impl Client {
         )))
     }
 
-    fn spawn_read_loop(&self, mut reader: ReadHalf<PipeStream>) {
+    fn spawn_read_loop(&self, mut reader: ReadHalf<PipeStream>, epoch: u64) {
         let inner = Arc::clone(&self.inner);
         tokio::spawn(async move {
             loop {
@@ -326,17 +335,30 @@ impl Client {
                 // (e.g. Network.requestWillBeSent vs Network.responseReceived).
                 if value.get("id").is_none() {
                     if let Some(method) = value.get("method").and_then(|m| m.as_str()) {
-                        let matched: Vec<mpsc::Sender<Value>> = inner
-                            .event_subs
-                            .lock()
-                            .await
-                            .iter()
-                            .filter(|s| method.starts_with(s.method_prefix.as_str()))
-                            .map(|s| s.sender.clone())
-                            .collect();
+                        let matched: Vec<mpsc::Sender<Value>> = {
+                            let mut subs = inner.event_subs.lock().await;
+                            subs.retain(|s| !s.sender.is_closed());
+                            subs.iter()
+                                .filter(|s| method.starts_with(s.method_prefix.as_str()))
+                                .map(|s| s.sender.clone())
+                                .collect()
+                        };
+                        let mut closed_sender = false;
                         for tx in matched {
                             // try_send: never block the read loop on a slow consumer
-                            let _ = tx.try_send(value.clone());
+                            if matches!(
+                                tx.try_send(value.clone()),
+                                Err(mpsc::error::TrySendError::Closed(_))
+                            ) {
+                                closed_sender = true;
+                            }
+                        }
+                        if closed_sender {
+                            inner
+                                .event_subs
+                                .lock()
+                                .await
+                                .retain(|s| !s.sender.is_closed());
                         }
                     }
                     continue;
@@ -353,6 +375,15 @@ impl Client {
                 }
             }
             // ── read loop exited: the connection is dead ──
+            #[cfg(test)]
+            inner.read_loop_exits.fetch_add(1, Ordering::SeqCst);
+            if inner.connection_epoch.load(Ordering::Acquire) != epoch {
+                tracing::debug!(
+                    epoch,
+                    "stale bridge read loop exited; current connection unchanged"
+                );
+                return;
+            }
             tracing::warn!("bridge read loop exited; marking connection dead");
             inner.alive.store(false, Ordering::Release);
             // Drop pending waiters' senders — they return Connection errors via the
@@ -431,11 +462,10 @@ impl Client {
                 .await
             {
                 Ok(raw) => return Ok(raw),
-                Err(_err) => {
-                    // Any error from sticky path: invalidate cache and fall through to full re-attach.
-                    // This avoids persistent-failure loops when stale sessions produce unrecognized errors.
+                Err(err) if is_session_invalid_error(&err) => {
                     self.inner.attached_tabs.lock().await.remove(&tab_id);
                 }
+                Err(err) => return Err(err),
             }
         }
 
@@ -577,6 +607,18 @@ impl Client {
     #[allow(dead_code)]
     pub(crate) async fn tab_lock_len_for_test(&self) -> usize {
         self.inner.tab_locks.lock().await.len()
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) async fn event_sub_len_for_test(&self) -> usize {
+        self.inner.event_subs.lock().await.len()
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn read_loop_exit_count_for_test(&self) -> u64 {
+        self.inner.read_loop_exits.load(Ordering::SeqCst)
     }
 
     async fn close_for_health_check_failure(&self) {
@@ -732,16 +774,25 @@ mod reconnect_tests {
     use tokio::io::{duplex, AsyncWriteExt, DuplexStream};
     use tokio::sync::Notify;
 
+    const TEST_STATE_TIMEOUT: Duration = Duration::from_secs(2);
+
     async fn test_client(buf: usize) -> (Client, DuplexStream) {
         let (client_end, server_end) = duplex(buf);
         let client = Client::from_stream(client_end).unwrap();
         (client, server_end)
     }
 
+    async fn next_request(server: &mut DuplexStream) -> Value {
+        let frame = timeout(TEST_STATE_TIMEOUT, decode_frame(server))
+            .await
+            .expect("timed out waiting for client request")
+            .unwrap();
+        serde_json::from_slice(&frame).unwrap()
+    }
+
     /// Read the next request frame off the server side and reply with `result`.
     async fn reply_ok(server: &mut DuplexStream) {
-        let frame = decode_frame(server).await.unwrap();
-        let req: Value = serde_json::from_slice(&frame).unwrap();
+        let req = next_request(server).await;
         let id = req["id"].as_u64().unwrap();
         encode_frame(server, &json!({"id": id, "result": {}}))
             .await
@@ -749,8 +800,7 @@ mod reconnect_tests {
     }
 
     async fn reply_ok_and_return_request(server: &mut DuplexStream) -> Value {
-        let frame = decode_frame(server).await.unwrap();
-        let req: Value = serde_json::from_slice(&frame).unwrap();
+        let req = next_request(server).await;
         let id = req["id"].as_u64().unwrap();
         encode_frame(server, &json!({"id": id, "result": {}}))
             .await
@@ -759,8 +809,7 @@ mod reconnect_tests {
     }
 
     async fn reply_error(server: &mut DuplexStream, code: i64, message: &str) {
-        let frame = decode_frame(server).await.unwrap();
-        let req: Value = serde_json::from_slice(&frame).unwrap();
+        let req = next_request(server).await;
         let id = req["id"].as_u64().unwrap();
         encode_frame(
             server,
@@ -770,6 +819,52 @@ mod reconnect_tests {
         .unwrap();
     }
 
+    async fn wait_until<F, Fut>(label: &str, mut condition: F)
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = bool>,
+    {
+        timeout(TEST_STATE_TIMEOUT, async {
+            loop {
+                if condition().await {
+                    return;
+                }
+                tokio::task::yield_now().await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {label}"));
+    }
+
+    async fn expect_pending_len(client: &Client, expected: usize) {
+        wait_until(&format!("pending len {expected}"), || async {
+            client.pending_len_for_test().await == expected
+        })
+        .await;
+    }
+
+    async fn expect_event_sub_len(client: &Client, expected: usize) {
+        wait_until(&format!("event subscription len {expected}"), || async {
+            client.event_sub_len_for_test().await == expected
+        })
+        .await;
+    }
+
+    async fn expect_alive(client: &Client, expected: bool) {
+        wait_until(&format!("alive={expected}"), || async {
+            client.is_alive() == expected
+        })
+        .await;
+    }
+
+    async fn expect_read_loop_exits(client: &Client, expected: u64) {
+        wait_until(&format!("read loop exits >= {expected}"), || async {
+            client.read_loop_exit_count_for_test() >= expected
+        })
+        .await;
+    }
+
     #[tokio::test]
     async fn normal_roundtrip_tracks_pending() {
         let (client, mut server) = test_client(4096).await;
@@ -777,14 +872,12 @@ mod reconnect_tests {
             let client = client.clone();
             async move { client.send_request("getInfo", None).await }
         });
-        tokio::task::yield_now().await;
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        assert_eq!(client.pending_len_for_test().await, 1);
+        expect_pending_len(&client, 1).await;
 
         reply_ok(&mut server).await;
         let result = handle.await.unwrap();
         assert!(result.is_ok());
-        assert_eq!(client.pending_len_for_test().await, 0);
+        expect_pending_len(&client, 0).await;
     }
 
     #[tokio::test]
@@ -809,14 +902,13 @@ mod reconnect_tests {
         let attach = reply_ok_and_return_request(&mut server).await;
         assert_eq!(attach["method"], "attach");
 
-        let frame = decode_frame(&mut server).await.unwrap();
-        let req: Value = serde_json::from_slice(&frame).unwrap();
+        let req = next_request(&mut server).await;
         assert_eq!(req["method"], "executeCdp");
-        assert_eq!(client.pending_len_for_test().await, 1);
+        expect_pending_len(&client, 1).await;
 
         let err = handle.await.unwrap().unwrap_err();
         assert!(matches!(err, BridgeError::Timeout(_)), "got: {err}");
-        assert_eq!(client.pending_len_for_test().await, 0);
+        expect_pending_len(&client, 0).await;
     }
 
     #[tokio::test]
@@ -830,19 +922,47 @@ mod reconnect_tests {
                     .await
             }
         });
-        tokio::task::yield_now().await;
-        assert_eq!(client.pending_len_for_test().await, 1);
+        expect_pending_len(&client, 1).await;
 
         // Kill the pipe: shut down + drop the server half.
         server.shutdown().await.ok();
         drop(server);
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        expect_alive(&client, false).await;
 
         assert!(!client.is_alive(), "connection should be dead");
-        assert_eq!(client.pending_len_for_test().await, 0, "pending must drain");
+        expect_pending_len(&client, 0).await;
 
         let err = handle.await.unwrap().unwrap_err();
         assert!(matches!(err, BridgeError::Connection(_)), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn server_drop_clears_event_subscriptions() {
+        let (client, server) = test_client(4096).await;
+        let (_sub_id, _rx) = client.subscribe_events("Network.", 8).await;
+        expect_event_sub_len(&client, 1).await;
+
+        drop(server);
+
+        expect_alive(&client, false).await;
+        expect_event_sub_len(&client, 0).await;
+    }
+
+    #[tokio::test]
+    async fn closed_event_receivers_are_pruned_on_next_event() {
+        let (client, mut server) = test_client(4096).await;
+        let (_sub_id, rx) = client.subscribe_events("Network.", 8).await;
+        expect_event_sub_len(&client, 1).await;
+        drop(rx);
+
+        encode_frame(
+            &mut server,
+            &json!({"method": "Network.requestWillBeSent", "params": {}}),
+        )
+        .await
+        .unwrap();
+
+        expect_event_sub_len(&client, 0).await;
     }
 
     #[tokio::test]
@@ -878,7 +998,7 @@ mod reconnect_tests {
         // Kill the first connection.
         server1.shutdown().await.ok();
         drop(server1);
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        expect_alive(&client, false).await;
         assert!(!client.is_alive());
         assert_eq!(call_count.load(Ordering::SeqCst), 0); // no reconnect yet
 
@@ -888,7 +1008,9 @@ mod reconnect_tests {
             async move { client.send_request("getInfo", None).await }
         });
 
-        ready.notified().await; // factory produced a new stream
+        timeout(TEST_STATE_TIMEOUT, ready.notified())
+            .await
+            .expect("timed out waiting for reconnect factory");
         let mut new_srv = new_server.lock().await.take().unwrap();
         assert_eq!(call_count.load(Ordering::SeqCst), 1);
         assert!(client.is_alive());
@@ -896,6 +1018,59 @@ mod reconnect_tests {
         reply_ok(&mut new_srv).await;
         let result = task.await.unwrap();
         assert!(result.is_ok(), "got: {:?}", result.err());
+    }
+
+    #[tokio::test]
+    async fn stale_read_loop_exit_does_not_clear_new_connection() {
+        let (client_end1, server1) = duplex(4096);
+
+        let new_server = Arc::new(Mutex::new(None::<DuplexStream>));
+        let ready = Arc::new(Notify::new());
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let factory: ConnectionFactory = {
+            let new_server = Arc::clone(&new_server);
+            let ready = Arc::clone(&ready);
+            let call_count = Arc::clone(&call_count);
+            Arc::new(move || {
+                let new_server = Arc::clone(&new_server);
+                let ready = Arc::clone(&ready);
+                let call_count = Arc::clone(&call_count);
+                Box::pin(async move {
+                    let (c, s) = duplex(4096);
+                    *new_server.lock().await = Some(s);
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    ready.notify_one();
+                    Ok(c)
+                })
+            })
+        };
+
+        let client = Client::from_stream_with_factory(client_end1, factory).unwrap();
+        client.force_reconnect().await.unwrap();
+        timeout(TEST_STATE_TIMEOUT, ready.notified())
+            .await
+            .expect("timed out waiting for reconnect factory");
+        let mut new_srv = new_server.lock().await.take().unwrap();
+
+        drop(server1);
+        expect_read_loop_exits(&client, 1).await;
+        assert!(
+            client.is_alive(),
+            "stale read loop must not mark new connection dead"
+        );
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+
+        let task = tokio::spawn({
+            let client = client.clone();
+            async move { client.send_request("getInfo", None).await }
+        });
+        reply_ok(&mut new_srv).await;
+        assert!(task.await.unwrap().is_ok());
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            1,
+            "new request should not need another reconnect"
+        );
     }
 
     #[tokio::test]
@@ -907,7 +1082,7 @@ mod reconnect_tests {
         let client = Client::from_stream_with_factory(client_end, factory).unwrap();
 
         drop(server); // break the read loop
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        expect_alive(&client, false).await;
         assert!(!client.is_alive());
 
         let err = client.send_request("getInfo", None).await.unwrap_err();

@@ -448,15 +448,29 @@ async fn read_pdf_stream_base64_len(client: &Client, tab_id: i64, stream: &str) 
 
     let mut total = 0usize;
     loop {
-        let raw = client
+        let raw = match client
             .execute_cdp(
                 tab_id,
                 "IO.read",
                 Some(json!({ "handle": stream, "size": PDF_STREAM_READ_SIZE })),
             )
-            .await?;
-        let chunk: StreamChunk = serde_json::from_str(raw.get())
-            .map_err(|err| BridgeError::Protocol(format!("parse IO.read response: {err}")))?;
+            .await
+        {
+            Ok(raw) => raw,
+            Err(err) => {
+                close_cdp_stream(client, tab_id, stream).await;
+                return Err(err);
+            }
+        };
+        let chunk: StreamChunk = match serde_json::from_str(raw.get()) {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                close_cdp_stream(client, tab_id, stream).await;
+                return Err(BridgeError::Protocol(format!(
+                    "parse IO.read response: {err}"
+                )));
+            }
+        };
         if !chunk.data.is_empty() {
             let encoded_len = if chunk.base64_encoded {
                 chunk.data.len()

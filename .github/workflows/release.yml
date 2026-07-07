@@ -24,10 +24,50 @@ jobs:
       version: ${{ steps.validate.outputs.version }}
       commit_sha: ${{ steps.validate.outputs.commit_sha }}
     steps:
+      - name: Validate release tag input
+        id: validate
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag || '' }}
+          REF_NAME: ${{ github.ref_name }}
+          WORKFLOW_REF: ${{ github.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$WORKFLOW_REF" != "refs/heads/main" ]]; then
+            echo "Manual releases must be dispatched from the main branch workflow, got $WORKFLOW_REF" >&2
+            exit 1
+          fi
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$REF_NAME"
+          fi
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: $TAG" >&2
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          WORKDIR="$(mktemp -d)"
+          git -C "$WORKDIR" init -q
+          git -C "$WORKDIR" remote add origin "https://github.com/$REPOSITORY.git"
+          git -C "$WORKDIR" fetch --quiet --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+          TAG_TYPE="$(git -C "$WORKDIR" cat-file -t "$TAG")"
+          if [ "$TAG_TYPE" != "tag" ]; then
+            echo "Release tag $TAG must be an annotated tag" >&2
+            exit 1
+          fi
+          COMMIT_SHA="$(git -C "$WORKDIR" rev-parse "$TAG^{commit}")"
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ steps.validate.outputs.commit_sha }}
 
       - name: Check GitHub Action pins
         shell: bash
@@ -37,30 +77,19 @@ jobs:
         shell: bash
         run: node scripts/check-release-contract.js
 
-      - name: Validate release tag and contents
-        id: validate
+      - name: Validate release contents
         shell: bash
         env:
-          RELEASE_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+          TAG: ${{ steps.validate.outputs.tag }}
+          VERSION: ${{ steps.validate.outputs.version }}
+          COMMIT_SHA: ${{ steps.validate.outputs.commit_sha }}
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.ref }}" != "refs/heads/main" ]]; then
-            echo "Manual releases must be dispatched from the main branch workflow, got ${{ github.ref }}" >&2
-            exit 1
-          fi
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid release tag: $TAG" >&2
-            exit 1
-          fi
-
-          VERSION="${TAG#v}"
           git fetch origin main --depth=1
           TAG_TYPE="$(git cat-file -t "$TAG")"
           if [ "$TAG_TYPE" != "tag" ]; then
             echo "Release tag $TAG must be an annotated tag" >&2
             exit 1
           fi
-          COMMIT_SHA="$(git rev-parse "$TAG^{commit}")"
           HEAD_SHA="$(git rev-parse HEAD)"
           if [ "$HEAD_SHA" != "$COMMIT_SHA" ]; then
             echo "Checked out $HEAD_SHA, but $TAG points to $COMMIT_SHA" >&2
@@ -80,7 +109,7 @@ jobs:
           fi
           node - <<'NODE'
           const fs = require("fs");
-          const version = process.env.RELEASE_VERSION.replace(/^v/, "");
+          const version = process.env.VERSION;
           const lines = fs.readFileSync("CHANGELOG.md", "utf8").split(/\r?\n/);
           const heading = lines.findIndex((line) =>
             line.startsWith(`## [${version}] - `) &&
@@ -98,10 +127,6 @@ jobs:
             throw new Error(`CHANGELOG.md section for ${version} is empty`);
           }
           NODE
-
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
 
   test:
     needs: validate-release
