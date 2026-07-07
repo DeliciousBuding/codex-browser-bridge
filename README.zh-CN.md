@@ -85,9 +85,15 @@ npm i -g @delicious233/codex-browser-bridge
 ```
 
 如果 MCP 客户端从 GUI 或定时任务启动，优先使用 npm `postinstall`
-打印的绝对 `command` 路径配置。之后如需重新找路径，可在 PowerShell 运行
-`where.exe codex-browser-bridge`，再把返回的完整路径填到 `command`。
-文件上传需要设置 `CODEX_BRIDGE_UPLOAD_BASE`；[examples/](examples/) 里有完整配置模板。
+打印的绝对 `command` 路径配置。之后如需重新找路径，可从 npm 全局安装路径运行 CLI doctor：
+
+```powershell
+$bridge = Join-Path (npm prefix -g) "codex-browser-bridge.cmd"
+& $bridge --mode doctor
+```
+
+把输出里的 `install.suggested_mcp_config.mcpServers.codex-browser.command`
+填到客户端配置的 `command`。文件上传需要设置 `CODEX_BRIDGE_UPLOAD_BASE`；[examples/](examples/) 里有完整配置模板。
 
 Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。npm 包内也会随包发布这些 `examples/` 模板。
 

@@ -86,8 +86,15 @@ Find the login button and click it.
 
 If your MCP client is launched from a GUI or a scheduler, prefer the absolute
 `command` path printed by npm `postinstall`. If you need to recover it later,
-run `where.exe codex-browser-bridge` in PowerShell and paste the returned path
-into `command`. File upload requires `CODEX_BRIDGE_UPLOAD_BASE`; use the
+run the out-of-band CLI doctor from npm's global install path:
+
+```powershell
+$bridge = Join-Path (npm prefix -g) "codex-browser-bridge.cmd"
+& $bridge --mode doctor
+```
+
+Paste `install.suggested_mcp_config.mcpServers.codex-browser.command` into the
+client config. File upload requires `CODEX_BRIDGE_UPLOAD_BASE`; use the
 templates in [examples/](examples/) for a full config.
 
 For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/). The npm

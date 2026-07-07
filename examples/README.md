@@ -26,7 +26,8 @@ scheduled agents, prefer the absolute `command` path printed by npm
 If you need to recover the installed command path later:
 
 ```powershell
-where.exe codex-browser-bridge
+$bridge = Join-Path (npm prefix -g) "codex-browser-bridge.cmd"
+& $bridge --mode doctor
 ```
 
 ```json
@@ -34,7 +35,8 @@ where.exe codex-browser-bridge
 ```
 
 GUI-launched clients do not always inherit the same `PATH` as your terminal. If
-the client reports spawn failures, paste the full path returned by `where.exe`.
+the client reports spawn failures, paste the `command` from
+`install.suggested_mcp_config` in the doctor output.
 
 ### WSL
 The npm package is Windows-only (`os: win32`), so `npm i -g` from a Linux WSL

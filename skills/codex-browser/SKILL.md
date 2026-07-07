@@ -9,7 +9,7 @@ You are an agent controlling a real Chrome browser through the `codex-browser` M
 
 ## Quick Check
 
-Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user to start Codex Desktop, Chrome, and the Codex extension.
+Call `codex_doctor` first. If `healthy` is true, browser pipes are ready. If `install.mcp_spawn_ready` is false, ask the user to update the MCP config with `install.suggested_mcp_config`; this is separate from browser pipe health.
 
 ## Tool Groups
 
@@ -192,6 +192,7 @@ When a tool fails, the cause is usually one of these. Try the fix before retryin
 | **Click has no effect** | JS `click()` swallowed by overlay or shadow DOM | Switch to `codex_cua_click` (real CDP mouse events) |
 | **SPA never "loads"** | URL unchanged, `wait_for_load` returns instantly | Use `codex_wait_for_element` on the target element instead |
 | **All tools slow / erratic** | Pipe degraded or extension stalled | `codex_doctor`; if unhealthy, restart Codex Desktop |
+| **MCP server missing after client restart** | GUI or scheduler cannot spawn the command from `PATH` | Run CLI doctor from the absolute npm install path and use `install.suggested_mcp_config` |
 
 General: always `codex_finalize` when the browsing task is done to release tabs.
 
@@ -203,7 +204,7 @@ General: always `codex_finalize` when the browsing task is done to release tabs.
 4. **Use `codex_cua_click`** when other click methods fail — raw CDP mouse events.
 5. **Use `codex_execute_cdp`** only when no dedicated tool covers the operation.
 6. **Call `codex_finalize`** when the browsing task is complete.
-7. **Call `codex_doctor`** if tools return unexpected errors — the pipe may have disconnected.
+7. **Call `codex_doctor`** if tools return unexpected errors — check both browser `healthy` and install `mcp_spawn_ready`.
 
 ## Profiles
 
