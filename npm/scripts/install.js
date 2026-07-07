@@ -123,7 +123,26 @@ function resolveWindowsArch(platform, cpu) {
   }
 }
 
-function logInstallHints(root, log) {
+function mcpConfigForTarget(target) {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        "codex-browser": {
+          command: target,
+          args: ["--mode", "mcp"],
+          transport: "stdio",
+          env: {
+            CODEX_BRIDGE_PROFILE: "full",
+          },
+        },
+      },
+    },
+    null,
+    2
+  );
+}
+
+function logInstallHints(root, log, target) {
   const skillDir = path.join(root, "skills", "codex-browser");
   const examplesDir = path.join(root, "examples");
   const escapedSkillDir = skillDir.replace(/"/g, '\\"');
@@ -138,10 +157,14 @@ function logInstallHints(root, log) {
     );
   }
   if (fs.existsSync(examplesDir)) {
-    log(
-      `MCP config examples: ${examplesDir} (Claude Code, Cursor, OpenClaw, Hermes Agent)\n` +
-        "  -> If a GUI client cannot spawn the server, run: where.exe codex-browser-bridge"
-    );
+    const lines = [`MCP config examples: ${examplesDir} (Claude Code, Cursor, OpenClaw, Hermes Agent)`];
+    if (target) {
+      lines.push("Ready-to-paste MCP config with the absolute installed binary path:");
+      lines.push(mcpConfigForTarget(target));
+    } else {
+      lines.push("  -> If a GUI client cannot spawn the server, run: where.exe codex-browser-bridge");
+    }
+    log(lines.join("\n"));
   }
 }
 
@@ -187,7 +210,7 @@ async function install(options = {}) {
   const target = path.join(outDir, exeName);
   fs.writeFileSync(target, binary);
   log(`Installed: ${target}`);
-  logInstallHints(root, log);
+  logInstallHints(root, log, target);
   return { target, asset, tag, repo };
 }
 
@@ -207,6 +230,7 @@ module.exports = {
   findChecksum,
   install,
   logInstallHints,
+  mcpConfigForTarget,
   parseChecksumLine,
   requestBuffer,
   resolveWindowsArch,

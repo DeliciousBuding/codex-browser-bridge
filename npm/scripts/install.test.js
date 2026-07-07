@@ -9,6 +9,7 @@ const {
   findChecksum,
   install,
   logInstallHints,
+  mcpConfigForTarget,
   parseChecksumLine,
   requestBuffer,
   resolveWindowsArch,
@@ -212,6 +213,20 @@ async function run() {
     assert.ok(installLogs.some((line) => line.includes(`Installed: ${path.join(outDir, "codex-browser-bridge.exe")}`)));
     assert.ok(installLogs.some((line) => line.includes("Skill:") && line.includes(path.join(installRoot, "skills", "codex-browser"))));
     assert.ok(installLogs.some((line) => line.includes("MCP config examples:") && line.includes(path.join(installRoot, "examples"))));
+    const installedConfigLog = installLogs.find((line) => line.includes("Ready-to-paste MCP config"));
+    assert.ok(installedConfigLog);
+    const installedConfig = JSON.parse(installedConfigLog.slice(installedConfigLog.indexOf("{")));
+    assert.strictEqual(
+      installedConfig.mcpServers["codex-browser"].command,
+      path.join(outDir, "codex-browser-bridge.exe")
+    );
+    assert.deepStrictEqual(installedConfig.mcpServers["codex-browser"].args, ["--mode", "mcp"]);
+    assert.strictEqual(installedConfig.mcpServers["codex-browser"].transport, "stdio");
+
+    assert.strictEqual(
+      JSON.parse(mcpConfigForTarget("C:\\Tools\\codex-browser-bridge.exe")).mcpServers["codex-browser"].command,
+      "C:\\Tools\\codex-browser-bridge.exe"
+    );
 
     const hintsRoot = path.join(tmp, "hints-root");
     fs.mkdirSync(path.join(hintsRoot, "skills", "codex-browser"), { recursive: true });
@@ -224,6 +239,7 @@ async function run() {
     assert.match(hintText, /OpenClaw/);
     assert.match(hintText, /Hermes Agent/);
     assert.match(hintText, /examples/);
+    assert.match(hintText, /where\.exe codex-browser-bridge/);
 
     const fetchedRoot = path.join(tmp, "fetched-root");
     const fetchedOut = path.join(tmp, "fetched-bin");

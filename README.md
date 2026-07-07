@@ -84,11 +84,11 @@ Open https://example.com and take a screenshot.
 Find the login button and click it.
 ```
 
-If your MCP client is launched from a GUI and cannot find the command, run
-`where.exe codex-browser-bridge` in PowerShell and paste the returned
-`codex-browser-bridge.cmd` path into `command`. File upload requires
-`CODEX_BRIDGE_UPLOAD_BASE`; use the templates in [examples/](examples/) for a
-full config.
+If your MCP client is launched from a GUI or a scheduler, prefer the absolute
+`command` path printed by npm `postinstall`. If you need to recover it later,
+run `where.exe codex-browser-bridge` in PowerShell and paste the returned path
+into `command`. File upload requires `CODEX_BRIDGE_UPLOAD_BASE`; use the
+templates in [examples/](examples/) for a full config.
 
 For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/). The npm
 package also ships these examples under `examples/`.

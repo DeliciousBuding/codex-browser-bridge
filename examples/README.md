@@ -19,8 +19,11 @@ directory is the only location `codex_file_input` can upload from.
 ## Platform notes
 
 ### Windows (native)
-Use the config as-is after replacing `YOUR_USER`. The binary must be in `PATH`
-or use an absolute path:
+Use the config as-is after replacing `YOUR_USER`. For GUI-launched clients and
+scheduled agents, prefer the absolute `command` path printed by npm
+`postinstall`.
+
+If you need to recover the installed command path later:
 
 ```powershell
 where.exe codex-browser-bridge
@@ -31,8 +34,7 @@ where.exe codex-browser-bridge
 ```
 
 GUI-launched clients do not always inherit the same `PATH` as your terminal. If
-the client reports spawn failures, paste the full `.cmd` path returned by
-`where.exe`.
+the client reports spawn failures, paste the full path returned by `where.exe`.
 
 ### WSL
 The npm package is Windows-only (`os: win32`), so `npm i -g` from a Linux WSL
