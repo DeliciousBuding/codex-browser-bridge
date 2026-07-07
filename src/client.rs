@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use serde_json::{json, value::RawValue, Value};
@@ -247,23 +247,7 @@ impl Client {
             }
         };
 
-        if let Some(err) = resp.error {
-            return Err(BridgeError::Rpc {
-                method: method.to_string(),
-                message: format!(
-                    "json-rpc error {}: {}",
-                    err.code,
-                    err.message.replace('\n', "\\n").replace('\r', "\\r")
-                ),
-            });
-        }
-
-        match resp.result {
-            Some(result) => Ok(result),
-            None => serde_json::value::RawValue::from_string("null".to_string()).map_err(|err| {
-                BridgeError::Protocol(format!("missing result for {method}: {err}"))
-            }),
-        }
+        response_result(method, resp)
     }
 
     fn is_alive(&self) -> bool {
@@ -321,7 +305,31 @@ impl Client {
             }
             tracing::debug!(attempt, "attempting reconnect");
             match (self.inner.connection_factory)().await {
-                Ok(stream) => {
+                Ok(mut stream) => {
+                    match verify_pipe_stream(
+                        &mut stream,
+                        &self.inner.session_id,
+                        &self.inner.turn_id,
+                    )
+                    .await
+                    {
+                        Ok(info) => {
+                            tracing::debug!(
+                                attempt = attempt + 1,
+                                info = %truncate(info.get(), 120),
+                                "reconnect health check succeeded"
+                            );
+                        }
+                        Err(err) => {
+                            tracing::debug!(
+                                attempt = attempt + 1,
+                                error = %err,
+                                "reconnect health check failed"
+                            );
+                            last_err = Some(err);
+                            continue;
+                        }
+                    }
                     let (reader, writer) = split(stream);
                     let epoch = self.inner.connection_epoch.fetch_add(1, Ordering::AcqRel) + 1;
                     *self.inner.writer.lock().await = Some(writer);
@@ -331,19 +339,6 @@ impl Client {
                     *self.inner.reconnect_cooldown_until.lock().await = None;
                     self.inner.alive.store(true, Ordering::Release);
                     self.spawn_read_loop(reader, epoch);
-                    if let Err(err) = self
-                        .send_request_once("getInfo", None, RECONNECT_HEALTH_CHECK_TIMEOUT)
-                        .await
-                    {
-                        self.close_for_health_check_failure().await;
-                        tracing::debug!(
-                            attempt = attempt + 1,
-                            error = %err,
-                            "reconnect health check failed"
-                        );
-                        last_err = Some(err);
-                        continue;
-                    }
                     tracing::info!(attempt = attempt + 1, "bridge reconnected");
                     return Ok(());
                 }
@@ -668,15 +663,24 @@ impl Client {
     pub(crate) fn read_loop_exit_count_for_test(&self) -> u64 {
         self.inner.read_loop_exits.load(Ordering::SeqCst)
     }
+}
 
-    async fn close_for_health_check_failure(&self) {
-        // Reclaim the writer; the read loop reads EOF and exits, which clears
-        // pending + marks the connection dead.
-        let mut writer = self.inner.writer.lock().await;
-        if let Some(mut w) = writer.take() {
-            use tokio::io::AsyncWriteExt;
-            let _ = w.shutdown().await;
-        }
+fn response_result(method: &str, resp: Response) -> Result<Box<RawValue>> {
+    if let Some(err) = resp.error {
+        return Err(BridgeError::Rpc {
+            method: method.to_string(),
+            message: format!(
+                "json-rpc error {}: {}",
+                err.code,
+                err.message.replace('\n', "\\n").replace('\r', "\\r")
+            ),
+        });
+    }
+
+    match resp.result {
+        Some(result) => Ok(result),
+        None => serde_json::value::RawValue::from_string("null".to_string())
+            .map_err(|err| BridgeError::Protocol(format!("missing result for {method}: {err}"))),
     }
 }
 
@@ -692,22 +696,19 @@ async fn connect_discovered_client() -> Result<Client> {
     for pipe in pipes {
         let path = discovery::pipe_path(&pipe.name);
         match dial_named_pipe(&path).await {
-            Ok(stream) => {
-                let client = Client::from_stream(stream)?;
-                match client
-                    .send_request_with_timeout("getInfo", None, Duration::from_secs(5))
-                    .await
-                {
+            Ok(mut stream) => {
+                let session_id = Uuid::new_v4().to_string();
+                let turn_id = Uuid::new_v4().to_string();
+                match verify_pipe_stream(&mut stream, &session_id, &turn_id).await {
                     Ok(info) => {
                         tracing::debug!(
                             pipe = %pipe.name,
                             info = %truncate(info.get(), 120),
                             "auto-discovered verified browser pipe"
                         );
-                        return Ok(client);
+                        return Client::from_stream_inner(stream, real_connection_factory());
                     }
                     Err(err) => {
-                        client.close_for_health_check_failure().await;
                         tracing::debug!(pipe = %pipe.name, "pipe health check failed: {err}");
                         last_err = Some(err);
                     }
@@ -720,10 +721,33 @@ async fn connect_discovered_client() -> Result<Client> {
     Err(last_err.unwrap_or_else(|| BridgeError::Discovery("all pipes failed".into())))
 }
 
-/// Dial the first reachable pipe without a `getInfo` health check. Used by the
-/// reconnect factory — a reachable dial is enough to resume; a bad pipe surfaces
-/// on the next request and triggers another reconnect.
-async fn discover_and_dial_first() -> Result<PipeStream> {
+async fn verify_pipe_stream(
+    stream: &mut PipeStream,
+    session_id: &str,
+    turn_id: &str,
+) -> Result<Box<RawValue>> {
+    let params = protocol::with_session_params(session_id, turn_id, None);
+    let req = Request::new(0, "getInfo", params);
+    protocol::encode_frame(stream, &req).await?;
+    let deadline = Instant::now() + RECONNECT_HEALTH_CHECK_TIMEOUT;
+    loop {
+        let frame = timeout(remaining(deadline), protocol::decode_frame(stream))
+            .await
+            .map_err(|_| BridgeError::Timeout("getInfo".into()))??;
+        let resp: Response = serde_json::from_slice(&frame)
+            .map_err(|err| BridgeError::Protocol(format!("invalid getInfo response: {err}")))?;
+        if resp.id == Some(0) {
+            return response_result("getInfo", resp);
+        }
+        if Instant::now() >= deadline {
+            return Err(BridgeError::Timeout("getInfo".into()));
+        }
+    }
+}
+
+/// Dial a reachable pipe, starting from a rotating index. The caller verifies
+/// the stream before making it the active connection.
+async fn discover_and_dial_from(start: usize) -> Result<PipeStream> {
     let pipes = discovery::discover_codex_pipes().await?;
     if pipes.is_empty() {
         return Err(BridgeError::User(
@@ -731,7 +755,8 @@ async fn discover_and_dial_first() -> Result<PipeStream> {
         ));
     }
     let mut last_err = None;
-    for pipe in pipes {
+    for offset in 0..pipes.len() {
+        let pipe = &pipes[(start + offset) % pipes.len()];
         let path = discovery::pipe_path(&pipe.name);
         match dial_named_pipe(&path).await {
             Ok(stream) => {
@@ -744,9 +769,18 @@ async fn discover_and_dial_first() -> Result<PipeStream> {
     Err(last_err.unwrap_or_else(|| BridgeError::Discovery("all pipes failed".into())))
 }
 
-/// Production connection factory: discover + dial the first reachable pipe.
+/// Production connection factory: discover + dial a reachable pipe. Reconnect
+/// attempts rotate their starting point so one dialable stale pipe does not
+/// starve later healthy candidates.
 fn real_connection_factory() -> ConnectionFactory {
-    Arc::new(|| Box::pin(async { discover_and_dial_first().await }))
+    let next_start = Arc::new(AtomicUsize::new(0));
+    Arc::new(move || {
+        let next_start = Arc::clone(&next_start);
+        Box::pin(async move {
+            let start = next_start.fetch_add(1, Ordering::SeqCst);
+            discover_and_dial_from(start).await
+        })
+    })
 }
 
 fn named_connection_factory(pipe_name: String) -> ConnectionFactory {
@@ -1099,9 +1133,15 @@ mod reconnect_tests {
             .expect("timed out waiting for reconnect factory");
         let mut new_srv = new_server.lock().await.take().unwrap();
         assert_eq!(call_count.load(Ordering::SeqCst), 1);
-        assert!(client.is_alive());
 
+        encode_frame(
+            &mut new_srv,
+            &json!({"method": "Network.requestWillBeSent", "params": {}}),
+        )
+        .await
+        .unwrap();
         reply_ok(&mut new_srv).await;
+        expect_alive(&client, true).await;
         reply_ok(&mut new_srv).await;
         let result = task.await.unwrap();
         assert!(result.is_ok(), "got: {:?}", result.err());
@@ -1144,9 +1184,9 @@ mod reconnect_tests {
             .expect("timed out waiting for lazy connect factory");
         let mut new_srv = new_server.lock().await.take().unwrap();
         assert_eq!(call_count.load(Ordering::SeqCst), 1);
-        assert!(client.is_alive());
 
         reply_ok(&mut new_srv).await;
+        expect_alive(&client, true).await;
         reply_ok(&mut new_srv).await;
         let result = task.await.unwrap();
         assert!(result.is_ok(), "got: {:?}", result.err());
