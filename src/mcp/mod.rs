@@ -146,16 +146,24 @@ impl Server {
     }
 
     pub(crate) fn bridge_runtime_info(&self) -> Value {
-        Self::runtime_info_for(self.profile, self.tools.len())
+        Self::runtime_info_for(
+            self.profile,
+            self.tools.len(),
+            std::env::var_os("CODEX_BRIDGE_UPLOAD_BASE").is_some(),
+        )
     }
 
-    fn runtime_info_for(profile: ToolProfile, tool_count: usize) -> Value {
+    fn runtime_info_for(
+        profile: ToolProfile,
+        tool_count: usize,
+        upload_base_configured: bool,
+    ) -> Value {
         let limits = content_limits();
         json!({
             "bridgeVersion": env!("CARGO_PKG_VERSION"),
             "profile": profile.as_str(),
             "toolCount": tool_count,
-            "uploadBaseConfigured": std::env::var_os("CODEX_BRIDGE_UPLOAD_BASE").is_some(),
+            "uploadBaseConfigured": upload_base_configured,
             "responseLimits": {
                 "maxTextBytes": limits.max_text_bytes,
                 "maxImageBytes": limits.max_image_bytes,
@@ -339,6 +347,9 @@ mod resources_prompts_tests {
     use crate::client::Client;
     use crate::protocol;
     use tokio::io::{duplex, DuplexStream};
+    use tokio::time::{timeout, Duration};
+
+    const PIPE_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
     fn test_server() -> Server {
         test_server_with_pipe().0
@@ -353,8 +364,18 @@ mod resources_prompts_tests {
     }
 
     async fn next_request(server: &mut DuplexStream) -> Value {
-        let frame = protocol::decode_frame(server).await.unwrap();
+        let frame = timeout(PIPE_REQUEST_TIMEOUT, protocol::decode_frame(server))
+            .await
+            .expect("timed out waiting for extension request")
+            .unwrap();
         serde_json::from_slice(&frame).unwrap()
+    }
+
+    async fn expect_task<T>(task: tokio::task::JoinHandle<T>, reason: &str) -> T {
+        timeout(PIPE_REQUEST_TIMEOUT, task)
+            .await
+            .unwrap_or_else(|_| panic!("{reason}: task timed out"))
+            .unwrap_or_else(|err| panic!("{reason}: task panicked: {err}"))
     }
 
     async fn reply_result(server: &mut DuplexStream, request: &Value, result: Value) {
@@ -381,7 +402,7 @@ mod resources_prompts_tests {
         )
         .await;
 
-        let response = read_task.await.unwrap();
+        let response = expect_task(read_task, "resources/read tabs response").await;
         let v: Value = serde_json::from_str(&response).unwrap();
         let text = v["result"]["contents"][0]["text"].as_str().unwrap();
 
@@ -473,13 +494,7 @@ mod runtime_info_tests {
 
     #[test]
     fn bridge_runtime_info_omits_raw_upload_path() {
-        let previous = std::env::var_os("CODEX_BRIDGE_UPLOAD_BASE");
-        std::env::set_var("CODEX_BRIDGE_UPLOAD_BASE", r"C:\Users\someone\secret");
-        let info = Server::runtime_info_for(ToolProfile::Basic, 34);
-        match previous {
-            Some(value) => std::env::set_var("CODEX_BRIDGE_UPLOAD_BASE", value),
-            None => std::env::remove_var("CODEX_BRIDGE_UPLOAD_BASE"),
-        }
+        let info = Server::runtime_info_for(ToolProfile::Basic, 34, true);
 
         assert_eq!(info["profile"], "basic");
         assert_eq!(info["toolCount"], 34);
@@ -498,6 +513,9 @@ mod tools_call_tests {
     use tokio::io::{duplex, DuplexStream};
     use tokio::time::{timeout, Duration};
 
+    const PIPE_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+    const NO_REQUEST_GRACE: Duration = Duration::from_millis(50);
+
     fn test_server(profile: ToolProfile) -> Server {
         let (client_end, _server) = duplex(4096);
         Server::new_with_profile(Client::from_stream(client_end).unwrap(), profile)
@@ -512,8 +530,24 @@ mod tools_call_tests {
     }
 
     async fn next_request(server: &mut DuplexStream) -> Value {
-        let frame = protocol::decode_frame(server).await.unwrap();
+        let frame = timeout(PIPE_REQUEST_TIMEOUT, protocol::decode_frame(server))
+            .await
+            .expect("timed out waiting for extension request")
+            .unwrap();
         serde_json::from_slice(&frame).unwrap()
+    }
+
+    async fn no_request(server: &mut DuplexStream, reason: &str) {
+        if let Ok(request) = timeout(NO_REQUEST_GRACE, next_request(server)).await {
+            panic!("{reason}: unexpected pipe request {request}");
+        }
+    }
+
+    async fn expect_task<T>(task: tokio::task::JoinHandle<T>, reason: &str) -> T {
+        timeout(PIPE_REQUEST_TIMEOUT, task)
+            .await
+            .unwrap_or_else(|_| panic!("{reason}: task timed out"))
+            .unwrap_or_else(|err| panic!("{reason}: task panicked: {err}"))
     }
 
     async fn reply_result(server: &mut DuplexStream, request: &Value, result: Value) {
@@ -579,7 +613,7 @@ mod tools_call_tests {
         )
         .await;
 
-        let response = call_task.await.unwrap();
+        let response = expect_task(call_task, "get_info metadata response").await;
         let text = response["result"]["content"][0]["text"].as_str().unwrap();
         let info: Value = serde_json::from_str(text).unwrap();
 
@@ -620,7 +654,7 @@ mod tools_call_tests {
         )
         .await;
 
-        let response = call_task.await.unwrap();
+        let response = expect_task(call_task, "get_info bridge-field response").await;
         let text = response["result"]["content"][0]["text"].as_str().unwrap();
         let info: Value = serde_json::from_str(text).unwrap();
 
@@ -665,18 +699,77 @@ mod tools_call_tests {
         )
         .await;
 
-        let no_content_fetch = timeout(Duration::from_millis(50), next_request(&mut pipe)).await;
-        assert!(
-            no_content_fetch.is_err(),
-            "unknown-size resources should not request Page.getResourceContent"
-        );
+        no_request(
+            &mut pipe,
+            "unknown-size resources should not request Page.getResourceContent",
+        )
+        .await;
 
-        let response = call_task.await.unwrap();
+        let response = expect_task(call_task, "page assets unknown-size response").await;
         let text = response["result"]["content"][0]["text"].as_str().unwrap();
         let body: Value = serde_json::from_str(text).unwrap();
         assert_eq!(body["truncated"], true);
         assert_eq!(body["limit_reason"], "unknown_resource_size");
         assert_eq!(body["resources"][0]["failed"], true);
+    }
+
+    #[tokio::test]
+    async fn page_assets_marks_resource_failed_when_postfetch_total_limit_trips() {
+        let (server, mut pipe) = test_server_with_pipe(ToolProfile::Full);
+        let call_task = tokio::spawn(async move {
+            call(
+                &server,
+                json!({
+                    "jsonrpc":"2.0",
+                    "id":1,
+                    "method":"tools/call",
+                    "params":{
+                        "name":"codex_page_assets",
+                        "arguments":{"tab_id":"7","include_content":true,"max_total_bytes":4}
+                    }
+                }),
+            )
+            .await
+        });
+
+        complete_attach_sequence(&mut pipe, 7).await;
+
+        let tree = next_request(&mut pipe).await;
+        assert_eq!(tree["params"]["method"], "Page.getResourceTree");
+        reply_result(
+            &mut pipe,
+            &tree,
+            json!({
+                "frame": {"id":"frame-1","url":"https://example.com"},
+                "resources": [{
+                    "url":"https://example.com/app.js",
+                    "type":"Script",
+                    "mimeType":"application/javascript",
+                    "contentSize": 4
+                }]
+            }),
+        )
+        .await;
+
+        let content = next_request(&mut pipe).await;
+        assert_eq!(content["params"]["method"], "Page.getResourceContent");
+        reply_result(
+            &mut pipe,
+            &content,
+            json!({
+                "content": "too-large",
+                "base64Encoded": false
+            }),
+        )
+        .await;
+
+        let response = expect_task(call_task, "page assets postfetch total limit").await;
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let body: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(body["truncated"], true);
+        assert_eq!(body["limit_reason"], "max_total_bytes");
+        assert_eq!(body["resources"][0]["failed"], true);
+        assert!(body["resources"][0].get("content").is_none());
     }
 
     #[tokio::test]
@@ -687,30 +780,29 @@ mod tools_call_tests {
         }
 
         let (server, mut pipe) = test_server_with_pipe(ToolProfile::Full);
-        let response = call(
-            &server,
-            json!({
-                "jsonrpc":"2.0",
-                "id":1,
-                "method":"tools/call",
-                "params":{
-                    "name":"codex_file_input",
-                    "arguments":{"tab_id":"7","selector":"#file","files":["C:/tmp/a.txt"]}
-                }
-            }),
-        )
-        .await;
+        let call_task = tokio::spawn(async move {
+            call(
+                &server,
+                json!({
+                    "jsonrpc":"2.0",
+                    "id":1,
+                    "method":"tools/call",
+                    "params":{
+                        "name":"codex_file_input",
+                        "arguments":{"tab_id":"7","selector":"#file","files":["C:/tmp/a.txt"]}
+                    }
+                }),
+            )
+            .await
+        });
 
+        no_request(&mut pipe, "validation should fail before pipe use").await;
+        let response = expect_task(call_task, "file input upload-base validation").await;
         assert_eq!(response["result"]["isError"], true);
         assert!(response["result"]["content"][0]["text"]
             .as_str()
             .unwrap()
             .contains("CODEX_BRIDGE_UPLOAD_BASE must be set"));
-        let no_pipe_use = timeout(Duration::from_millis(50), next_request(&mut pipe)).await;
-        assert!(
-            no_pipe_use.is_err(),
-            "validation should fail before pipe use"
-        );
     }
 
     #[tokio::test]

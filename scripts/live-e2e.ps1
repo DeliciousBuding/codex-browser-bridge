@@ -29,12 +29,44 @@ if ($RequestTimeoutMs -le 0) {
     $RequestTimeoutMs = [Math]::Max($TimeoutMs + 5000, 10000)
 }
 
-Write-Host "Running doctor..."
-$doctor = & $BridgePath --mode doctor
-if ($LASTEXITCODE -ne 0) {
-    throw "doctor failed with exit code $LASTEXITCODE"
+function Invoke-BridgeDoctor {
+    param(
+        [int]$TimeoutMs
+    )
+
+    $doctorPsi = [System.Diagnostics.ProcessStartInfo]::new()
+    $doctorPsi.FileName = $BridgePath
+    $doctorPsi.ArgumentList.Add("--mode")
+    $doctorPsi.ArgumentList.Add("doctor")
+    $doctorPsi.RedirectStandardOutput = $true
+    $doctorPsi.RedirectStandardError = $true
+    $doctorPsi.UseShellExecute = $false
+    $doctorPsi.CreateNoWindow = $true
+    $doctorPsi.WorkingDirectory = $RepoRoot
+    $doctorProc = [System.Diagnostics.Process]::Start($doctorPsi)
+    try {
+        if (-not $doctorProc.WaitForExit($TimeoutMs)) {
+            $doctorProc.Kill()
+            [void]$doctorProc.WaitForExit(5000)
+            throw "doctor timed out after $TimeoutMs ms"
+        }
+        $stdout = $doctorProc.StandardOutput.ReadToEnd()
+        $stderr = $doctorProc.StandardError.ReadToEnd()
+        if ($doctorProc.ExitCode -ne 0) {
+            throw "doctor failed with exit code $($doctorProc.ExitCode). stdout: $stdout stderr: $stderr"
+        }
+        try {
+            $stdout | ConvertFrom-Json | Out-Null
+        } catch {
+            throw "doctor returned invalid JSON. stdout: $stdout stderr: $stderr"
+        }
+    } finally {
+        $doctorProc.Dispose()
+    }
 }
-$doctor | ConvertFrom-Json | Out-Null
+
+Write-Host "Running doctor..."
+Invoke-BridgeDoctor -TimeoutMs $RequestTimeoutMs
 
 $psi = [System.Diagnostics.ProcessStartInfo]::new()
 $psi.FileName = $BridgePath
@@ -106,7 +138,8 @@ function Read-BridgeStderr {
 function Invoke-Mcp {
     param(
         [string]$Method,
-        [object]$Params = $null
+        [object]$Params = $null,
+        [int]$TimeoutMs = $script:RequestTimeoutMs
     )
 
     if ($script:bridgeStopped -or $script:proc.HasExited) {
@@ -128,10 +161,10 @@ function Invoke-Mcp {
     $script:proc.StandardInput.Flush()
 
     $lineTask = $script:proc.StandardOutput.ReadLineAsync()
-    if (-not $lineTask.Wait($script:RequestTimeoutMs)) {
+    if (-not $lineTask.Wait($TimeoutMs)) {
         Stop-BridgeProcess
         $stderr = Read-BridgeStderr
-        throw "MCP response timed out after $script:RequestTimeoutMs ms for $Method. stderr: $stderr"
+        throw "MCP response timed out after $TimeoutMs ms for $Method. stderr: $stderr"
     }
 
     $line = $lineTask.Result
@@ -157,12 +190,13 @@ function Invoke-Mcp {
 function Invoke-Tool {
     param(
         [string]$Name,
-        [hashtable]$Arguments = @{}
+        [hashtable]$Arguments = @{},
+        [int]$TimeoutMs = $script:RequestTimeoutMs
     )
     return Invoke-Mcp "tools/call" @{
         name = $Name
         arguments = $Arguments
-    }
+    } -TimeoutMs $TimeoutMs
 }
 
 try {
@@ -202,14 +236,14 @@ try {
 } finally {
     if ($tabId -and -not $bridgeStopped -and -not $proc.HasExited) {
         try {
-            Invoke-Tool "codex_close_tab" @{ tab_id = $tabId } | Out-Null
+            Invoke-Tool "codex_close_tab" @{ tab_id = $tabId } -TimeoutMs 5000 | Out-Null
         } catch {
             Write-Warning $_
         }
     }
     if (-not $bridgeStopped -and -not $proc.HasExited) {
         try {
-            Invoke-Tool "codex_finalize" | Out-Null
+            Invoke-Tool "codex_finalize" -TimeoutMs 5000 | Out-Null
         } catch {
             Write-Warning $_
         }

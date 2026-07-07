@@ -430,6 +430,7 @@ impl super::Server {
                         if total_bytes.saturating_add(content_bytes) > max_total_bytes {
                             truncated = true;
                             limit_reason = Some("max_total_bytes");
+                            resource.failed = Some(true);
                             break;
                         }
                         total_bytes += content_bytes;

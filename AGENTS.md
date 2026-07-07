@@ -37,6 +37,7 @@
 - **集成测试**（`tests/browser_api.rs`）：公开 browser/helper 行为与安全边界
 - **Reconnect/mock 测试**（`src/client.rs`，`cfg(not(windows))`）：`tokio::io::duplex()` mock pipe
 - **Harness 计划**：新的真实/模拟 E2E 应放在 `tests/`，不要使用 `#[path]` 嵌入源码文件
+- Mock pipe / E2E harness 等待必须 bounded：正向 pipe read 和 spawned task join 用明确 timeout，负向“不得发 pipe 请求”断言用短 grace window；live E2E 的 doctor preflight 和 cleanup MCP 调用也必须有 timeout。
 
 ### 6. 工具数量
 - 当前：52 个 MCP 工具
