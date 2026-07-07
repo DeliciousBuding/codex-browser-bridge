@@ -161,7 +161,10 @@ codex_dialog <tab_id> action="dismiss"
 codex_nav_and_wait <tab_id> <login_url>
 codex_wait_for_element <tab_id> selector="#username"   // SPA renders async
 codex_form_fill <tab_id> {"#username": "alice", "#password": "secret"}
-codex_click_element... or codex_click_and_wait <tab_id> "#login-btn"
+codex_find_element <tab_id> role="button" name="Login"
+codex_click_element <tab_id> <node_id>
+# Or, for stable selectors:
+codex_click_and_wait <tab_id> selector="#login-btn"
 codex_wait_for_element <tab_id> selector=".dashboard"   // confirm login landed
 ```
 

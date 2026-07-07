@@ -29,9 +29,15 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.inputs.tag || github.ref }}
 
+      - name: Check GitHub Action pins
+        shell: bash
+        run: node scripts/check-actions-pinned.js
+
       - name: Validate release tag and contents
         id: validate
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
@@ -64,10 +70,26 @@ jobs:
             echo "Cargo.toml version $CARGO_VERSION does not match release tag $TAG" >&2
             exit 1
           fi
-          if ! grep -Eq "^## \[$VERSION\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
-            echo "CHANGELOG.md is missing dated section ## [$VERSION] - YYYY-MM-DD" >&2
-            exit 1
-          fi
+          node - <<'NODE'
+          const fs = require("fs");
+          const version = process.env.RELEASE_VERSION.replace(/^v/, "");
+          const lines = fs.readFileSync("CHANGELOG.md", "utf8").split(/\r?\n/);
+          const heading = lines.findIndex((line) =>
+            line.startsWith(`## [${version}] - `) &&
+            /^## \[[^\]]+\] - \d{4}-\d{2}-\d{2}$/.test(line)
+          );
+          if (heading < 0) {
+            throw new Error(`CHANGELOG.md is missing dated section ## [${version}] - YYYY-MM-DD`);
+          }
+          const body = [];
+          for (const line of lines.slice(heading + 1)) {
+            if (line.startsWith("## [")) break;
+            body.push(line);
+          }
+          if (!body.some((line) => /\S/.test(line))) {
+            throw new Error(`CHANGELOG.md section for ${version} is empty`);
+          }
+          NODE
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -96,6 +118,9 @@ jobs:
       - name: Test Rust
         shell: bash
         run: cargo test --locked
+      - name: Check agent surface docs
+        shell: bash
+        run: node scripts/check-agent-surface.js
       - name: Test live E2E timeout cleanup
         shell: pwsh
         run: ./scripts/test-live-e2e-timeout.ps1
@@ -273,6 +298,32 @@ jobs:
             echo "dist_tag=latest" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check npm publication status
+        id: npm-published
+        shell: bash
+        env:
+          PACKAGE_NAME: "@delicious233/codex-browser-bridge"
+          VERSION: ${{ needs.validate-release.outputs.version }}
+          DIST_TAG: ${{ steps.npm-version.outputs.dist_tag }}
+        run: |
+          if npm view "$PACKAGE_NAME@$VERSION" version >/tmp/npm-version.txt 2>/dev/null; then
+            PUBLISHED_VERSION="$(cat /tmp/npm-version.txt)"
+            if [ "$PUBLISHED_VERSION" != "$VERSION" ]; then
+              echo "npm returned unexpected version $PUBLISHED_VERSION for $PACKAGE_NAME@$VERSION" >&2
+              exit 1
+            fi
+            TAG_VERSION="$(npm view "$PACKAGE_NAME" "dist-tags.$DIST_TAG" 2>/dev/null || true)"
+            if [ "$TAG_VERSION" != "$VERSION" ]; then
+              echo "$PACKAGE_NAME@$VERSION is already published, but dist-tag $DIST_TAG points to '${TAG_VERSION:-<missing>}'" >&2
+              echo "Fix npm dist-tags manually, then rerun." >&2
+              exit 1
+            fi
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "$PACKAGE_NAME@$VERSION already published with $DIST_TAG; skipping npm publish."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download release checksums
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -313,6 +364,7 @@ jobs:
           CODEX_BRIDGE_REQUIRE_CHECKSUMS=1 npm run check:package
 
       - name: Publish npm package
+        if: steps.npm-published.outputs.published != 'true'
         shell: bash
         run: |
           cd npm

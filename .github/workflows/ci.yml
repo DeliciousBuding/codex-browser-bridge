@@ -68,6 +68,9 @@ jobs:
       - name: Check GitHub Action pins
         shell: bash
         run: node scripts/check-actions-pinned.js
+      - name: Check agent surface docs
+        shell: bash
+        run: node scripts/check-agent-surface.js
       - name: Test npm installer helpers
         shell: bash
         run: |

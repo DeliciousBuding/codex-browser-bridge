@@ -161,7 +161,8 @@ impl super::Server {
     async fn handle_navigate(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
         let url = required_str(&args, "url")?;
-        browser::navigate(&self.client, tab_id, url).await?;
+        let url = security::validate_url(url)?;
+        browser::navigate(&self.client, tab_id, &url).await?;
         Ok(vec![Content::text(format!(
             "Navigated tab {tab_id} to {url}"
         ))])
@@ -468,11 +469,13 @@ impl super::Server {
         let urls: Option<Vec<String>> = optional_str_array(&args, "urls")?;
         let redact = optional_bool(&args, "redact_values")?.unwrap_or(true);
 
-        if let Some(urls) = urls.as_deref() {
-            for url in urls {
-                security::validate_url(url)?;
-            }
-        }
+        let urls = urls
+            .map(|urls| {
+                urls.into_iter()
+                    .map(|url| security::validate_url(&url))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?;
 
         let mut cookies = browser::get_cookies(&self.client, tab_id, urls.as_deref()).await?;
 
@@ -490,9 +493,11 @@ impl super::Server {
         let name = required_str(&args, "name")?;
         let value = required_str(&args, "value")?;
 
-        if let Some(url) = args.get("url").and_then(Value::as_str) {
-            security::validate_url(url)?;
-        }
+        let normalized_url = args
+            .get("url")
+            .and_then(Value::as_str)
+            .map(security::validate_url)
+            .transpose()?;
 
         let mut cookie_params = json!({
             "name": name,
@@ -500,7 +505,7 @@ impl super::Server {
         });
 
         if let Some(obj) = cookie_params.as_object_mut() {
-            if let Some(url) = args.get("url").and_then(Value::as_str) {
+            if let Some(url) = normalized_url {
                 obj.insert("url".into(), json!(url));
             }
             if let Some(domain) = args.get("domain").and_then(Value::as_str) {
@@ -759,7 +764,7 @@ impl super::Server {
         let mut params = json!({ "name": name });
         if let Some(obj) = params.as_object_mut() {
             if let Some(url) = args.get("url").and_then(Value::as_str) {
-                security::validate_url(url)?;
+                let url = security::validate_url(url)?;
                 obj.insert("url".into(), json!(url));
             }
             if let Some(domain) = args.get("domain").and_then(Value::as_str) {

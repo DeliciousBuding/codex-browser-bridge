@@ -57,6 +57,8 @@ Release 时遵循 `docs/release-process.md`：确保 `Cargo.toml` 和 `npm/packa
 
 GitHub workflow 中的外部 `uses:` 必须固定到完整 commit SHA，并保留相邻版本注释；修改 workflow 后运行 `node scripts/check-actions-pinned.js`。
 
+工具、profile、README、skill、examples 或 npm package 清单变更后运行 `node scripts/check-agent-surface.js`，防止 agent 面文档和实际 Rust 工具注册 drift。
+
 ## 源码结构
 
 ```

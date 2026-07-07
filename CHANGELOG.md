@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Made `codex_file_input` require an explicit `CODEX_BRIDGE_UPLOAD_BASE` instead of falling back to the process working directory.
 - Routed npm prerelease publishes to the `next` dist-tag while keeping stable releases on `latest`.
 - Tightened navigation URL validation to only allow `http://` and `https://`.
+- Normalized URL inputs before sending them to CDP and rejected malformed HTTP(S) URLs with raw whitespace, control characters, backslashes, or missing hosts.
 - Added bounded duration validation for MCP waits, captures, and form-fill delays.
 - Restricted generic CDP execution to an explicit low-level allowlist and blocked raw methods that bypass dedicated safety wrappers.
 - Added `codex_doctor` to the `basic` tool profile.
@@ -27,11 +28,14 @@ All notable changes to this project will be documented in this file.
 - Validated release jobs against the exact annotated tag commit SHA and required non-empty dated changelog sections for release notes.
 - Pinned release-workflow actions to full commit SHAs for the jobs that hold release write or OIDC permissions.
 - Pinned CI and supply-chain workflow actions to full commit SHAs and added a CI-enforced pin scanner.
+- Added a CI/release-enforced agent-surface drift check for tool docs, profile counts, packaged examples, and npm skill/example contents.
+- Made release validation fail early on empty changelog sections and made npm publish reruns skip already-published versions only when the expected dist-tag is correct.
 - Updated `crossbeam-epoch` in the lockfile to clear `RUSTSEC-2026-0204` from the dev-dependency benchmark chain.
 - Added workflow concurrency controls to cancel stale PR validation runs and serialize same-tag release runs.
 - Retired per-tab client locks on tab close/finalize and normalized invalid page asset sizes as unknown to avoid long-lived agent sessions accumulating stale state or fetching misleadingly sized resources.
 - Hardened the live E2E script timeout path and added a CI-covered fake bridge timeout harness so killed MCP bridge processes do not trigger blocking stderr reads or follow-up cleanup requests.
 - Bundled multi-client MCP config examples in the npm package and expanded postinstall hints for Claude Code, Cursor, OpenClaw, Hermes Agent, and skill-aware agents.
+- Switched packaged Cursor and Hermes Agent examples to the full profile so default templates expose all 52 documented MCP tools.
 - Made explicit config paths authoritative, rejected relative upload paths, cleaned pending CDP requests on page asset timeouts, and normalized fetched asset content to base64.
 - Fixed npm package content checks so CI and release jobs verify the bundled agent skill before publish.
 - Included README and LICENSE in the npm package tarball.

@@ -2,22 +2,44 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{BridgeError, Result};
 
-/// Validate URL schemes accepted by navigation-like tools.
-pub fn validate_url(raw_url: &str) -> Result<()> {
+/// Validate and normalize URL strings accepted by navigation-like tools.
+pub fn validate_url(raw_url: &str) -> Result<String> {
     let trimmed = raw_url.trim();
     let lower = trimmed.to_ascii_lowercase();
-    if lower.starts_with("http://") || lower.starts_with("https://") {
-        return Ok(());
+
+    if trimmed
+        .chars()
+        .any(|ch| ch.is_ascii_control() || ch.is_ascii_whitespace() || ch == '\\')
+    {
+        return Err(BridgeError::User(
+            "blocked malformed URL; raw whitespace, control characters, and backslashes are not allowed"
+                .into(),
+        ));
     }
 
-    let scheme = trimmed
-        .split_once(':')
-        .map(|(scheme, _)| scheme)
-        .filter(|scheme| !scheme.is_empty())
-        .unwrap_or("missing");
-    Err(BridgeError::User(format!(
-        "blocked URL scheme {scheme:?}; only http:// and https:// are allowed"
-    )))
+    let authority = if lower.starts_with("http://") {
+        &trimmed["http://".len()..]
+    } else if lower.starts_with("https://") {
+        &trimmed["https://".len()..]
+    } else {
+        let scheme = trimmed
+            .split_once(':')
+            .map(|(scheme, _)| scheme)
+            .filter(|scheme| !scheme.is_empty())
+            .unwrap_or("missing");
+        return Err(BridgeError::User(format!(
+            "blocked URL scheme {scheme:?}; only http:// and https:// are allowed"
+        )));
+    };
+
+    let host = authority.split(['/', '?', '#']).next().unwrap_or_default();
+    if host.is_empty() {
+        return Err(BridgeError::User(
+            "blocked malformed URL; http:// and https:// URLs must include a host".into(),
+        ));
+    }
+
+    Ok(trimmed.to_string())
 }
 
 /// Validate a file path for upload safety.

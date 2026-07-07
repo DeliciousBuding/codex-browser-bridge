@@ -5,7 +5,7 @@
       "args": ["--mode", "mcp"],
       "transport": "stdio",
       "env": {
-        "CODEX_BRIDGE_PROFILE": "network",
+        "CODEX_BRIDGE_PROFILE": "full",
         "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\YOUR_USER\\Downloads"
       }
     }

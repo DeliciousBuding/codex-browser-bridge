@@ -25,7 +25,14 @@ for (const file of workflowFiles(workflowsDir)) {
     if (!match) return;
 
     const spec = match[1].replace(/^["']|["']$/g, "");
-    if (spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("docker://")) {
+    if (spec.startsWith("./") || spec.startsWith("../")) {
+      return;
+    }
+
+    if (spec.startsWith("docker://")) {
+      if (!/@sha256:[0-9a-f]{64}$/i.test(spec)) {
+        failures.push(`${rel}:${index + 1}: docker action refs must use @sha256 digest: ${spec}`);
+      }
       return;
     }
 

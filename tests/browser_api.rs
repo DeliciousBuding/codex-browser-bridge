@@ -55,6 +55,28 @@ fn validate_url_allows_only_http_and_https() {
 }
 
 #[test]
+fn validate_url_rejects_malformed_http_urls() {
+    for url in [
+        "https://",
+        "http://",
+        "https:///path",
+        "https://example.com\r\nHost: evil.test",
+        "https://example.com/a b",
+        "https://example.com\\evil",
+    ] {
+        assert!(validate_url(url).is_err(), "{url:?}");
+    }
+}
+
+#[test]
+fn validate_url_returns_trimmed_url() {
+    assert_eq!(
+        validate_url(" https://example.com/path ").unwrap(),
+        "https://example.com/path"
+    );
+}
+
+#[test]
 fn validate_file_path_rejects_relative_paths() {
     let cwd = std::env::current_dir().unwrap();
     let err = validate_file_path("Cargo.toml", &cwd).unwrap_err();

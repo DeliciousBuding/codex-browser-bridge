@@ -120,7 +120,7 @@ pub async fn close_tab(client: &Client, tab_id: &str) -> Result<()> {
 }
 
 pub async fn navigate(client: &Client, tab_id: &str, url: &str) -> Result<()> {
-    validate_url(url)?;
+    let url = validate_url(url)?;
     let id = parse_tab_id("navigate", tab_id)?;
     client
         .execute_cdp(id, "Page.navigate", Some(json!({ "url": url })))

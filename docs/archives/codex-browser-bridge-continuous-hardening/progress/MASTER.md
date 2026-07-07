@@ -34,7 +34,7 @@
 ## Current Status
 
 **Active Phase**: PR #15 finalization
-**Active Task**: Bundling multi-client examples in the npm package and improving postinstall hints after PR #15 returned green at `d0269fb`.
+**Active Task**: Addressing follow-up review findings after PR #15 returned green at `13ebdea`: stricter URL normalization, agent-surface drift checks, full-profile client examples, and release/npm rerun hardening.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -90,6 +90,7 @@ adaptive:
 | 2026-07-07 | Supply-chain advisory refresh | S | 5/5 | 1 | Updated `crossbeam-epoch` from 0.9.18 to 0.9.20 in `Cargo.lock` to clear `RUSTSEC-2026-0204` from the dev benchmark dependency chain. |
 | 2026-07-07 | Workflow action pin enforcement | S | 5/5 | 0 | Pinned CI and supply-chain workflow actions to full commit SHAs and added a Node scanner enforced in CI. |
 | 2026-07-07 | npm multi-client examples | S | 5/5 | 0 | Bundled `examples/` into the npm package and expanded postinstall hints for Claude Code, Cursor, OpenClaw, Hermes Agent, and skill-aware agents. |
+| 2026-07-07 | Agent surface and URL/release follow-ups | M | 5/5 | 2 | Added CI/release agent-surface drift checks, normalized URL validation before CDP/cookie use, made Cursor/Hermes examples expose the full 52-tool profile, strengthened release changelog/action-pin checks, and added npm publish rerun idempotence. |
 
 ## Quick Status Commands
 
@@ -104,7 +105,7 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 
 ## Next Steps
 
-1. Verify and push npm multi-client examples packaging.
+1. Push the latest URL/agent-surface/release follow-ups.
 2. Wait for PR #15 checks to return green again.
 3. Decide whether to undraft and merge PR #15.
 4. Configure npm Trusted Publisher before the first tokenless release publish.
@@ -138,3 +139,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | workflow-action-pins | Added full-SHA pin enforcement for all external GitHub Actions in CI, release, and supply-chain workflows. |
 | 2026-07-07 | workflow-action-pins-green | PR #15 was mergeable and all remote checks were green at `d0269fb` after full workflow action pin enforcement. |
 | 2026-07-07 | npm-multi-client-examples | Bundled examples into npm package contents and made postinstall hints point to local examples plus skill directories. |
+| 2026-07-07 | agent-surface-url-release | Addressed follow-up review findings for malformed URL inputs, agent docs/profile drift, full-profile packaged examples, release self-checks, and npm publish rerun behavior. |
