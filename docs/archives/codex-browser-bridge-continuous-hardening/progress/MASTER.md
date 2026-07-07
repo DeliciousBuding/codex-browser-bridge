@@ -34,7 +34,7 @@
 ## Current Status
 
 **Active Phase**: PR #15 finalization
-**Active Task**: PR #15 final review follow-ups: deadline-safe CDP writes and stricter cookie parameter validation before browser pipe use.
+**Active Task**: PR #15 final review follow-ups: bounded monitor event capture for network/console tools; next queued stability review is lazy/offline MCP startup and verified reconnect selection.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -99,6 +99,7 @@ adaptive:
 | 2026-07-07 | Harness bounded-wait follow-ups | M | 5/5 | 2 | Bounded mock pipe reads and spawned task joins, removed global env mutation from runtime-info tests, bounded live E2E doctor/cleanup calls, and marked postfetch page-asset total-limit truncation as failed. |
 | 2026-07-07 | Client/release final review follow-ups | M | 5/5 | 5 | Replaced remaining client reconnect test sleeps with bounded polling, added connection epochs so stale read loops cannot tear down fresh reconnects, pruned closed event subscribers, closed PDF streams on IO.read/parse failure, stopped sticky CDP from retrying non-session errors, moved release tag input validation before checkout/repo scripts, and enforced supply-chain job timeouts. |
 | 2026-07-07 | Deadline and cookie validation follow-ups | S | 5/5 | 2 | Rejected expired CDP deadlines before writing side-effecting frames and validated cookie name/value/domain/path/sameSite before set/delete cookie tools touch the browser pipe. |
+| 2026-07-07 | Monitor event capture byte budget | S | 5/5 | 2 | Added a shared 256 KiB drain budget for network/console monitor events, preserved raw observed counts after truncation, filtered network capture to pairable request/response events, and recorded follow-up findings for subscription-time byte bounds plus lazy MCP startup. |
 
 ## Quick Status Commands
 
@@ -113,11 +114,12 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 
 ## Next Steps
 
-1. Push the latest deadline/cookie validation follow-up.
+1. Push the latest monitor event capture byte-budget follow-up.
 2. Wait for PR #15 checks to return green again.
-3. Decide whether to undraft and merge PR #15.
-4. Configure npm Trusted Publisher before the first tokenless release publish.
-5. After PR #15 lands, revisit failing Dependabot PR #14 against the updated MSRV/release baseline.
+3. Consider the next minimal stability slice from subagent review: lazy/offline MCP startup, verified reconnect selection, and absolute MCP install hints for GUI/scheduled agents.
+4. Decide whether to undraft and merge PR #15.
+5. Configure npm Trusted Publisher before the first tokenless release publish.
+6. After PR #15 lands, revisit Dependabot PR #14 against the updated MSRV/release baseline.
 
 ## Session Log
 
@@ -156,3 +158,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | harness-bounded-waits | Addressed subagent findings for unbounded mock pipe reads/task joins, live E2E doctor and cleanup waits, process env mutation in runtime-info tests, and page-asset postfetch failure marking. |
 | 2026-07-07 | client-release-final-review | Addressed subagent findings for stale read-loop reconnect teardown, remaining reconnect-test sleeps, event subscription cleanup, PDF IO stream cleanup on read failure, release tag validation before checkout, and supply-chain timeout enforcement. |
 | 2026-07-07 | deadline-cookie-validation | Addressed subagent findings for late CDP writes after expired deadlines and malformed cookie fields reaching CDP. |
+| 2026-07-07 | monitor-event-budget | Bounded network/console monitor event processing by bytes, kept truncation metadata agent-visible, prevented noisy unpairable Network events from hiding request/response pairs, and queued deeper MCP startup/reconnect work from the incident review. |

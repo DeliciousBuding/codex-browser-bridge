@@ -8,6 +8,7 @@ use crate::error::{BridgeError, Result};
 
 const MAX_WAIT_MS: u64 = 60_000;
 const MAX_CAPTURE_MS: u64 = 30_000;
+const MAX_CAPTURE_EVENT_BYTES: usize = 256 * 1024;
 const MAX_FORM_DELAY_MS: u64 = 1_000;
 const MAX_PDF_BASE64_BYTES: usize = 10 * 1024 * 1024;
 const PDF_STREAM_READ_SIZE: usize = 256 * 1024;
@@ -736,6 +737,14 @@ struct NetEntry {
     mime_type: Option<String>,
 }
 
+struct CapturedEvents {
+    events: Vec<Value>,
+    observed_count: usize,
+    captured_bytes: usize,
+    truncated: bool,
+    limit_reason: Option<&'static str>,
+}
+
 /// Capture `Network.*` events for a duration and pair request↔response into a
 /// structured, agent-friendly list. Enables Network domain, collects for
 /// `duration_ms`, then disables.
@@ -751,15 +760,68 @@ pub async fn network_monitor(client: &Client, tab_id: &str, duration_ms: u64) ->
     client.execute_cdp(id, "Network.disable", None).await.ok();
     client.unsubscribe_events(sub_id).await;
 
-    let events: Vec<Value> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
-    let raw_count = events.len();
-    let requests = pair_network_events(&events);
+    let captured =
+        drain_events_with_byte_budget(&mut rx, MAX_CAPTURE_EVENT_BYTES, is_pairable_network_event);
+    let requests = pair_network_events(&captured.events);
     Ok(json!({
         "duration_ms": duration_ms,
-        "raw_event_count": raw_count,
+        "raw_event_count": captured.observed_count,
+        "captured_event_count": captured.events.len(),
+        "captured_event_bytes": captured.captured_bytes,
+        "truncated": captured.truncated,
+        "limit_reason": captured.limit_reason,
         "request_count": requests.len(),
         "requests": requests
     }))
+}
+
+fn drain_events_with_byte_budget(
+    rx: &mut tokio::sync::mpsc::Receiver<Value>,
+    max_bytes: usize,
+    should_capture: impl Fn(&Value) -> bool,
+) -> CapturedEvents {
+    let mut events = Vec::new();
+    let mut observed_count = 0usize;
+    let mut captured_bytes = 0usize;
+    let mut truncated = false;
+    let mut limit_reason = None;
+
+    while let Ok(event) = rx.try_recv() {
+        observed_count += 1;
+        if !should_capture(&event) {
+            continue;
+        }
+        if truncated {
+            continue;
+        }
+        let Ok(event_bytes) = serde_json::to_vec(&event) else {
+            truncated = true;
+            limit_reason = Some("event_encode_failed");
+            continue;
+        };
+        if captured_bytes.saturating_add(event_bytes.len()) > max_bytes {
+            truncated = true;
+            limit_reason = Some("event_byte_limit");
+            continue;
+        }
+        captured_bytes += event_bytes.len();
+        events.push(event);
+    }
+
+    CapturedEvents {
+        events,
+        observed_count,
+        captured_bytes,
+        truncated,
+        limit_reason,
+    }
+}
+
+fn is_pairable_network_event(event: &Value) -> bool {
+    matches!(
+        event.get("method").and_then(|method| method.as_str()),
+        Some("Network.requestWillBeSent" | "Network.responseReceived")
+    )
 }
 
 /// Pair `Network.requestWillBeSent` + `Network.responseReceived` events by
@@ -848,14 +910,19 @@ pub async fn console_logs(client: &Client, tab_id: &str, duration_ms: u64) -> Re
     tokio::time::sleep(Duration::from_millis(duration_ms)).await;
     client.execute_cdp(id, "Runtime.disable", None).await.ok();
     client.unsubscribe_events(sub_id).await;
-    let mut logs = Vec::new();
-    while let Ok(v) = rx.try_recv() {
-        if let Some(params) = v.get("params") {
-            logs.push(params.clone());
-        }
-    }
+    let captured = drain_events_with_byte_budget(&mut rx, MAX_CAPTURE_EVENT_BYTES, |_| true);
+    let logs: Vec<Value> = captured
+        .events
+        .iter()
+        .filter_map(|v| v.get("params").cloned())
+        .collect();
     Ok(json!({
         "duration_ms": duration_ms,
+        "raw_event_count": captured.observed_count,
+        "captured_event_count": captured.events.len(),
+        "captured_event_bytes": captured.captured_bytes,
+        "truncated": captured.truncated,
+        "limit_reason": captured.limit_reason,
         "log_count": logs.len(),
         "logs": logs
     }))
@@ -1923,6 +1990,65 @@ mod tests {
             json!({"method":"Network.requestWillBeSent","params":{"requestId":"","request":{"url":"https://x","method":"GET"}}}),
         ];
         assert!(pair_network_events(&events).is_empty());
+    }
+
+    #[tokio::test]
+    async fn event_capture_budget_truncates_large_events() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        tx.try_send(
+            json!({"method":"Runtime.consoleAPICalled","params":{"args":[{"value":"ok"}]}}),
+        )
+        .unwrap();
+        tx.try_send(json!({"method":"Runtime.consoleAPICalled","params":{"args":[{"value":"x".repeat(200)}]}}))
+            .unwrap();
+        tx.try_send(json!({"method":"Runtime.consoleAPICalled","params":{"args":[{"value":"after-limit"}]}}))
+            .unwrap();
+        drop(tx);
+
+        let captured = drain_events_with_byte_budget(&mut rx, 120, |_| true);
+
+        assert_eq!(captured.observed_count, 3);
+        assert_eq!(captured.events.len(), 1);
+        assert!(captured.captured_bytes <= 120);
+        assert!(captured.truncated);
+        assert_eq!(captured.limit_reason, Some("event_byte_limit"));
+    }
+
+    #[tokio::test]
+    async fn event_capture_budget_allows_small_events() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        tx.try_send(json!({"method":"Network.requestWillBeSent","params":{"requestId":"1","request":{"url":"https://example.test","method":"GET"}}}))
+            .unwrap();
+        tx.try_send(json!({"method":"Network.responseReceived","params":{"requestId":"1","response":{"status":200,"mimeType":"text/html"}}}))
+            .unwrap();
+        drop(tx);
+
+        let captured = drain_events_with_byte_budget(&mut rx, 4096, |_| true);
+
+        assert_eq!(captured.observed_count, 2);
+        assert_eq!(captured.events.len(), 2);
+        assert!(!captured.truncated);
+        assert_eq!(captured.limit_reason, None);
+        assert_eq!(pair_network_events(&captured.events).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn event_capture_budget_ignores_unpairable_network_noise() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        tx.try_send(json!({"method":"Network.dataReceived","params":{"requestId":"1","dataLength":5000,"payload":"x".repeat(1000)}}))
+            .unwrap();
+        tx.try_send(json!({"method":"Network.requestWillBeSent","params":{"requestId":"1","request":{"url":"https://example.test","method":"GET"}}}))
+            .unwrap();
+        tx.try_send(json!({"method":"Network.responseReceived","params":{"requestId":"1","response":{"status":200,"mimeType":"text/html"}}}))
+            .unwrap();
+        drop(tx);
+
+        let captured = drain_events_with_byte_budget(&mut rx, 4096, is_pairable_network_event);
+
+        assert_eq!(captured.observed_count, 3);
+        assert_eq!(captured.events.len(), 2);
+        assert!(!captured.truncated);
+        assert_eq!(pair_network_events(&captured.events).len(), 1);
     }
 
     // ── storage value parsing (runtime_value_string) ──
