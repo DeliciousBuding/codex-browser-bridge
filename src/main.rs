@@ -55,9 +55,7 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&pipes)?);
         }
         Mode::Mcp => {
-            let client = client::Client::connect(args.pipe.as_deref())
-                .await
-                .context("failed to connect to Codex browser pipe")?;
+            let client = client::Client::lazy(args.pipe.clone());
             // Precedence: CLI flags > config file > env > default.
             let config = config::Config::load();
             if let Some(base) = args.upload_base.clone().or(config.upload_base) {

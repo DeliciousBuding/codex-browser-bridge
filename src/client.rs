@@ -90,8 +90,42 @@ struct ClientInner {
 impl Client {
     pub async fn connect(pipe_name: Option<&str>) -> Result<Self> {
         match pipe_name {
-            Some(name) => Self::from_stream(dial_named_pipe(&discovery::pipe_path(name)).await?),
+            Some(name) => Self::from_stream_inner(
+                dial_named_pipe(&discovery::pipe_path(name)).await?,
+                named_connection_factory(name.to_string()),
+            ),
             None => connect_discovered_client().await,
+        }
+    }
+
+    pub fn lazy(pipe_name: Option<String>) -> Self {
+        let factory = match pipe_name {
+            Some(name) => named_connection_factory(name),
+            None => real_connection_factory(),
+        };
+        Self::from_lazy_inner(factory)
+    }
+
+    fn from_lazy_inner(factory: ConnectionFactory) -> Self {
+        Self {
+            inner: Arc::new(ClientInner {
+                writer: Mutex::new(None),
+                pending: Mutex::new(HashMap::new()),
+                next_id: AtomicU64::new(1),
+                session_id: Uuid::new_v4().to_string(),
+                turn_id: Uuid::new_v4().to_string(),
+                tab_locks: Mutex::new(HashMap::new()),
+                attached_tabs: Mutex::new(HashMap::new()),
+                event_subs: Mutex::new(Vec::new()),
+                next_sub_id: AtomicU64::new(1),
+                connection_epoch: AtomicU64::new(0),
+                #[cfg(test)]
+                read_loop_exits: AtomicU64::new(0),
+                alive: AtomicBool::new(false),
+                reconnect_lock: Mutex::new(()),
+                reconnect_cooldown_until: Mutex::new(None),
+                connection_factory: factory,
+            }),
         }
     }
 
@@ -701,6 +735,13 @@ fn real_connection_factory() -> ConnectionFactory {
     Arc::new(|| Box::pin(async { discover_and_dial_first().await }))
 }
 
+fn named_connection_factory(pipe_name: String) -> ConnectionFactory {
+    Arc::new(move || {
+        let path = discovery::pipe_path(&pipe_name);
+        Box::pin(async move { dial_named_pipe(&path).await })
+    })
+}
+
 fn truncate(s: &str, n: usize) -> String {
     if s.len() <= n {
         s.to_string()
@@ -1042,6 +1083,50 @@ mod reconnect_tests {
         timeout(TEST_STATE_TIMEOUT, ready.notified())
             .await
             .expect("timed out waiting for reconnect factory");
+        let mut new_srv = new_server.lock().await.take().unwrap();
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+        assert!(client.is_alive());
+
+        reply_ok(&mut new_srv).await;
+        let result = task.await.unwrap();
+        assert!(result.is_ok(), "got: {:?}", result.err());
+    }
+
+    #[tokio::test]
+    async fn lazy_client_connects_on_first_request() {
+        let new_server = Arc::new(Mutex::new(None::<DuplexStream>));
+        let ready = Arc::new(Notify::new());
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let factory: ConnectionFactory = {
+            let new_server = Arc::clone(&new_server);
+            let ready = Arc::clone(&ready);
+            let call_count = Arc::clone(&call_count);
+            Arc::new(move || {
+                let new_server = Arc::clone(&new_server);
+                let ready = Arc::clone(&ready);
+                let call_count = Arc::clone(&call_count);
+                Box::pin(async move {
+                    let (c, s) = duplex(4096);
+                    *new_server.lock().await = Some(s);
+                    call_count.fetch_add(1, Ordering::SeqCst);
+                    ready.notify_one();
+                    Ok(c)
+                })
+            })
+        };
+        let client = Client::from_lazy_inner(factory);
+
+        assert!(!client.is_alive());
+        assert_eq!(call_count.load(Ordering::SeqCst), 0);
+
+        let task = tokio::spawn({
+            let client = client.clone();
+            async move { client.send_request("getInfo", None).await }
+        });
+
+        timeout(TEST_STATE_TIMEOUT, ready.notified())
+            .await
+            .expect("timed out waiting for lazy connect factory");
         let mut new_srv = new_server.lock().await.take().unwrap();
         assert_eq!(call_count.load(Ordering::SeqCst), 1);
         assert!(client.is_alive());

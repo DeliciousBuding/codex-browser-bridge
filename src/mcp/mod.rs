@@ -411,6 +411,28 @@ mod resources_prompts_tests {
     }
 
     #[tokio::test]
+    async fn lazy_server_answers_metadata_without_browser_pipe() {
+        let server = Server::new(Client::lazy(None));
+
+        let initialize = server
+            .handle_jsonrpc_line(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#)
+            .await
+            .unwrap();
+        let initialize: Value = serde_json::from_str(&initialize).unwrap();
+        assert_eq!(
+            initialize["result"]["serverInfo"]["name"],
+            "codex-browser-bridge"
+        );
+
+        let tools = server
+            .handle_jsonrpc_line(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#)
+            .await
+            .unwrap();
+        let tools: Value = serde_json::from_str(&tools).unwrap();
+        assert!(tools["result"]["tools"].as_array().unwrap().len() >= 30);
+    }
+
+    #[tokio::test]
     async fn resources_list_advertises_tabs() {
         let server = test_server();
         let resp = server.handle_resources_list(json!(1));
