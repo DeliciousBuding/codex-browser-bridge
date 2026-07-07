@@ -34,7 +34,7 @@
 ## Current Status
 
 **Active Phase**: PR #15 finalization
-**Active Task**: PR #15 is green at `1d3192f`; code, harness, CI, release, npm, docs, and progress hardening are implemented pending final draft/merge and external npm Trusted Publisher setup.
+**Active Task**: PR #15 is being reverified after clearing `RUSTSEC-2026-0204` with a lockfile-only `crossbeam-epoch` update; code, harness, CI, release, npm, docs, and progress hardening are implemented pending final draft/merge and external npm Trusted Publisher setup.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -87,6 +87,7 @@ adaptive:
 | 2026-07-07 | Live E2E timeout cleanup | S | 5/5 | 0 | Killed bridge processes now skip close/finalize cleanup and avoid blocking stderr reads on timeout. |
 | 2026-07-07 | Live E2E timeout gate | S | 5/5 | 0 | Added a fake bridge timeout harness script and wired it into Windows CI/release test jobs. |
 | 2026-07-07 | Release recoverability hardening | S | 5/5 | 2 | Made release jobs share an exact tag commit SHA, required non-empty dated changelog notes, made GitHub Release asset staging rerunnable, published assets before npm visibility, and pinned release actions to SHAs. |
+| 2026-07-07 | Supply-chain advisory refresh | S | 5/5 | 1 | Updated `crossbeam-epoch` from 0.9.18 to 0.9.20 in `Cargo.lock` to clear `RUSTSEC-2026-0204` from the dev benchmark dependency chain. |
 
 ## Quick Status Commands
 
@@ -101,9 +102,10 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 
 ## Next Steps
 
-1. Decide whether to undraft and merge PR #15.
-2. Configure npm Trusted Publisher before the first tokenless release publish.
-3. After PR #15 lands, revisit failing Dependabot PR #14 against the updated MSRV/release baseline.
+1. Push the `RUSTSEC-2026-0204` lockfile fix and wait for PR #15 checks to return green.
+2. Decide whether to undraft and merge PR #15.
+3. Configure npm Trusted Publisher before the first tokenless release publish.
+4. After PR #15 lands, revisit failing Dependabot PR #14 against the updated MSRV/release baseline.
 
 ## Session Log
 
@@ -129,3 +131,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | live-e2e-timeout-gate | Added a CI/release fake bridge timeout harness for live E2E cleanup regressions. |
 | 2026-07-07 | release-recoverability | Hardened release reruns, exact tag-SHA checkout, changelog-note validation, npm installability ordering, and release-workflow action pinning. |
 | 2026-07-07 | remote-ci-green | PR #15 was mergeable and all remote checks were green at `1d3192f`; remaining gates are draft status, merge decision, and npm Trusted Publisher setup. |
+| 2026-07-07 | rustsec-2026-0204 | Cleared a fresh cargo-deny failure by updating `crossbeam-epoch` to 0.9.20 and verifying cargo-deny, Rust tests, clippy, npm tests, and whitespace locally. |
