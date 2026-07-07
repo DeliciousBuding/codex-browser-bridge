@@ -142,6 +142,8 @@ async function run() {
     const installRoot = path.join(tmp, "install-root");
     const outDir = path.join(tmp, "bin");
     fs.mkdirSync(installRoot);
+    fs.mkdirSync(path.join(installRoot, "skills", "codex-browser"), { recursive: true });
+    fs.mkdirSync(path.join(installRoot, "examples"), { recursive: true });
     fs.writeFileSync(
       path.join(installRoot, "checksums.json"),
       JSON.stringify({ files: { "codex-browser-bridge.exe": binaryHash } })
@@ -166,6 +168,8 @@ async function run() {
     assert.ok(embeddedCalls[0].endsWith("/v1.10.0/codex-browser-bridge.exe"));
     assert.deepStrictEqual(fs.readFileSync(path.join(outDir, "codex-browser-bridge.exe")), binary);
     assert.ok(installLogs.some((line) => line.includes(`Installed: ${path.join(outDir, "codex-browser-bridge.exe")}`)));
+    assert.ok(installLogs.some((line) => line.includes("Skill:") && line.includes(path.join(installRoot, "skills", "codex-browser"))));
+    assert.ok(installLogs.some((line) => line.includes("MCP config examples:") && line.includes(path.join(installRoot, "examples"))));
 
     const hintsRoot = path.join(tmp, "hints-root");
     fs.mkdirSync(path.join(hintsRoot, "skills", "codex-browser"), { recursive: true });
