@@ -559,7 +559,7 @@ impl Client {
         self.send_request_with_timeout(
             "attach",
             Some(json!({ "tabId": tab_id })),
-            remaining(deadline),
+            remaining_before_write("attach", deadline)?,
         )
         .await
         .map(|_| ())
@@ -569,7 +569,7 @@ impl Client {
         self.send_request_with_timeout(
             "detach",
             Some(json!({ "tabId": tab_id })),
-            remaining(deadline),
+            remaining_before_write("detach", deadline)?,
         )
         .await
         .map(|_| ())
@@ -590,7 +590,7 @@ impl Client {
                     "method": method,
                     "commandParams": params.unwrap_or_else(|| json!({}))
                 })),
-                remaining(deadline),
+                remaining_before_write(method, deadline)?,
             )
             .await?;
         check_cdp_error(method, &raw)?;
@@ -721,6 +721,13 @@ fn remaining(deadline: Instant) -> Duration {
         .max(Duration::from_nanos(1))
 }
 
+fn remaining_before_write(method: &str, deadline: Instant) -> Result<Duration> {
+    if Instant::now() >= deadline {
+        return Err(BridgeError::Timeout(method.to_string()));
+    }
+    Ok(remaining(deadline))
+}
+
 /// Errors that indicate the CDP session is no longer valid and needs re-attach.
 fn is_session_invalid_error(err: &BridgeError) -> bool {
     let msg = err.to_string().to_ascii_lowercase();
@@ -788,6 +795,12 @@ mod reconnect_tests {
             .expect("timed out waiting for client request")
             .unwrap();
         serde_json::from_slice(&frame).unwrap()
+    }
+
+    async fn no_request(server: &mut DuplexStream, reason: &str) {
+        if let Ok(request) = timeout(Duration::from_millis(50), next_request(server)).await {
+            panic!("{reason}: unexpected pipe request {request}");
+        }
     }
 
     /// Read the next request frame off the server side and reply with `result`.
@@ -909,6 +922,24 @@ mod reconnect_tests {
         let err = handle.await.unwrap().unwrap_err();
         assert!(matches!(err, BridgeError::Timeout(_)), "got: {err}");
         expect_pending_len(&client, 0).await;
+    }
+
+    #[tokio::test]
+    async fn expired_cdp_deadline_does_not_write_frame() {
+        let (client, mut server) = test_client(4096).await;
+
+        let err = client
+            .execute_cdp_raw_until(
+                7,
+                "Runtime.evaluate",
+                Some(json!({"expression":"window.sideEffect = true"})),
+                Instant::now(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, BridgeError::Timeout(_)), "got: {err}");
+        no_request(&mut server, "expired deadline should fail before pipe use").await;
     }
 
     #[tokio::test]

@@ -491,8 +491,8 @@ impl super::Server {
 
     async fn handle_network_set_cookie(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
-        let name = required_str(&args, "name")?;
-        let value = required_str(&args, "value")?;
+        let name = security::validate_cookie_name(required_str(&args, "name")?)?;
+        let value = security::validate_cookie_value(required_str(&args, "value")?)?;
 
         let normalized_url = args
             .get("url")
@@ -510,9 +510,11 @@ impl super::Server {
                 obj.insert("url".into(), json!(url));
             }
             if let Some(domain) = args.get("domain").and_then(Value::as_str) {
+                let domain = security::validate_cookie_domain(domain)?;
                 obj.insert("domain".into(), json!(domain));
             }
             if let Some(path) = args.get("path").and_then(Value::as_str) {
+                let path = security::validate_cookie_path(path)?;
                 obj.insert("path".into(), json!(path));
             }
             if let Some(http_only) = args.get("httpOnly").and_then(Value::as_bool) {
@@ -522,6 +524,7 @@ impl super::Server {
                 obj.insert("secure".into(), json!(secure));
             }
             if let Some(same_site) = args.get("sameSite").and_then(Value::as_str) {
+                let same_site = security::validate_cookie_same_site(same_site)?;
                 obj.insert("sameSite".into(), json!(same_site));
             }
         }
@@ -761,7 +764,7 @@ impl super::Server {
 
     async fn handle_delete_cookies(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
-        let name = required_str(&args, "name")?;
+        let name = security::validate_cookie_name(required_str(&args, "name")?)?;
         let mut params = json!({ "name": name });
         if let Some(obj) = params.as_object_mut() {
             if let Some(url) = args.get("url").and_then(Value::as_str) {
@@ -769,9 +772,11 @@ impl super::Server {
                 obj.insert("url".into(), json!(url));
             }
             if let Some(domain) = args.get("domain").and_then(Value::as_str) {
+                let domain = security::validate_cookie_domain(domain)?;
                 obj.insert("domain".into(), json!(domain));
             }
             if let Some(path) = args.get("path").and_then(Value::as_str) {
+                let path = security::validate_cookie_path(path)?;
                 obj.insert("path".into(), json!(path));
             }
         }

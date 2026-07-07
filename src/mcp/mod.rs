@@ -956,6 +956,89 @@ mod tools_call_tests {
             .unwrap()
             .contains("only http:// and https:// are allowed"));
     }
+
+    #[tokio::test]
+    async fn cookie_tools_reject_malformed_cookie_fields_before_cdp() {
+        let (server, mut pipe) = test_server_with_pipe(ToolProfile::Full);
+
+        let set_cookie = call(
+            &server,
+            json!({
+                "jsonrpc":"2.0",
+                "id":1,
+                "method":"tools/call",
+                "params":{
+                    "name":"codex_network_set_cookie",
+                    "arguments":{
+                        "tab_id":"1",
+                        "name":"bad;name",
+                        "value":"ok",
+                        "domain":"example.com",
+                        "path":"/",
+                        "sameSite":"Lax"
+                    }
+                }
+            }),
+        )
+        .await;
+        assert_eq!(set_cookie["result"]["isError"], true);
+        assert!(set_cookie["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("malformed cookie name"));
+        no_request(&mut pipe, "invalid cookie name should fail before pipe use").await;
+
+        let set_same_site = call(
+            &server,
+            json!({
+                "jsonrpc":"2.0",
+                "id":2,
+                "method":"tools/call",
+                "params":{
+                    "name":"codex_network_set_cookie",
+                    "arguments":{
+                        "tab_id":"1",
+                        "name":"sid",
+                        "value":"ok",
+                        "domain":"example.com",
+                        "path":"/",
+                        "sameSite":"lax"
+                    }
+                }
+            }),
+        )
+        .await;
+        assert_eq!(set_same_site["result"]["isError"], true);
+        assert!(set_same_site["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("malformed cookie sameSite"));
+        no_request(&mut pipe, "invalid sameSite should fail before pipe use").await;
+
+        let delete = call(
+            &server,
+            json!({
+                "jsonrpc":"2.0",
+                "id":3,
+                "method":"tools/call",
+                "params":{
+                    "name":"codex_delete_cookies",
+                    "arguments":{"tab_id":"1","name":"sid","domain":"https://example.com","path":"/"}
+                }
+            }),
+        )
+        .await;
+        assert_eq!(delete["result"]["isError"], true);
+        assert!(delete["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("malformed cookie domain"));
+        no_request(
+            &mut pipe,
+            "invalid cookie domain should fail before pipe use",
+        )
+        .await;
+    }
 }
 
 #[cfg(test)]
