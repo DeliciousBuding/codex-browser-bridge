@@ -17,8 +17,8 @@ jobs:
   rust:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
         with:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
           components: clippy
@@ -37,7 +37,7 @@ jobs:
       - name: Install cargo-llvm-cov
         # Prebuilt binary via taiki-e — avoids `cargo install` compiling the
         # latest cargo-llvm-cov (0.8.7+ needs rustc 1.87, but our MSRV is 1.85).
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2
         with:
           tool: cargo-llvm-cov
       - name: Coverage
@@ -46,7 +46,7 @@ jobs:
           rustup component add llvm-tools-preview
           cargo llvm-cov --locked --lcov --output-path lcov.info
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
         with:
           files: lcov.info
           fail_ci_if_error: false
@@ -61,10 +61,13 @@ jobs:
   npm:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "22"
+      - name: Check GitHub Action pins
+        shell: bash
+        run: node scripts/check-actions-pinned.js
       - name: Test npm installer helpers
         shell: bash
         run: |
@@ -83,8 +86,8 @@ jobs:
     # platform-agnostic logic (reconnect state machine, frame round-trip).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
         with:
           components: clippy
       - name: Test non-Windows harness

@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - Staged GitHub Release assets through a recoverable draft/update path, then published the GitHub Release before npm so npm installs can immediately download public binaries.
 - Validated release jobs against the exact annotated tag commit SHA and required non-empty dated changelog sections for release notes.
 - Pinned release-workflow actions to full commit SHAs for the jobs that hold release write or OIDC permissions.
+- Pinned CI and supply-chain workflow actions to full commit SHAs and added a CI-enforced pin scanner.
 - Updated `crossbeam-epoch` in the lockfile to clear `RUSTSEC-2026-0204` from the dev-dependency benchmark chain.
 - Added workflow concurrency controls to cancel stale PR validation runs and serialize same-tag release runs.
 - Retired per-tab client locks on tab close/finalize and normalized invalid page asset sizes as unknown to avoid long-lived agent sessions accumulating stale state or fetching misleadingly sized resources.

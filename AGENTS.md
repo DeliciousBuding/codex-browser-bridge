@@ -55,6 +55,8 @@ npm --prefix npm test              # npm installer/package helper 测试
 
 Release 时遵循 `docs/release-process.md`：确保 `Cargo.toml` 和 `npm/package.json` 版本号与 tag 一致，`CHANGELOG.md` 有对应段，npm 包 dry-run 包含 `skills/codex-browser/SKILL.md`。npm 发布走 Trusted Publishing/OIDC，不在 GitHub secrets 中放 npm write token。
 
+GitHub workflow 中的外部 `uses:` 必须固定到完整 commit SHA，并保留相邻版本注释；修改 workflow 后运行 `node scripts/check-actions-pinned.js`。
+
 ## 源码结构
 
 ```
