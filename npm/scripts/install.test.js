@@ -15,6 +15,7 @@ const {
   sha256,
 } = require("./install");
 const { requiredFilesForEnv } = require("./check-package");
+const { packageJsonForPublish } = require("./prepare-package");
 
 const hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const binary = Buffer.from("fake binary");
@@ -138,6 +139,18 @@ async function run() {
       "skills/codex-browser/SKILL.md",
       "checksums.json",
     ]);
+    assert.deepStrictEqual(
+      packageJsonForPublish({
+        name: "pkg",
+        scripts: {
+          test: "node test.js",
+          prepack: "node prepack.js",
+          postpack: "node postpack.js",
+          postinstall: "node install.js",
+        },
+      }).scripts,
+      { postinstall: "node install.js" }
+    );
 
     const installRoot = path.join(tmp, "install-root");
     const outDir = path.join(tmp, "bin");

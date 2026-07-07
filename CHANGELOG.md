@@ -36,6 +36,7 @@ All notable changes to this project will be documented in this file.
 - Retired idle per-tab locks after attach failures and made `codex_print_pdf` use bounded CDP streaming with explicit stream close instead of holding unbounded PDF base64 in memory.
 - Hardened the live E2E script timeout path and added a CI-covered fake bridge timeout harness so killed MCP bridge processes do not trigger blocking stderr reads or follow-up cleanup requests; stderr is now drained asynchronously so verbose bridge logs cannot block MCP responses.
 - Bundled multi-client MCP config examples in the npm package and expanded postinstall hints for Claude Code, Cursor, OpenClaw, Hermes Agent, and skill-aware agents.
+- Trimmed the published npm package scripts to `postinstall` only while preserving repo-local dev scripts, so installed tarballs do not advertise helper scripts that are not shipped.
 - Switched packaged Cursor and Hermes Agent examples to the full profile so default templates expose all 52 documented MCP tools.
 - Made explicit config paths authoritative, rejected relative upload paths, cleaned pending CDP requests on page asset timeouts, and normalized fetched asset content to base64.
 - Fixed npm package content checks so CI and release jobs verify the bundled agent skill before publish.
