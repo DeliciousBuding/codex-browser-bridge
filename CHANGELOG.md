@@ -33,6 +33,7 @@ All notable changes to this project will be documented in this file.
 - Updated `crossbeam-epoch` in the lockfile to clear `RUSTSEC-2026-0204` from the dev-dependency benchmark chain.
 - Added workflow concurrency controls to cancel stale PR validation runs and serialize same-tag release runs.
 - Retired per-tab client locks on tab close/finalize and normalized invalid page asset sizes as unknown to avoid long-lived agent sessions accumulating stale state or fetching misleadingly sized resources.
+- Retired idle per-tab locks after attach failures and made `codex_print_pdf` use bounded CDP streaming with explicit stream close instead of holding unbounded PDF base64 in memory.
 - Hardened the live E2E script timeout path and added a CI-covered fake bridge timeout harness so killed MCP bridge processes do not trigger blocking stderr reads or follow-up cleanup requests.
 - Bundled multi-client MCP config examples in the npm package and expanded postinstall hints for Claude Code, Cursor, OpenClaw, Hermes Agent, and skill-aware agents.
 - Switched packaged Cursor and Hermes Agent examples to the full profile so default templates expose all 52 documented MCP tools.

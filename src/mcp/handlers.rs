@@ -692,10 +692,10 @@ impl super::Server {
 
     async fn handle_print_pdf(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
-        let data = browser::print_pdf(&self.client, tab_id).await?;
+        let base64_len = browser::print_pdf(&self.client, tab_id).await?;
         Ok(vec![Content::text(format!(
-            "PDF generated for tab {tab_id} ({} bytes base64). Save and decode as application/pdf.",
-            data.len()
+            "PDF generated for tab {tab_id} ({} bytes base64). Content is streamed and not embedded in the MCP response.",
+            base64_len
         ))])
     }
 

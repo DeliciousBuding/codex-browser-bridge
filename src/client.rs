@@ -443,11 +443,12 @@ impl Client {
         // budget even if the sticky fast-path just consumed STICKY_FAST_TIMEOUT.
         let deadline = Instant::now() + request_timeout;
         self.detach_tab_until(tab_id, deadline).await.ok();
-        self.attach_tab_until(tab_id, deadline)
-            .await
-            .map_err(|err| {
-                BridgeError::Protocol(format!("attach failed for tab {tab_id}: {err}"))
-            })?;
+        if let Err(err) = self.attach_tab_until(tab_id, deadline).await {
+            self.retire_current_tab_state(tab_id).await;
+            return Err(BridgeError::Protocol(format!(
+                "attach failed for tab {tab_id}: {err}"
+            )));
+        }
         self.inner.attached_tabs.lock().await.insert(tab_id, true);
 
         match self
@@ -458,13 +459,12 @@ impl Client {
             Err(err) if is_session_invalid_error(&err) => {
                 self.inner.attached_tabs.lock().await.remove(&tab_id);
                 self.detach_tab_until(tab_id, deadline).await.ok();
-                self.attach_tab_until(tab_id, deadline)
-                    .await
-                    .map_err(|err| {
-                        BridgeError::Protocol(format!(
-                            "retry attach failed for tab {tab_id}: {err}"
-                        ))
-                    })?;
+                if let Err(err) = self.attach_tab_until(tab_id, deadline).await {
+                    self.retire_current_tab_state(tab_id).await;
+                    return Err(BridgeError::Protocol(format!(
+                        "retry attach failed for tab {tab_id}: {err}"
+                    )));
+                }
                 self.inner.attached_tabs.lock().await.insert(tab_id, true);
                 self.execute_cdp_raw_until(tab_id, method, params, deadline)
                     .await
@@ -485,6 +485,18 @@ impl Client {
         let mut locks = self.inner.tab_locks.lock().await;
         if let Some(lock) = locks.get(&tab_id) {
             if Arc::strong_count(lock) == 1 {
+                locks.remove(&tab_id);
+            }
+        }
+    }
+
+    async fn retire_current_tab_state(&self, tab_id: i64) {
+        self.inner.attached_tabs.lock().await.remove(&tab_id);
+        let mut locks = self.inner.tab_locks.lock().await;
+        if let Some(lock) = locks.get(&tab_id) {
+            // The current execute_cdp call still owns one Arc while holding the
+            // guard. Remove only when there are no other waiters.
+            if Arc::strong_count(lock) <= 2 {
                 locks.remove(&tab_id);
             }
         }
@@ -746,6 +758,18 @@ mod reconnect_tests {
         req
     }
 
+    async fn reply_error(server: &mut DuplexStream, code: i64, message: &str) {
+        let frame = decode_frame(server).await.unwrap();
+        let req: Value = serde_json::from_slice(&frame).unwrap();
+        let id = req["id"].as_u64().unwrap();
+        encode_frame(
+            server,
+            &json!({"id": id, "error": {"code": code, "message": message}}),
+        )
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn normal_roundtrip_tracks_pending() {
         let (client, mut server) = test_client(4096).await;
@@ -945,6 +969,26 @@ mod reconnect_tests {
         assert_eq!(client.tab_lock_len_for_test().await, 1);
         drop(lock);
         client.clear_tab_state().await;
+        assert_eq!(client.tab_lock_len_for_test().await, 0);
+    }
+
+    #[tokio::test]
+    async fn attach_failure_retires_idle_tab_lock() {
+        let (client, mut server) = test_client(4096).await;
+        let task = tokio::spawn({
+            let client = client.clone();
+            async move { client.execute_cdp(7, "Runtime.evaluate", None).await }
+        });
+
+        let detach = reply_ok_and_return_request(&mut server).await;
+        assert_eq!(detach["method"], "detach");
+        reply_error(&mut server, -32000, "No target with given id").await;
+
+        let err = task.await.unwrap().unwrap_err();
+        assert!(
+            err.to_string().contains("attach failed for tab 7"),
+            "got: {err}"
+        );
         assert_eq!(client.tab_lock_len_for_test().await, 0);
     }
 }

@@ -100,3 +100,56 @@ async fn blocked_navigation_and_cdp_methods_do_not_touch_pipe() {
         "blocked calls should fail before writing a frame"
     );
 }
+
+#[tokio::test]
+async fn print_pdf_uses_bounded_stream_and_closes_handle() {
+    let (client, mut server) = test_client();
+
+    let pdf_task = tokio::spawn({
+        let client = client.clone();
+        async move { browser::print_pdf(&client, "7").await }
+    });
+
+    let detach = next_request(&mut server).await;
+    assert_eq!(detach["method"], "detach");
+    reply_result(&mut server, &detach, json!({})).await;
+
+    let attach = next_request(&mut server).await;
+    assert_eq!(attach["method"], "attach");
+    reply_result(&mut server, &attach, json!({})).await;
+
+    let print = next_request(&mut server).await;
+    assert_eq!(print["method"], "executeCdp");
+    assert_eq!(print["params"]["method"], "Page.printToPDF");
+    assert_eq!(
+        print["params"]["commandParams"]["transferMode"],
+        "ReturnAsStream"
+    );
+    reply_result(&mut server, &print, json!({"stream":"pdf-stream"})).await;
+
+    let read1 = next_request(&mut server).await;
+    assert_eq!(read1["params"]["method"], "IO.read");
+    assert_eq!(read1["params"]["commandParams"]["handle"], "pdf-stream");
+    reply_result(
+        &mut server,
+        &read1,
+        json!({"data":"ZmFrZQ==","base64Encoded":true,"eof":false}),
+    )
+    .await;
+
+    let read2 = next_request(&mut server).await;
+    assert_eq!(read2["params"]["method"], "IO.read");
+    reply_result(
+        &mut server,
+        &read2,
+        json!({"data":"cGRm","base64Encoded":true,"eof":true}),
+    )
+    .await;
+
+    let close = next_request(&mut server).await;
+    assert_eq!(close["params"]["method"], "IO.close");
+    assert_eq!(close["params"]["commandParams"]["handle"], "pdf-stream");
+    reply_result(&mut server, &close, json!({})).await;
+
+    assert_eq!(pdf_task.await.unwrap().unwrap(), 12);
+}

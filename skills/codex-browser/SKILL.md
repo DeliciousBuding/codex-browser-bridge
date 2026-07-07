@@ -64,7 +64,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 |------|-------------|
 | `codex_screenshot` | Viewport PNG. **Times out on background tabs** — call `codex_bring_to_front` first. |
 | `codex_screenshot_element` | Capture a single element via clipped screenshot |
-| `codex_print_pdf` | Render page to PDF via `Page.printToPDF` |
+| `codex_print_pdf` | Render page to PDF via bounded `Page.printToPDF` stream; returns a size summary, not embedded PDF bytes |
 | `codex_bring_to_front` | Activate a background tab. Restores its rendering pipeline so screenshot/CDP calls respond again. |
 | `codex_dialog` | Handle `alert`/`confirm`/`prompt`. Accept or dismiss. |
 

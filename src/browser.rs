@@ -9,6 +9,8 @@ use crate::error::{BridgeError, Result};
 const MAX_WAIT_MS: u64 = 60_000;
 const MAX_CAPTURE_MS: u64 = 30_000;
 const MAX_FORM_DELAY_MS: u64 = 1_000;
+const MAX_PDF_BASE64_BYTES: usize = 10 * 1024 * 1024;
+const PDF_STREAM_READ_SIZE: usize = 256 * 1024;
 
 fn bounded_duration_ms(name: &str, value: u64, default_ms: u64, max_ms: u64) -> Result<u64> {
     let value = if value == 0 { default_ms } else { value };
@@ -402,23 +404,102 @@ pub async fn hover(client: &Client, tab_id: &str, selector: &str) -> Result<()> 
     parse_action_result(&raw, "hover")
 }
 
-/// Render the page to PDF via `Page.printToPDF`. Returns base64-encoded PDF.
-pub async fn print_pdf(client: &Client, tab_id: &str) -> Result<String> {
+/// Render the page to PDF via `Page.printToPDF`. Returns base64 byte count.
+pub async fn print_pdf(client: &Client, tab_id: &str) -> Result<usize> {
     let id = parse_tab_id("print_pdf", tab_id)?;
     let raw = client
         .execute_cdp(
             id,
             "Page.printToPDF",
-            Some(json!({ "format": "A4", "printBackground": true })),
+            Some(json!({
+                "format": "A4",
+                "printBackground": true,
+                "transferMode": "ReturnAsStream"
+            })),
         )
         .await?;
     #[derive(Deserialize)]
     struct Pdf {
-        data: String,
+        data: Option<String>,
+        stream: Option<String>,
     }
     let pdf: Pdf = serde_json::from_str(raw.get())
         .map_err(|err| BridgeError::Protocol(format!("parse printToPDF response: {err}")))?;
-    Ok(pdf.data)
+    if let Some(stream) = pdf.stream {
+        return read_pdf_stream_base64_len(client, id, &stream).await;
+    }
+    let data = pdf
+        .data
+        .ok_or_else(|| BridgeError::Protocol("printToPDF response missing data/stream".into()))?;
+    ensure_pdf_base64_budget(data.len())?;
+    Ok(data.len())
+}
+
+async fn read_pdf_stream_base64_len(client: &Client, tab_id: i64, stream: &str) -> Result<usize> {
+    #[derive(Deserialize)]
+    struct StreamChunk {
+        #[serde(default)]
+        data: String,
+        #[serde(default, rename = "base64Encoded")]
+        base64_encoded: bool,
+        #[serde(default)]
+        eof: bool,
+    }
+
+    let mut total = 0usize;
+    loop {
+        let raw = client
+            .execute_cdp(
+                tab_id,
+                "IO.read",
+                Some(json!({ "handle": stream, "size": PDF_STREAM_READ_SIZE })),
+            )
+            .await?;
+        let chunk: StreamChunk = serde_json::from_str(raw.get())
+            .map_err(|err| BridgeError::Protocol(format!("parse IO.read response: {err}")))?;
+        if !chunk.data.is_empty() {
+            let encoded_len = if chunk.base64_encoded {
+                chunk.data.len()
+            } else {
+                general_purpose::STANDARD
+                    .encode(chunk.data.as_bytes())
+                    .len()
+            };
+            total = total.checked_add(encoded_len).ok_or_else(|| {
+                BridgeError::User("PDF output is too large to count safely".into())
+            })?;
+            if let Err(err) = ensure_pdf_base64_budget(total) {
+                close_cdp_stream(client, tab_id, stream).await;
+                return Err(err);
+            }
+        } else if !chunk.eof {
+            close_cdp_stream(client, tab_id, stream).await;
+            return Err(BridgeError::Protocol(
+                "IO.read returned an empty chunk without eof".into(),
+            ));
+        }
+
+        if chunk.eof {
+            close_cdp_stream(client, tab_id, stream).await;
+            return Ok(total);
+        }
+    }
+}
+
+async fn close_cdp_stream(client: &Client, tab_id: i64, stream: &str) {
+    client
+        .execute_cdp(tab_id, "IO.close", Some(json!({ "handle": stream })))
+        .await
+        .ok();
+}
+
+fn ensure_pdf_base64_budget(len: usize) -> Result<()> {
+    if len > MAX_PDF_BASE64_BYTES {
+        return Err(BridgeError::User(format!(
+            "PDF output too large: {len} base64 bytes exceeds limit {MAX_PDF_BASE64_BYTES}"
+        )));
+    }
+    Ok(())
 }
 
 // ── Storage ─────────────────────────────────────────────────────
@@ -1766,6 +1847,12 @@ mod tests {
         }
 
         assert!(validate_generic_cdp_method("DOM.getDocument").is_ok());
+    }
+
+    #[test]
+    fn pdf_budget_rejects_oversized_base64() {
+        assert!(ensure_pdf_base64_budget(MAX_PDF_BASE64_BYTES).is_ok());
+        assert!(ensure_pdf_base64_budget(MAX_PDF_BASE64_BYTES + 1).is_err());
     }
 
     // ── network_monitor event pairing (pair_network_events) ──

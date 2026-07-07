@@ -201,7 +201,7 @@ JavaScript, CDP, or screenshot payloads by accident:
 | `codex_emulate_device` | Emulate mobile viewport (`reset=true` to clear) |
 | `codex_screenshot` | Capture viewport screenshot; oversized images return a summary |
 | `codex_screenshot_element` | Capture a single element by selector; oversized images return a summary |
-| `codex_print_pdf` | Render page to PDF |
+| `codex_print_pdf` | Render page to PDF via bounded CDP stream; returns a size summary, not embedded PDF bytes |
 | `codex_bring_to_front` | Activate a background tab (fixes screenshot timeouts) |
 | `codex_dialog` | Handle alert / confirm / prompt |
 | `codex_performance_metrics` | DOM nodes, JS heap, event listeners (Performance) |

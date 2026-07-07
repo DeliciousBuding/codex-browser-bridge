@@ -172,7 +172,7 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 | `codex_emulate_device` | 模拟移动端视口（`reset=true` 清除） |
 | `codex_screenshot` | 截取视口截图，超大图片返回摘要 |
 | `codex_screenshot_element` | 截取单个元素，超大图片返回摘要 |
-| `codex_print_pdf` | 渲染页面为 PDF |
+| `codex_print_pdf` | 通过有界 CDP stream 渲染 PDF；只返回大小摘要，不嵌入 PDF 内容 |
 | `codex_bring_to_front` | 激活后台标签（修复截图超时） |
 | `codex_dialog` | 处理 alert / confirm / prompt |
 | `codex_performance_metrics` | DOM 节点数、JS 堆、事件监听数（性能） |
