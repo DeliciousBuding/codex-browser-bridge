@@ -34,7 +34,7 @@
 ## Current Status
 
 **Active Phase**: PR #15 finalization
-**Active Task**: Addressing remaining npm package hygiene after PR #15 returned green at `750e723`: publish tarball scripts should only expose shipped runtime behavior.
+**Active Task**: Addressing PR #15 npm CI portability after tarball script hygiene: package manifest inspection must work on Windows Git Bash and fail fast on stale package backups.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -94,6 +94,7 @@ adaptive:
 | 2026-07-07 | Resource-use follow-ups | M | 5/5 | 1 | Retired idle tab locks on attach failure and changed `codex_print_pdf` to bounded `ReturnAsStream`/`IO.read` processing with `IO.close`, plus mock tests for the stream sequence and PDF size budget. |
 | 2026-07-07 | Live E2E stderr drain | S | 5/5 | 0 | Drained redirected bridge stderr asynchronously and strengthened the fake live-E2E timeout harness so stderr flood must not block initialize/create-tab before the expected tool-call timeout. |
 | 2026-07-07 | npm tarball script hygiene | S | 5/5 | 0 | Made `prepack` stage a publish-only package manifest containing only `postinstall`, restored the dev manifest in `postpack`, and made package checks inspect the real tarball manifest. |
+| 2026-07-07 | npm tarball manifest portability | S | 5/5 | 1 | Made packed manifest extraction use a tarball-relative path for Windows Git Bash portability and added fail-fast handling plus tests for stale publish manifest backups. |
 
 ## Quick Status Commands
 
@@ -146,3 +147,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | resource-use-followups | Addressed remaining resource-use findings for attach-failure tab lock cleanup and bounded streamed PDF generation. |
 | 2026-07-07 | live-e2e-stderr-drain | Addressed the remaining live-E2E harness stderr backpressure risk with async stderr draining and a stronger fake-bridge gate. |
 | 2026-07-07 | npm-tarball-script-hygiene | Addressed published npm package script hygiene by stripping dev-only scripts from the generated tarball manifest and checking the packed manifest contents. |
+| 2026-07-07 | npm-tarball-manifest-portability | Addressed Windows Git Bash tar path handling in the npm package checker and hardened stale package-backup handling. |

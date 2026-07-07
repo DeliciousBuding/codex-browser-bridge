@@ -21,13 +21,18 @@ function packageJsonForPublish(pkg) {
   };
 }
 
-function stagePackageJson() {
-  if (!fs.existsSync(packageJsonBackupPath)) {
-    fs.copyFileSync(packageJsonPath, packageJsonBackupPath);
+function stagePackageJson(options = {}) {
+  const targetPackageJsonPath = options.packageJsonPath || packageJsonPath;
+  const targetPackageJsonBackupPath = options.packageJsonBackupPath || packageJsonBackupPath;
+  if (fs.existsSync(targetPackageJsonBackupPath)) {
+    throw new Error(
+      `stale package backup exists at ${targetPackageJsonBackupPath}; run node scripts/clean-package.js or inspect it before packing`
+    );
   }
-  const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+  fs.copyFileSync(targetPackageJsonPath, targetPackageJsonBackupPath);
+  const pkg = JSON.parse(fs.readFileSync(targetPackageJsonPath, "utf8"));
   fs.writeFileSync(
-    packageJsonPath,
+    targetPackageJsonPath,
     `${JSON.stringify(packageJsonForPublish(pkg), null, 2)}\n`
   );
 }
@@ -51,4 +56,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { main, packageJsonForPublish };
+module.exports = { main, packageJsonForPublish, stagePackageJson };

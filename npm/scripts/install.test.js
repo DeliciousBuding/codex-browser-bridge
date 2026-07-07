@@ -15,7 +15,7 @@ const {
   sha256,
 } = require("./install");
 const { requiredFilesForEnv } = require("./check-package");
-const { packageJsonForPublish } = require("./prepare-package");
+const { packageJsonForPublish, stagePackageJson } = require("./prepare-package");
 
 const hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const binary = Buffer.from("fake binary");
@@ -150,6 +150,35 @@ async function run() {
         },
       }).scripts,
       { postinstall: "node install.js" }
+    );
+    const stagingPackageJsonPath = path.join(tmp, "stage-package.json");
+    const stagingPackageJsonBackupPath = path.join(tmp, "stage-package.json.backup");
+    fs.writeFileSync(
+      stagingPackageJsonPath,
+      `${JSON.stringify({
+        name: "pkg",
+        scripts: {
+          test: "node test.js",
+          prepack: "node prepack.js",
+          postinstall: "node install.js",
+        },
+      })}\n`
+    );
+    stagePackageJson({
+      packageJsonPath: stagingPackageJsonPath,
+      packageJsonBackupPath: stagingPackageJsonBackupPath,
+    });
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(stagingPackageJsonPath, "utf8")).scripts, {
+      postinstall: "node install.js",
+    });
+    assert.match(fs.readFileSync(stagingPackageJsonBackupPath, "utf8"), /"prepack"/);
+    assert.throws(
+      () =>
+        stagePackageJson({
+          packageJsonPath: stagingPackageJsonPath,
+          packageJsonBackupPath: stagingPackageJsonBackupPath,
+        }),
+      /stale package backup exists/
     );
 
     const installRoot = path.join(tmp, "install-root");

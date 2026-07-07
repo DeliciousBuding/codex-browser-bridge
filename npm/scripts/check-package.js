@@ -40,9 +40,10 @@ function npmPack(packDestination) {
   return JSON.parse(stdout)[0];
 }
 
-function tarFileText(tarball, member) {
-  return execFileSync("tar", ["-xOf", tarball, member], {
+function tarFileText(tarballDirectory, tarballFilename, member) {
+  return execFileSync("tar", ["-xOf", tarballFilename, member], {
     encoding: "utf8",
+    cwd: tarballDirectory,
     stdio: ["ignore", "pipe", "inherit"],
   });
 }
@@ -52,7 +53,7 @@ function packedPackage(packDestination = fs.mkdtempSync(path.join(os.tmpdir(), "
     const pack = npmPack(packDestination);
     const files = new Set(pack.files.map((file) => file.path));
     const packageJson = JSON.parse(
-      tarFileText(path.join(packDestination, pack.filename), "package/package.json")
+      tarFileText(packDestination, pack.filename, "package/package.json")
     );
     return { files, packageJson };
   } finally {
