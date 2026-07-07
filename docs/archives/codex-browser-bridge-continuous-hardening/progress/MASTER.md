@@ -34,7 +34,7 @@
 ## Current Status
 
 **Active Phase**: PR #15 finalization
-**Active Task**: PR #15 final review follow-ups: npm installer prints an absolute-path MCP config so GUI and scheduled agents do not depend on inherited PATH.
+**Active Task**: PR #15 final review follow-ups: `codex_doctor` reports install lifecycle details without changing browser pipe health semantics.
 **Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
 
 ## Governance Status
@@ -104,6 +104,7 @@ adaptive:
 | 2026-07-07 | Verified reconnect selection | S | 5/5 | 1 | Reconnect now probes a newly dialed pipe with bounded getInfo before marking it healthy, skips stale/bad dialable pipes, and keeps the existing connection-epoch protection for stale read-loop exits. |
 | 2026-07-07 | Verified reconnect cleanup refactor | S | 5/5 | 1 | Moved reconnect health checking to stream-level verification before installing writer/alive state, reused response parsing, ignored event frames while waiting for getInfo, and rotated discovery start points so a stale dialable pipe cannot starve later candidates. |
 | 2026-07-07 | Absolute-path MCP install hints | S | 5/5 | 0 | npm postinstall now prints a ready-to-paste MCP config using the installed binary's absolute path, and README/examples guidance prioritizes that path for GUI and scheduled agents. |
+| 2026-07-07 | Doctor install diagnostics | S | 5/5 | 0 | Added an additive `install` diagnostic object with running executable path, PATH lookup result, mismatch notes, and suggested absolute-path MCP config; verified CLI doctor output and kept PATH notes separate from pipe health. |
 
 ## Quick Status Commands
 
@@ -118,9 +119,9 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 
 ## Next Steps
 
-1. Push the latest absolute-path MCP install hint follow-up.
+1. Push the latest doctor install diagnostics follow-up.
 2. Wait for PR #15 checks to return green again.
-3. Consider the next minimal stability slice from subagent review: richer doctor install/lifecycle diagnostics and subscription-time event byte bounds.
+3. Consider the next minimal stability slice from subagent review: subscription-time event byte bounds or bounded doctor pipe listing.
 4. Decide whether to undraft and merge PR #15.
 5. Configure npm Trusted Publisher before the first tokenless release publish.
 6. After PR #15 lands, revisit Dependabot PR #14 against the updated MSRV/release baseline.
@@ -167,3 +168,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | verified-reconnect-selection | Reconnect now rejects dialable but unhealthy pipes before swapping them into normal browser requests. |
 | 2026-07-07 | verified-reconnect-cleanup | Refactored reconnect verification so failed probes never install transient Client connection state. |
 | 2026-07-07 | absolute-path-install-hints | npm postinstall now emits a machine-specific absolute-path MCP config for clients that do not inherit terminal PATH. |
+| 2026-07-07 | doctor-install-diagnostics | `codex_doctor` now reports command-path diagnostics and an absolute-path MCP config while preserving browser-pipe health semantics. |
