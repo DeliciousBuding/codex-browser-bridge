@@ -6,25 +6,73 @@ const crypto = require("crypto");
 const https = require("https");
 
 const defaultRepo = "DeliciousBuding/codex-browser-bridge";
-const binDir = path.join(__dirname, "..", "bin");
+const packageRoot = path.join(__dirname, "..");
+const binDir = path.join(packageRoot, "bin");
 const packageJson = require("../package.json");
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60000;
+const DEFAULT_MAX_REDIRECTS = 5;
+const DEFAULT_MAX_BYTES = 64 * 1024 * 1024;
 
-function requestBuffer(url) {
+function requestBuffer(url, options = {}) {
+  const maxBytes = options.maxBytes || DEFAULT_MAX_BYTES;
+  const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+  const timeoutMs = options.timeoutMs || DEFAULT_DOWNLOAD_TIMEOUT_MS;
+  const get = options.get || https.get;
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { "User-Agent": "codex-browser-bridge-npm" }, timeout: 60000 }, (res) => {
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+    const req = get(url, { headers: { "User-Agent": "codex-browser-bridge-npm" }, timeout: timeoutMs }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        requestBuffer(res.headers.location).then(resolve, reject);
+        res.resume();
+        if (maxRedirects <= 0) {
+          fail(new Error(`too many redirects: ${url}`));
+          return;
+        }
+        requestBuffer(new URL(res.headers.location, url).toString(), {
+          get,
+          maxBytes,
+          maxRedirects: maxRedirects - 1,
+          timeoutMs,
+        }).then(resolve, reject);
         return;
       }
       if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode}: ${url}`));
+        res.resume();
+        fail(new Error(`HTTP ${res.statusCode}: ${url}`));
+        return;
+      }
+      const contentLength = Number(res.headers["content-length"]);
+      if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+        res.resume();
+        fail(new Error(`download too large: ${contentLength} bytes (max ${maxBytes})`));
         return;
       }
       const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => resolve(Buffer.concat(chunks)));
-    }).on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error(`timeout: ${url}`)); });
+      let total = 0;
+      res.on("data", (c) => {
+        total += c.length;
+        if (total > maxBytes) {
+          req.destroy(new Error(`download too large: exceeded ${maxBytes} bytes`));
+          return;
+        }
+        chunks.push(c);
+      });
+      res.on("end", () => {
+        if (!settled) {
+          settled = true;
+          resolve(Buffer.concat(chunks));
+        }
+      });
+      res.on("error", fail);
+    }).on("error", fail);
+    req.on("timeout", () => {
+      req.destroy();
+      fail(new Error(`timeout: ${url}`));
+    });
   });
 }
 
@@ -48,8 +96,8 @@ function findChecksum(text, asset) {
     .find((entry) => entry && entry.file === asset);
 }
 
-function embeddedChecksum(asset) {
-  const file = path.join(__dirname, "..", "checksums.json");
+function embeddedChecksum(asset, root = packageRoot) {
+  const file = path.join(root, "checksums.json");
   if (!fs.existsSync(file)) return null;
   const checksums = JSON.parse(fs.readFileSync(file, "utf8"));
   if (!checksums || !checksums.files || typeof checksums.files[asset] !== "string") {
@@ -61,37 +109,88 @@ function embeddedChecksum(asset) {
   };
 }
 
-async function main() {
-  if (process.platform !== "win32") {
-    console.error("codex-browser-bridge only supports Windows (requires named pipes).");
-    process.exit(1);
+function resolveWindowsArch(platform, cpu) {
+  if (platform !== "win32") {
+    throw new Error("codex-browser-bridge only supports Windows (requires named pipes).");
   }
-
-  let arch;
-  switch (process.arch) {
+  switch (cpu) {
     case "x64":
-      arch = "amd64";
-      break;
+      return "amd64";
     case "arm64":
-      arch = "arm64";
-      break;
+      return "arm64";
     default:
-      console.error(`codex-browser-bridge does not ship a Windows binary for ${process.arch}.`);
-      process.exit(1);
+      throw new Error(`codex-browser-bridge does not ship a Windows binary for ${cpu}.`);
   }
+}
 
-  const devDownloads = process.env.CODEX_BRIDGE_ALLOW_DEV_DOWNLOADS === "1";
-  const repo = devDownloads && process.env.CODEX_BRIDGE_REPO ? process.env.CODEX_BRIDGE_REPO : defaultRepo;
-  const tag = devDownloads && process.env.CODEX_BRIDGE_TAG ? process.env.CODEX_BRIDGE_TAG : `v${packageJson.version}`;
+function mcpConfigForTarget(target) {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        "codex-browser": {
+          command: target,
+          args: ["--mode", "mcp"],
+          transport: "stdio",
+          env: {
+            CODEX_BRIDGE_PROFILE: "full",
+          },
+        },
+      },
+    },
+    null,
+    2
+  );
+}
+
+function logInstallHints(root, log, target) {
+  const skillDir = path.join(root, "skills", "codex-browser");
+  const examplesDir = path.join(root, "examples");
+  const escapedSkillDir = skillDir.replace(/"/g, '\\"');
+  if (fs.existsSync(skillDir)) {
+    log(
+      [
+        `Skill: ${skillDir}`,
+        `  -> Claude Code (PowerShell): Copy-Item -Recurse -Force "${escapedSkillDir}" "$env:USERPROFILE\\.claude\\skills\\"`,
+        "  -> Claude Code (Git Bash/WSL): copy or symlink to ~/.claude/skills/",
+        "  -> Other skill-aware agents: copy or symlink into that agent's skills directory",
+      ].join("\n")
+    );
+  }
+  if (fs.existsSync(examplesDir)) {
+    const lines = [`MCP config examples: ${examplesDir} (Claude Code, Cursor, OpenClaw, Hermes Agent)`];
+    if (target) {
+      lines.push("Ready-to-paste MCP config with the absolute installed binary path:");
+      lines.push(mcpConfigForTarget(target));
+    } else {
+      lines.push("  -> If a GUI client cannot spawn the server, run: where.exe codex-browser-bridge");
+    }
+    log(lines.join("\n"));
+  }
+}
+
+async function install(options = {}) {
+  const platform = options.platform || process.platform;
+  const cpu = options.arch || process.arch;
+  const env = options.env || process.env;
+  const root = options.packageRoot || packageRoot;
+  const outDir = options.binDir || binDir;
+  const version = options.version || packageJson.version;
+  const fetchBuffer = options.requestBuffer || requestBuffer;
+  const log = options.log || console.log;
+
+  const arch = resolveWindowsArch(platform, cpu);
+  const devDownloads = env.CODEX_BRIDGE_ALLOW_DEV_DOWNLOADS === "1";
+  const repo = devDownloads && env.CODEX_BRIDGE_REPO ? env.CODEX_BRIDGE_REPO : defaultRepo;
+  const tag = devDownloads && env.CODEX_BRIDGE_TAG ? env.CODEX_BRIDGE_TAG : `v${version}`;
   const exeName = "codex-browser-bridge.exe";
   const asset = arch === "arm64" ? "codex-browser-bridge-arm64.exe" : "codex-browser-bridge.exe";
 
   const base = `https://github.com/${repo}/releases/download/${tag}`;
 
-  let checksum = embeddedChecksum(asset);
+  let checksum = embeddedChecksum(asset, root);
   if (!checksum) {
     const checksumsURL = `${base}/checksums.txt`;
-    const checksums = await requestBuffer(checksumsURL).catch((err) => {
+    const checksums = await fetchBuffer(checksumsURL, { maxBytes: 1024 * 1024 }).catch((err) => {
       throw new Error(`could not download checksums for ${tag}: ${err.message}`);
     });
     checksum = findChecksum(checksums.toString("utf8"), asset);
@@ -99,22 +198,24 @@ async function main() {
   }
 
   // Download binary
-  console.log(`Downloading codex-browser-bridge ${tag} (${arch})...`);
-  const binary = await requestBuffer(`${base}/${asset}`);
+  log(`Downloading codex-browser-bridge ${tag} (${arch})...`);
+  const binary = await fetchBuffer(`${base}/${asset}`);
 
   // Verify checksum
   const actual = sha256(binary);
   if (actual !== checksum.hash) throw new Error(`checksum mismatch: expected ${checksum.hash}, got ${actual}`);
 
   // Install
-  fs.mkdirSync(binDir, { recursive: true });
-  const target = path.join(binDir, exeName);
+  fs.mkdirSync(outDir, { recursive: true });
+  const target = path.join(outDir, exeName);
   fs.writeFileSync(target, binary);
-  console.log(`Installed: ${target}`);
-  const skillDir = path.join(__dirname, "..", "skills", "codex-browser");
-  if (fs.existsSync(skillDir)) {
-    console.log(`Skill: ${skillDir}\n  → copy to ~/.claude/skills/ to activate the agent skill`);
-  }
+  log(`Installed: ${target}`);
+  logInstallHints(root, log, target);
+  return { target, asset, tag, repo };
+}
+
+async function main() {
+  await install();
 }
 
 if (require.main === module) {
@@ -127,6 +228,11 @@ if (require.main === module) {
 module.exports = {
   embeddedChecksum,
   findChecksum,
+  install,
+  logInstallHints,
+  mcpConfigForTarget,
   parseChecksumLine,
+  requestBuffer,
+  resolveWindowsArch,
   sha256,
 };

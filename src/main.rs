@@ -26,6 +26,12 @@ struct Args {
 
     #[arg(long)]
     upload_base: Option<String>,
+
+    #[arg(long)]
+    max_text_bytes: Option<usize>,
+
+    #[arg(long)]
+    max_image_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -49,13 +55,17 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&pipes)?);
         }
         Mode::Mcp => {
-            let client = client::Client::connect(args.pipe.as_deref())
-                .await
-                .context("failed to connect to Codex browser pipe")?;
+            let client = client::Client::lazy(args.pipe.clone());
             // Precedence: CLI flags > config file > env > default.
             let config = config::Config::load();
             if let Some(base) = args.upload_base.clone().or(config.upload_base) {
                 std::env::set_var("CODEX_BRIDGE_UPLOAD_BASE", base);
+            }
+            if let Some(max_text_bytes) = args.max_text_bytes.or(config.max_text_bytes) {
+                std::env::set_var("CODEX_BRIDGE_MAX_TEXT_BYTES", max_text_bytes.to_string());
+            }
+            if let Some(max_image_bytes) = args.max_image_bytes.or(config.max_image_bytes) {
+                std::env::set_var("CODEX_BRIDGE_MAX_IMAGE_BYTES", max_image_bytes.to_string());
             }
             let profile = args.profile.or_else(|| match config.profile.as_deref() {
                 Some("basic") => Some(Profile::Basic),

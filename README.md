@@ -45,7 +45,7 @@ No browser profile copying. No WebDriver. No remote setup. It connects to the Co
 - Upload files to `<input type=file>` elements
 - Handle JavaScript dialogs (alert / confirm / prompt)
 - Read and set browser cookies
-- Run raw CDP commands (Chrome DevTools Protocol escape hatch)
+- Run explicitly allowlisted CDP diagnostics (Chrome DevTools Protocol escape hatch)
 - Self-diagnose with `codex_doctor`
 
 Useful when an agent needs to work with pages that require a real browser session — dashboards, logged-in web apps, local dev servers, documentation sites.
@@ -84,24 +84,102 @@ Open https://example.com and take a screenshot.
 Find the login button and click it.
 ```
 
-For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/).
+If your MCP client is launched from a GUI or a scheduler, prefer the absolute
+`command` path printed by npm `postinstall`. If you need to recover it later,
+run the out-of-band CLI doctor from npm's global install path:
 
-### 3. Install the agent skill (recommended)
+```powershell
+$bridge = Join-Path (npm prefix -g) "codex-browser-bridge.cmd"
+& $bridge --mode doctor
+```
+
+Paste `install.suggested_mcp_config.mcpServers.codex-browser.command` into the
+client config. File upload requires `CODEX_BRIDGE_UPLOAD_BASE`; use the
+templates in [examples/](examples/) for a full config.
+
+For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/). The npm
+package also ships these examples under `examples/`.
+
+### Install the agent skill (recommended)
 
 The npm package includes a skill that teaches agents how to use all 52
 tools effectively. After install, copy it to your skills directory:
 
 ```bash
-# Global install → Claude Code skills
+# Git Bash / WSL: global install → Claude Code skills
 cp -r "$(npm root -g)/@delicious233/codex-browser-bridge/skills/codex-browser" ~/.claude/skills/
 
-# Or into a local project
+# Git Bash / WSL: or into a local project
 cp -r node_modules/@delicious233/codex-browser-bridge/skills/codex-browser .claude/skills/
+```
+
+```powershell
+# PowerShell: global install -> Claude Code skills
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills" | Out-Null
+Copy-Item -Recurse -Force "$env:APPDATA\npm\node_modules\@delicious233\codex-browser-bridge\skills\codex-browser" "$env:USERPROFILE\.claude\skills\"
+
+# PowerShell: or into a local project
+New-Item -ItemType Directory -Force ".claude\skills" | Out-Null
+Copy-Item -Recurse -Force "node_modules\@delicious233\codex-browser-bridge\skills\codex-browser" ".claude\skills\"
 ```
 
 **👤 For agents reading this:** to self-install, run the copy command above
 against your own skills directory. The skill is at
-`skills/codex-browser/SKILL.md` inside the installed npm package.
+`skills/codex-browser/SKILL.md` inside the installed npm package, and
+multi-client MCP config templates are under `examples/`.
+
+## Configuration
+
+Configuration precedence is:
+
+1. CLI flags
+2. config file
+3. environment variables
+4. built-in defaults
+
+The default config file is `.codex-browser-bridge.toml` in the current working directory. Set `CODEX_BRIDGE_CONFIG` to use an explicit path; when it is set, the bridge does not fall back to the working-directory config:
+
+```toml
+profile = "full"                 # basic | network | full
+upload_base = "C:/Users/me/Downloads"
+max_text_bytes = 1048576
+max_image_bytes = 3145728
+```
+
+The same settings can be provided in MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "codex-browser": {
+      "command": "codex-browser-bridge",
+      "args": ["--mode", "mcp", "--profile", "network"],
+      "transport": "stdio",
+      "env": {
+        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\me\\Downloads",
+        "CODEX_BRIDGE_MAX_TEXT_BYTES": "1048576",
+        "CODEX_BRIDGE_MAX_IMAGE_BYTES": "3145728"
+      }
+    }
+  }
+}
+```
+
+`CODEX_BRIDGE_UPLOAD_BASE` enables `codex_file_input` and limits uploads to a specific directory. File upload is disabled until this is set explicitly; MCP clients do not always launch servers from a predictable working directory.
+
+Large MCP responses are bounded so agents do not receive multi-megabyte DOM,
+JavaScript, CDP, or screenshot payloads by accident:
+
+- `CODEX_BRIDGE_MAX_TEXT_BYTES` caps each text content item. Default: `1048576`.
+- `CODEX_BRIDGE_MAX_IMAGE_BYTES` caps each base64 image content item. Default: `3145728`.
+- Both settings are clamped to an 8 MiB hard ceiling. Truncated text includes an
+  explicit marker with the original byte count; oversized images return a text
+  summary instead of invalid partial base64.
+- The same limits can be set in `.codex-browser-bridge.toml` as
+  `max_text_bytes` and `max_image_bytes`, or via CLI flags
+  `--max-text-bytes` and `--max-image-bytes`.
+
+`codex://tabs` is available as an MCP resource for clients that support resources. It returns tabs owned by the current bridge session, not every Chrome tab. The prompt templates `login` and `extract-table` are also exposed for clients that support MCP prompts.
 
 ## All 52 MCP Tools
 
@@ -129,7 +207,7 @@ against your own skills directory. The skill is at
 ### DOM & Accessibility `[DOM]`
 | Tool | Description |
 |------|-------------|
-| `codex_dom_snapshot` | Full accessibility tree with node IDs |
+| `codex_dom_snapshot` | Full accessibility tree with node IDs; large responses may be truncated |
 | `codex_dom_get_visible` | Human-readable visible DOM tree |
 | `codex_dom_click` | Click by accessibility node ID |
 | `codex_find_element` | Find elements by ARIA role + name |
@@ -140,13 +218,13 @@ against your own skills directory. The skill is at
 |------|-------------|
 | `codex_get_url` | Current tab URL |
 | `codex_get_title` | Current page title |
-| `codex_evaluate` | Execute JavaScript, return JSON result |
-| `codex_page_assets` | List page resources (images, CSS, JS, fonts) |
+| `codex_evaluate` | Execute JavaScript, return bounded JSON result |
+| `codex_page_assets` | List page resources; optionally fetch bounded known-size content |
 | `codex_console_logs` | Capture console output for a window |
 | `codex_emulate_device` | Emulate mobile viewport (`reset=true` to clear) |
-| `codex_screenshot` | Capture viewport PNG screenshot |
-| `codex_screenshot_element` | Capture a single element by selector |
-| `codex_print_pdf` | Render page to PDF |
+| `codex_screenshot` | Capture viewport screenshot; oversized images return a summary |
+| `codex_screenshot_element` | Capture a single element by selector; oversized images return a summary |
+| `codex_print_pdf` | Render page to PDF via bounded CDP stream; returns a size summary, not embedded PDF bytes |
 | `codex_bring_to_front` | Activate a background tab (fixes screenshot timeouts) |
 | `codex_dialog` | Handle alert / confirm / prompt |
 | `codex_performance_metrics` | DOM nodes, JS heap, event listeners (Performance) |
@@ -179,14 +257,14 @@ against your own skills directory. The skill is at
 ### CDP Escape Hatch `[CDP]`
 | Tool | Description |
 |------|-------------|
-| `codex_execute_cdp` | Execute any CDP command (allowlist-protected) |
+| `codex_execute_cdp` | Execute explicitly allowlisted CDP diagnostics |
 
 ### Session `[Session]`
 | Tool | Description |
 |------|-------------|
 | `codex_name_session` | Name the current session |
 | `codex_finalize` | Clean up tabs, release resources |
-| `codex_get_info` | Get extension backend metadata |
+| `codex_get_info` | Get bridge runtime + extension backend metadata |
 | `codex_doctor` | Self-diagnostics (pipe health, latency, version) |
 
 ## CLI Usage
@@ -202,9 +280,12 @@ codex-browser-bridge --mode discover
 codex-browser-bridge --mode cli
 
 # With tool profiles
-codex-browser-bridge --mode mcp --profile basic     # 33 tools
-codex-browser-bridge --mode mcp --profile network   # 50 tools
+codex-browser-bridge --mode mcp --profile basic     # 34 tools
+codex-browser-bridge --mode mcp --profile network   # 51 tools
 codex-browser-bridge --mode mcp --profile full      # all 52 (default)
+
+# Bound large MCP outputs
+codex-browser-bridge --mode mcp --max-text-bytes 1048576 --max-image-bytes 3145728
 ```
 
 ## Architecture
@@ -232,7 +313,8 @@ This tool gives an agent access to your active browser session.
 - Avoid using on pages with passwords, payments, or admin consoles
 - Redact tab titles, URLs, DOM text, screenshots before sharing output
 - `codex_file_input` enforces path traversal prevention (canonicalize + prefix check, 10 MB limit)
-- Cookie values redacted by default; CDP allowlist blocks dangerous domains
+- Navigation only accepts `http://` and `https://` URLs
+- Cookie values redacted by default; raw CDP is allowlist-protected and blocks sensitive browser, target, debugger, navigation, cookie, screenshot, PDF, file upload, event-producing enable calls, arbitrary Runtime JS, page-resource content, and destructive storage operations
 
 ## Development
 
@@ -264,9 +346,9 @@ src/
 
 See [ROADMAP.md](ROADMAP.md). Highlights:
 
-- `codex_network_monitor` — request/response inspection
-- `codex_emulate_device` — mobile viewport emulation
-- `codex_storage` — localStorage / sessionStorage access
+- winget and scoop manifests
+- optional live E2E harness for Codex Desktop + Chrome (`scripts/live-e2e.ps1`)
+- typed tool result schemas
 - v2.0.0: Cross-platform (macOS / Linux via Unix domain sockets)
 
 ## Related
@@ -276,6 +358,7 @@ See [ROADMAP.md](ROADMAP.md). Highlights:
 - [ROADMAP.md](ROADMAP.md) — Full roadmap with SUPER scores
 - [CHANGELOG.md](CHANGELOG.md) — Release history
 - [CONTRIBUTING.md](CONTRIBUTING.md) — Dev setup and conventions
+- [docs/release-process.md](docs/release-process.md) — Tag, changelog, GitHub Release, and npm publishing rules
 
 ## License
 

@@ -12,17 +12,135 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
-  test:
-    runs-on: windows-latest
+  validate-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      version: ${{ steps.validate.outputs.version }}
+      commit_sha: ${{ steps.validate.outputs.commit_sha }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Validate release tag input
+        id: validate
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag || '' }}
+          REF_NAME: ${{ github.ref_name }}
+          WORKFLOW_REF: ${{ github.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$WORKFLOW_REF" != "refs/heads/main" ]]; then
+            echo "Manual releases must be dispatched from the main branch workflow, got $WORKFLOW_REF" >&2
+            exit 1
+          fi
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$REF_NAME"
+          fi
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: $TAG" >&2
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          WORKDIR="$(mktemp -d)"
+          git -C "$WORKDIR" init -q
+          git -C "$WORKDIR" remote add origin "https://github.com/$REPOSITORY.git"
+          git -C "$WORKDIR" fetch --quiet --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+          TAG_TYPE="$(git -C "$WORKDIR" cat-file -t "$TAG")"
+          if [ "$TAG_TYPE" != "tag" ]; then
+            echo "Release tag $TAG must be an annotated tag" >&2
+            exit 1
+          fi
+          COMMIT_SHA="$(git -C "$WORKDIR" rev-parse "$TAG^{commit}")"
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-      - uses: actions/setup-node@v6
+          fetch-depth: 0
+          ref: ${{ steps.validate.outputs.commit_sha }}
+
+      - name: Check GitHub Action pins
+        shell: bash
+        run: node scripts/check-actions-pinned.js
+
+      - name: Check release automation contract
+        shell: bash
+        run: node scripts/check-release-contract.js
+
+      - name: Validate release contents
+        shell: bash
+        env:
+          TAG: ${{ steps.validate.outputs.tag }}
+          VERSION: ${{ steps.validate.outputs.version }}
+          COMMIT_SHA: ${{ steps.validate.outputs.commit_sha }}
+        run: |
+          git fetch origin main --depth=1
+          TAG_TYPE="$(git cat-file -t "$TAG")"
+          if [ "$TAG_TYPE" != "tag" ]; then
+            echo "Release tag $TAG must be an annotated tag" >&2
+            exit 1
+          fi
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "$HEAD_SHA" != "$COMMIT_SHA" ]; then
+            echo "Checked out $HEAD_SHA, but $TAG points to $COMMIT_SHA" >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$COMMIT_SHA" origin/main
+
+          PACKAGE_VERSION="$(grep -m1 '"version"' npm/package.json | sed -E 's/.*"version": "([^"]+)".*/\1/')"
+          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
+            echo "npm package version $PACKAGE_VERSION does not match release tag $TAG" >&2
+            exit 1
+          fi
+          CARGO_VERSION="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')"
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "Cargo.toml version $CARGO_VERSION does not match release tag $TAG" >&2
+            exit 1
+          fi
+          node - <<'NODE'
+          const fs = require("fs");
+          const version = process.env.VERSION;
+          const lines = fs.readFileSync("CHANGELOG.md", "utf8").split(/\r?\n/);
+          const heading = lines.findIndex((line) =>
+            line.startsWith(`## [${version}] - `) &&
+            /^## \[[^\]]+\] - \d{4}-\d{2}-\d{2}$/.test(line)
+          );
+          if (heading < 0) {
+            throw new Error(`CHANGELOG.md is missing dated section ## [${version}] - YYYY-MM-DD`);
+          }
+          const body = [];
+          for (const line of lines.slice(heading + 1)) {
+            if (line.startsWith("## [")) break;
+            body.push(line);
+          }
+          if (!body.some((line) => /\S/.test(line))) {
+            throw new Error(`CHANGELOG.md section for ${version} is empty`);
+          }
+          NODE
+
+  test:
+    needs: validate-release
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ needs.validate-release.outputs.commit_sha }}
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "22"
-      - uses: dtolnay/rust-toolchain@1.85.0
+          package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
         with:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
           components: clippy
@@ -33,8 +151,16 @@ jobs:
         shell: bash
         run: cargo clippy --locked -- -D warnings
       - name: Test Rust
+        timeout-minutes: 10
         shell: bash
         run: cargo test --locked
+      - name: Check agent surface docs
+        shell: bash
+        run: node scripts/check-agent-surface.js
+      - name: Test live E2E timeout cleanup
+        timeout-minutes: 3
+        shell: pwsh
+        run: ./scripts/test-live-e2e-timeout.ps1
       - name: Build x64
         shell: bash
         run: cargo build --locked --release --target x86_64-pc-windows-msvc
@@ -50,67 +176,50 @@ jobs:
         shell: bash
         run: |
           cd npm
-          npm pack --dry-run --json > pack.json
-          node - <<'NODE'
-          const fs = require("fs");
-          const pack = JSON.parse(fs.readFileSync("pack.json", "utf8"))[0];
-          const files = new Set(pack.files.map((f) => f.path));
-          for (const required of ["package.json", "scripts/install.js", "bin/codex-browser-bridge.js"]) {
-            if (!files.has(required)) {
-              throw new Error(`npm package is missing ${required}`);
-            }
-          }
-          NODE
+          npm run check:package
+
+  test-lib:
+    needs: validate-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ needs.validate-release.outputs.commit_sha }}
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
+        with:
+          components: clippy
+      - name: Test non-Windows harness
+        timeout-minutes: 10
+        shell: bash
+        run: cargo test --locked
+      - name: Clippy non-Windows harness
+        shell: bash
+        run: cargo clippy --locked --all-targets -- -D warnings
 
   release:
-    needs: [test]
+    needs: [validate-release, test, test-lib]
     runs-on: windows-latest
+    timeout-minutes: 30
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ needs.validate-release.outputs.commit_sha }}
 
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
         with:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
           components: clippy
 
-      - name: Get version
-        id: version
-        shell: bash
-        run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          if [[ ! "$TAG" =~ ^v[0-9]+(\.[0-9]+){1,2}([-+][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid release tag: $TAG" >&2
-            exit 1
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Validate release contents
-        shell: bash
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${TAG#v}"
-          git fetch origin main --depth=1
-          git rev-parse "$TAG^{commit}" >/dev/null
-          git merge-base --is-ancestor "$TAG^{commit}" origin/main
-          PACKAGE_VERSION="$(grep -m1 '"version"' npm/package.json | sed -E 's/.*"version": "([^"]+)".*/\1/')"
-          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
-            echo "npm package version $PACKAGE_VERSION does not match release tag $TAG" >&2
-            exit 1
-          fi
-          CARGO_VERSION="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')"
-          if [ "$CARGO_VERSION" != "$VERSION" ]; then
-            echo "Cargo.toml version $CARGO_VERSION does not match release tag $TAG" >&2
-            exit 1
-          fi
-          if ! grep -Fq "## [$VERSION]" CHANGELOG.md; then
-            echo "CHANGELOG.md is missing ## [$VERSION]" >&2
-            exit 1
-          fi
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
 
       - name: Build
         shell: bash
@@ -125,72 +234,204 @@ jobs:
         shell: bash
         run: sha256sum codex-browser-bridge*.exe > checksums.txt
 
+      - name: Guard published npm checksum drift
+        shell: bash
+        env:
+          PACKAGE_NAME: "@delicious233/codex-browser-bridge"
+          VERSION: ${{ needs.validate-release.outputs.version }}
+        run: |
+          if ! npm view "$PACKAGE_NAME@$VERSION" version >/tmp/npm-version.txt 2>/tmp/npm-view.err; then
+            if ! grep -Eq 'E404|404 Not Found|is not in this registry' /tmp/npm-view.err; then
+              cat /tmp/npm-view.err >&2
+              exit 1
+            fi
+            echo "$PACKAGE_NAME@$VERSION is not published yet; release assets may be staged."
+            exit 0
+          fi
+          PACK_DIR="$(mktemp -d)"
+          npm pack "$PACKAGE_NAME@$VERSION" --json --pack-destination "$PACK_DIR" > "$PACK_DIR/pack.json"
+          node - "$PACK_DIR" <<'NODE'
+          const { execFileSync } = require("child_process");
+          const fs = require("fs");
+          const path = require("path");
+
+          const packDir = process.argv[2];
+          const pack = JSON.parse(fs.readFileSync(path.join(packDir, "pack.json"), "utf8"))[0];
+          const published = JSON.parse(
+            execFileSync("tar", ["-xOf", pack.filename, "package/checksums.json"], {
+              cwd: packDir,
+              encoding: "utf8",
+              stdio: ["ignore", "pipe", "inherit"],
+            })
+          );
+          const current = {};
+          for (const line of fs.readFileSync("checksums.txt", "utf8").split(/\r?\n/)) {
+            const match = line.trim().match(/^([a-fA-F0-9]{64})\s+[*]?(.+)$/);
+            if (match) current[match[2].trim()] = match[1].toLowerCase();
+          }
+          const publishedFiles = published.files || {};
+          for (const file of ["codex-browser-bridge.exe", "codex-browser-bridge-arm64.exe"]) {
+            if (!publishedFiles[file]) throw new Error(`published npm package is missing checksum for ${file}`);
+            if (publishedFiles[file] !== current[file]) {
+              throw new Error(
+                `refusing to clobber release asset ${file}: published npm checksum ${publishedFiles[file]} does not match current build ${current[file] || "<missing>"}`
+              );
+            }
+          }
+          NODE
+
+      - name: Upload release checksums
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-checksums
+          path: checksums.txt
+          retention-days: 7
+
+      - name: Generate artifact attestation
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: |
+            codex-browser-bridge.exe
+            codex-browser-bridge-arm64.exe
+            checksums.txt
+
       - name: Generate release notes
         shell: bash
         run: |
-          if [ -f CHANGELOG.md ]; then
-            VERSION="${{ steps.version.outputs.tag }}"
-            VERSION="${VERSION#v}"
-            HEADING="## [$VERSION]"
-            awk -v heading="$HEADING" '
-              index($0, heading) == 1 { found=1; next }
-              found && /^## \[/ { exit }
-              found { print }
-            ' CHANGELOG.md > release_notes.txt
-          fi
-          if [ ! -s release_notes.txt ]; then
-            prev=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || git rev-list --max-parents=0 HEAD)
-            git log --oneline --no-merges "$prev"..HEAD > release_notes.txt
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          HEADING="## [$VERSION]"
+          awk -v heading="$HEADING" '
+            index($0, heading) == 1 { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release_notes.txt
+          if ! grep -Eq '[^[:space:]]' release_notes.txt; then
+            echo "CHANGELOG.md section for $VERSION is empty" >&2
+            exit 1
           fi
 
-      - name: Create GitHub Release
+      - name: Stage GitHub Release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
         shell: bash
         run: |
-          gh release create "${{ steps.version.outputs.tag }}" \
-            --title "${{ steps.version.outputs.tag }}" \
-            --notes-file release_notes.txt \
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "$TAG" \
+              --notes-file release_notes.txt
+          else
+            gh release create "$TAG" \
+              --draft \
+              --verify-tag \
+              --title "$TAG" \
+              --notes-file release_notes.txt
+          fi
+          gh release upload "$TAG" \
             codex-browser-bridge.exe \
             codex-browser-bridge-arm64.exe \
-            checksums.txt
+            checksums.txt \
+            --clobber
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
+        shell: bash
+        run: gh release edit "$TAG" --draft=false
 
   publish-npm:
-    needs: [release]
+    needs: [validate-release, release]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ needs.validate-release.outputs.commit_sha }}
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
 
-      - name: Verify npm version matches tag
+      - name: Verify npm trusted publishing toolchain
         shell: bash
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          VERSION="${TAG#v}"
+          node --version
+          npm --version
+          node - <<'NODE'
+          const { execSync } = require("child_process");
+          const version = execSync("npm --version", { encoding: "utf8" }).trim();
+          const [major, minor, patch] = version.split(".").map(Number);
+          const ok = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+          if (!ok) {
+            throw new Error(`npm ${version} is too old for Trusted Publishing; require npm >= 11.5.1`);
+          }
+          NODE
+
+      - name: Verify npm version matches tag
+        id: npm-version
+        shell: bash
+        run: |
+          TAG="${{ needs.validate-release.outputs.tag }}"
+          VERSION="${{ needs.validate-release.outputs.version }}"
           PACKAGE_VERSION="$(node -p 'require("./npm/package.json").version')"
           if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
             echo "npm package version $PACKAGE_VERSION does not match release tag $TAG" >&2
             exit 1
           fi
+          if [[ "$VERSION" == *-* ]]; then
+            echo "dist_tag=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "dist_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check npm publication status
+        id: npm-published
+        shell: bash
+        env:
+          PACKAGE_NAME: "@delicious233/codex-browser-bridge"
+          VERSION: ${{ needs.validate-release.outputs.version }}
+          DIST_TAG: ${{ steps.npm-version.outputs.dist_tag }}
+        run: |
+          if npm view "$PACKAGE_NAME@$VERSION" version >/tmp/npm-version.txt 2>/tmp/npm-view.err; then
+            PUBLISHED_VERSION="$(cat /tmp/npm-version.txt)"
+            if [ "$PUBLISHED_VERSION" != "$VERSION" ]; then
+              echo "npm returned unexpected version $PUBLISHED_VERSION for $PACKAGE_NAME@$VERSION" >&2
+              exit 1
+            fi
+            TAG_VERSION="$(npm view "$PACKAGE_NAME" "dist-tags.$DIST_TAG" 2>/dev/null || true)"
+            if [ "$TAG_VERSION" != "$VERSION" ]; then
+              echo "$PACKAGE_NAME@$VERSION is already published, but dist-tag $DIST_TAG points to '${TAG_VERSION:-<missing>}'" >&2
+              echo "Fix npm dist-tags manually, then rerun." >&2
+              exit 1
+            fi
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "$PACKAGE_NAME@$VERSION already published with $DIST_TAG; skipping npm publish."
+          else
+            if ! grep -Eq 'E404|404 Not Found|is not in this registry' /tmp/npm-view.err; then
+              cat /tmp/npm-view.err >&2
+              exit 1
+            fi
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download release checksums
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-checksums
+          path: npm
 
       - name: Embed release checksums
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+          TAG_VERSION: ${{ needs.validate-release.outputs.version }}
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          rm -f npm/checksums.txt npm/checksums.json
-          gh release download "$TAG" --pattern checksums.txt --dir npm
+          rm -f npm/checksums.json
           node - <<'NODE'
           const fs = require("fs");
           const path = require("path");
@@ -216,26 +457,11 @@ jobs:
         shell: bash
         run: |
           cd npm
-          npm pack --dry-run --json > pack.json
-          node - <<'NODE'
-          const fs = require("fs");
-          const pack = JSON.parse(fs.readFileSync("pack.json", "utf8"))[0];
-          const files = new Set(pack.files.map((f) => f.path));
-          for (const required of ["package.json", "checksums.json", "scripts/install.js", "bin/codex-browser-bridge.js", "skills/codex-browser/SKILL.md"]) {
-            if (!files.has(required)) {
-              throw new Error(`npm package is missing ${required}`);
-            }
-          }
-          NODE
-
-      - name: Bundle skill into npm package
-        shell: bash
-        run: cp -r skills npm/skills
+          CODEX_BRIDGE_REQUIRE_CHECKSUMS=1 npm run check:package
 
       - name: Publish npm package
+        if: steps.npm-published.outputs.published != 'true'
         shell: bash
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd npm
-          npm publish --provenance --access public
+          npm publish --access public --tag "${{ steps.npm-version.outputs.dist_tag }}"

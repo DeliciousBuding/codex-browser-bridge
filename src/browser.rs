@@ -1,9 +1,33 @@
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, value::RawValue, Value};
 use tokio::time::{sleep, Duration, Instant};
 
 use crate::client::Client;
 use crate::error::{BridgeError, Result};
+
+const MAX_WAIT_MS: u64 = 60_000;
+const MAX_CAPTURE_MS: u64 = 30_000;
+const MAX_CAPTURE_EVENT_BYTES: usize = 256 * 1024;
+const MAX_FORM_DELAY_MS: u64 = 1_000;
+const MAX_PDF_BASE64_BYTES: usize = 10 * 1024 * 1024;
+const PDF_STREAM_READ_SIZE: usize = 256 * 1024;
+
+fn bounded_duration_ms(name: &str, value: u64, default_ms: u64, max_ms: u64) -> Result<u64> {
+    let value = if value == 0 { default_ms } else { value };
+    if value > max_ms {
+        return Err(BridgeError::User(format!(
+            "{name} must be <= {max_ms} milliseconds"
+        )));
+    }
+    Ok(value)
+}
+
+fn deadline_from_now(timeout_ms: u64) -> Result<Instant> {
+    Instant::now()
+        .checked_add(Duration::from_millis(timeout_ms))
+        .ok_or_else(|| BridgeError::User("timeout_ms is too large".into()))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tab {
@@ -87,11 +111,11 @@ pub async fn close_tab(client: &Client, tab_id: &str) -> Result<()> {
     let id = parse_tab_id("close_tab", tab_id)?;
     match client.execute_cdp(id, "Page.close", None).await {
         Ok(_) => {
-            client.invalidate_attachment(id).await;
+            client.retire_tab_state(id).await;
             Ok(())
         }
         Err(err) if is_tab_gone_error(&err) => {
-            client.invalidate_attachment(id).await;
+            client.retire_tab_state(id).await;
             Ok(())
         }
         Err(err) => Err(err),
@@ -99,7 +123,7 @@ pub async fn close_tab(client: &Client, tab_id: &str) -> Result<()> {
 }
 
 pub async fn navigate(client: &Client, tab_id: &str, url: &str) -> Result<()> {
-    validate_url(url)?;
+    let url = validate_url(url)?;
     let id = parse_tab_id("navigate", tab_id)?;
     client
         .execute_cdp(id, "Page.navigate", Some(json!({ "url": url })))
@@ -149,8 +173,8 @@ pub async fn reload(client: &Client, tab_id: &str) -> Result<()> {
 
 pub async fn wait_for_load(client: &Client, tab_id: &str, timeout_ms: u64) -> Result<String> {
     let id = parse_tab_id("wait_for_load", tab_id)?;
-    let timeout_ms = if timeout_ms == 0 { 10_000 } else { timeout_ms };
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let timeout_ms = bounded_duration_ms("timeout_ms", timeout_ms, 10_000, MAX_WAIT_MS)?;
+    let deadline = deadline_from_now(timeout_ms)?;
     let mut last = String::new();
 
     loop {
@@ -289,8 +313,8 @@ pub async fn wait_for_element(
     timeout_ms: u64,
 ) -> Result<()> {
     let id = parse_tab_id("wait_for_element", tab_id)?;
-    let timeout_ms = if timeout_ms == 0 { 10_000 } else { timeout_ms };
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let timeout_ms = bounded_duration_ms("timeout_ms", timeout_ms, 10_000, MAX_WAIT_MS)?;
+    let deadline = deadline_from_now(timeout_ms)?;
     let escaped = selector.replace('\\', "\\\\").replace('`', "\\`");
     let expr = format!("document.querySelector(`{escaped}`) !== null");
 
@@ -331,8 +355,8 @@ pub async fn wait_for_url(
     timeout_ms: u64,
 ) -> Result<()> {
     let id = parse_tab_id("wait_for_url", tab_id)?;
-    let timeout_ms = if timeout_ms == 0 { 10_000 } else { timeout_ms };
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let timeout_ms = bounded_duration_ms("timeout_ms", timeout_ms, 10_000, MAX_WAIT_MS)?;
+    let deadline = deadline_from_now(timeout_ms)?;
     let pat_json = serde_json::to_string(pattern).unwrap_or_else(|_| "null".into());
     let expr = format!("location.href.indexOf({pat_json}) >= 0");
 
@@ -381,23 +405,116 @@ pub async fn hover(client: &Client, tab_id: &str, selector: &str) -> Result<()> 
     parse_action_result(&raw, "hover")
 }
 
-/// Render the page to PDF via `Page.printToPDF`. Returns base64-encoded PDF.
-pub async fn print_pdf(client: &Client, tab_id: &str) -> Result<String> {
+/// Render the page to PDF via `Page.printToPDF`. Returns base64 byte count.
+pub async fn print_pdf(client: &Client, tab_id: &str) -> Result<usize> {
     let id = parse_tab_id("print_pdf", tab_id)?;
     let raw = client
         .execute_cdp(
             id,
             "Page.printToPDF",
-            Some(json!({ "format": "A4", "printBackground": true })),
+            Some(json!({
+                "format": "A4",
+                "printBackground": true,
+                "transferMode": "ReturnAsStream"
+            })),
         )
         .await?;
     #[derive(Deserialize)]
     struct Pdf {
-        data: String,
+        data: Option<String>,
+        stream: Option<String>,
     }
     let pdf: Pdf = serde_json::from_str(raw.get())
         .map_err(|err| BridgeError::Protocol(format!("parse printToPDF response: {err}")))?;
-    Ok(pdf.data)
+    if let Some(stream) = pdf.stream {
+        return read_pdf_stream_base64_len(client, id, &stream).await;
+    }
+    let data = pdf
+        .data
+        .ok_or_else(|| BridgeError::Protocol("printToPDF response missing data/stream".into()))?;
+    ensure_pdf_base64_budget(data.len())?;
+    Ok(data.len())
+}
+
+async fn read_pdf_stream_base64_len(client: &Client, tab_id: i64, stream: &str) -> Result<usize> {
+    #[derive(Deserialize)]
+    struct StreamChunk {
+        #[serde(default)]
+        data: String,
+        #[serde(default, rename = "base64Encoded")]
+        base64_encoded: bool,
+        #[serde(default)]
+        eof: bool,
+    }
+
+    let mut total = 0usize;
+    loop {
+        let raw = match client
+            .execute_cdp(
+                tab_id,
+                "IO.read",
+                Some(json!({ "handle": stream, "size": PDF_STREAM_READ_SIZE })),
+            )
+            .await
+        {
+            Ok(raw) => raw,
+            Err(err) => {
+                close_cdp_stream(client, tab_id, stream).await;
+                return Err(err);
+            }
+        };
+        let chunk: StreamChunk = match serde_json::from_str(raw.get()) {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                close_cdp_stream(client, tab_id, stream).await;
+                return Err(BridgeError::Protocol(format!(
+                    "parse IO.read response: {err}"
+                )));
+            }
+        };
+        if !chunk.data.is_empty() {
+            let encoded_len = if chunk.base64_encoded {
+                chunk.data.len()
+            } else {
+                general_purpose::STANDARD
+                    .encode(chunk.data.as_bytes())
+                    .len()
+            };
+            total = total.checked_add(encoded_len).ok_or_else(|| {
+                BridgeError::User("PDF output is too large to count safely".into())
+            })?;
+            if let Err(err) = ensure_pdf_base64_budget(total) {
+                close_cdp_stream(client, tab_id, stream).await;
+                return Err(err);
+            }
+        } else if !chunk.eof {
+            close_cdp_stream(client, tab_id, stream).await;
+            return Err(BridgeError::Protocol(
+                "IO.read returned an empty chunk without eof".into(),
+            ));
+        }
+
+        if chunk.eof {
+            close_cdp_stream(client, tab_id, stream).await;
+            return Ok(total);
+        }
+    }
+}
+
+async fn close_cdp_stream(client: &Client, tab_id: i64, stream: &str) {
+    client
+        .execute_cdp(tab_id, "IO.close", Some(json!({ "handle": stream })))
+        .await
+        .ok();
+}
+
+fn ensure_pdf_base64_budget(len: usize) -> Result<()> {
+    if len > MAX_PDF_BASE64_BYTES {
+        return Err(BridgeError::User(format!(
+            "PDF output too large: {len} base64 bytes exceeds limit {MAX_PDF_BASE64_BYTES}"
+        )));
+    }
+    Ok(())
 }
 
 // ── Storage ─────────────────────────────────────────────────────
@@ -535,7 +652,9 @@ pub async fn screenshot_element(client: &Client, tab_id: &str, selector: &str) -
         .await?;
     let rect_str = runtime_value_string(&raw)?
         .filter(|s| s != "null")
-        .ok_or_else(|| BridgeError::User(format!("element {selector:?} not found or has zero size")))?;
+        .ok_or_else(|| {
+            BridgeError::User(format!("element {selector:?} not found or has zero size"))
+        })?;
     #[derive(Deserialize)]
     struct Rect {
         x: f64,
@@ -618,17 +737,28 @@ struct NetEntry {
     mime_type: Option<String>,
 }
 
+struct CapturedEvents {
+    events: Vec<Value>,
+    observed_count: usize,
+    captured_bytes: usize,
+    truncated: bool,
+    limit_reason: Option<&'static str>,
+}
+
 /// Capture `Network.*` events for a duration and pair request↔response into a
 /// structured, agent-friendly list. Enables Network domain, collects for
 /// `duration_ms`, then disables.
-pub async fn network_monitor(
-    client: &Client,
-    tab_id: &str,
-    duration_ms: u64,
-) -> Result<Value> {
+pub async fn network_monitor(client: &Client, tab_id: &str, duration_ms: u64) -> Result<Value> {
     let id = parse_tab_id("network_monitor", tab_id)?;
-    let duration_ms = if duration_ms == 0 { 5_000 } else { duration_ms };
-    let (sub_id, mut rx) = client.subscribe_events("Network.", 512).await;
+    let duration_ms = bounded_duration_ms("duration_ms", duration_ms, 5_000, MAX_CAPTURE_MS)?;
+    let (sub_id, mut rx, stats) = client
+        .subscribe_events_with_budget(
+            "Network.",
+            &["Network.requestWillBeSent", "Network.responseReceived"],
+            512,
+            MAX_CAPTURE_EVENT_BYTES,
+        )
+        .await;
     if let Err(err) = client.execute_cdp(id, "Network.enable", None).await {
         client.unsubscribe_events(sub_id).await;
         return Err(err);
@@ -637,15 +767,73 @@ pub async fn network_monitor(
     client.execute_cdp(id, "Network.disable", None).await.ok();
     client.unsubscribe_events(sub_id).await;
 
-    let events: Vec<Value> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
-    let raw_count = events.len();
-    let requests = pair_network_events(&events);
+    let captured =
+        drain_events_with_byte_budget(&mut rx, MAX_CAPTURE_EVENT_BYTES, is_pairable_network_event);
+    let stats = stats.snapshot();
+    let truncated = stats.truncated || captured.truncated;
+    let limit_reason = stats.limit_reason.or(captured.limit_reason);
+    let requests = pair_network_events(&captured.events);
     Ok(json!({
         "duration_ms": duration_ms,
-        "raw_event_count": raw_count,
+        "raw_event_count": stats.observed_count,
+        "queued_event_count": captured.observed_count,
+        "captured_event_count": captured.events.len(),
+        "captured_event_bytes": captured.captured_bytes,
+        "dropped_event_count": stats.dropped_count,
+        "truncated": truncated,
+        "limit_reason": limit_reason,
         "request_count": requests.len(),
         "requests": requests
     }))
+}
+
+fn drain_events_with_byte_budget(
+    rx: &mut tokio::sync::mpsc::Receiver<Value>,
+    max_bytes: usize,
+    should_capture: impl Fn(&Value) -> bool,
+) -> CapturedEvents {
+    let mut events = Vec::new();
+    let mut observed_count = 0usize;
+    let mut captured_bytes = 0usize;
+    let mut truncated = false;
+    let mut limit_reason = None;
+
+    while let Ok(event) = rx.try_recv() {
+        observed_count += 1;
+        if !should_capture(&event) {
+            continue;
+        }
+        if truncated {
+            continue;
+        }
+        let Ok(event_bytes) = serde_json::to_vec(&event) else {
+            truncated = true;
+            limit_reason = Some("event_encode_failed");
+            continue;
+        };
+        if captured_bytes.saturating_add(event_bytes.len()) > max_bytes {
+            truncated = true;
+            limit_reason = Some("event_byte_limit");
+            continue;
+        }
+        captured_bytes += event_bytes.len();
+        events.push(event);
+    }
+
+    CapturedEvents {
+        events,
+        observed_count,
+        captured_bytes,
+        truncated,
+        limit_reason,
+    }
+}
+
+fn is_pairable_network_event(event: &Value) -> bool {
+    matches!(
+        event.get("method").and_then(|method| method.as_str()),
+        Some("Network.requestWillBeSent" | "Network.responseReceived")
+    )
 }
 
 /// Pair `Network.requestWillBeSent` + `Network.responseReceived` events by
@@ -671,8 +859,16 @@ fn pair_network_events(events: &[Value]) -> Vec<NetEntry> {
                     }
                     let entry = NetEntry {
                         request_id: rid.clone(),
-                        url: req.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                        method: req.get("method").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        url: req
+                            .get("url")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        method: req
+                            .get("method")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
                         resource_type: params
                             .and_then(|p| p.get("type"))
                             .and_then(|v| v.as_str())
@@ -713,15 +909,16 @@ fn pair_network_events(events: &[Value]) -> Vec<NetEntry> {
 
 /// Capture `console.*` log calls for a duration. Enables Runtime, collects
 /// `Runtime.consoleAPICalled` events, then disables. Returns raw log params.
-pub async fn console_logs(
-    client: &Client,
-    tab_id: &str,
-    duration_ms: u64,
-) -> Result<Value> {
+pub async fn console_logs(client: &Client, tab_id: &str, duration_ms: u64) -> Result<Value> {
     let id = parse_tab_id("console_logs", tab_id)?;
-    let duration_ms = if duration_ms == 0 { 5_000 } else { duration_ms };
-    let (sub_id, mut rx) = client
-        .subscribe_events("Runtime.consoleAPICalled", 512)
+    let duration_ms = bounded_duration_ms("duration_ms", duration_ms, 5_000, MAX_CAPTURE_MS)?;
+    let (sub_id, mut rx, stats) = client
+        .subscribe_events_with_budget(
+            "Runtime.consoleAPICalled",
+            &[],
+            512,
+            MAX_CAPTURE_EVENT_BYTES,
+        )
         .await;
     if let Err(err) = client.execute_cdp(id, "Runtime.enable", None).await {
         client.unsubscribe_events(sub_id).await;
@@ -730,14 +927,24 @@ pub async fn console_logs(
     tokio::time::sleep(Duration::from_millis(duration_ms)).await;
     client.execute_cdp(id, "Runtime.disable", None).await.ok();
     client.unsubscribe_events(sub_id).await;
-    let mut logs = Vec::new();
-    while let Ok(v) = rx.try_recv() {
-        if let Some(params) = v.get("params") {
-            logs.push(params.clone());
-        }
-    }
+    let captured = drain_events_with_byte_budget(&mut rx, MAX_CAPTURE_EVENT_BYTES, |_| true);
+    let stats = stats.snapshot();
+    let truncated = stats.truncated || captured.truncated;
+    let limit_reason = stats.limit_reason.or(captured.limit_reason);
+    let logs: Vec<Value> = captured
+        .events
+        .iter()
+        .filter_map(|v| v.get("params").cloned())
+        .collect();
     Ok(json!({
         "duration_ms": duration_ms,
+        "raw_event_count": stats.observed_count,
+        "queued_event_count": captured.observed_count,
+        "captured_event_count": captured.events.len(),
+        "captured_event_bytes": captured.captured_bytes,
+        "dropped_event_count": stats.dropped_count,
+        "truncated": truncated,
+        "limit_reason": limit_reason,
         "log_count": logs.len(),
         "logs": logs
     }))
@@ -750,7 +957,10 @@ pub async fn performance_metrics(client: &Client, tab_id: &str) -> Result<Value>
     let id = parse_tab_id("performance_metrics", tab_id)?;
     client.execute_cdp(id, "Performance.enable", None).await?;
     let raw = client.execute_cdp(id, "Performance.getMetrics", None).await;
-    client.execute_cdp(id, "Performance.disable", None).await.ok();
+    client
+        .execute_cdp(id, "Performance.disable", None)
+        .await
+        .ok();
     let raw = raw?;
     serde_json::from_str(raw.get())
         .map_err(|err| BridgeError::Protocol(format!("parse performance metrics: {err}")))
@@ -928,6 +1138,27 @@ const BLOCKED_CDP_DOMAINS: &[&str] = &[
     "Storage.clearDataForOrigin",
 ];
 
+const ALLOWED_CDP_METHODS: &[&str] = &[
+    "Accessibility.getFullAXTree",
+    "CSS.getComputedStyleForNode",
+    "CSS.getMatchedStylesForNode",
+    "DOM.describeNode",
+    "DOM.getAttributes",
+    "DOM.getBoxModel",
+    "DOM.getDocument",
+    "DOM.querySelector",
+    "DOM.querySelectorAll",
+    "DOM.resolveNode",
+    "Log.clear",
+    "Log.disable",
+    "Network.disable",
+    "Page.getFrameTree",
+    "Page.getLayoutMetrics",
+    "Performance.disable",
+    "Performance.getMetrics",
+    "Runtime.getProperties",
+];
+
 /// Execute any CDP method with arbitrary params. The universal CDP escape hatch.
 /// Blocks dangerous CDP domains (Browser, Debugger, Target, etc.) for security.
 pub async fn execute_cdp_generic(
@@ -938,14 +1169,32 @@ pub async fn execute_cdp_generic(
 ) -> Result<Box<RawValue>> {
     for blocked in BLOCKED_CDP_DOMAINS {
         if method.starts_with(blocked) || method == blocked.trim_end_matches('.') {
-            return Err(BridgeError::User(format!(
-                "blocked CDP method: {method} ({}is not allowed for security)",
-                if blocked.ends_with('.') { "domain " } else { "" }
-            )));
+            return blocked_cdp_method(method, blocked);
         }
     }
+    validate_generic_cdp_method(method)?;
     let id = parse_tab_id("execute_cdp", tab_id)?;
     client.execute_cdp(id, method, params).await
+}
+
+fn validate_generic_cdp_method(method: &str) -> Result<()> {
+    if ALLOWED_CDP_METHODS.contains(&method) {
+        return Ok(());
+    }
+    Err(BridgeError::User(format!(
+        "blocked CDP method: {method} (method is not in the generic CDP allowlist)"
+    )))
+}
+
+fn blocked_cdp_method<T>(method: &str, blocked: &str) -> Result<T> {
+    Err(BridgeError::User(format!(
+        "blocked CDP method: {method} ({}is not allowed for security)",
+        if blocked.ends_with('.') {
+            "domain "
+        } else {
+            ""
+        }
+    )))
 }
 
 // ── Page Assets (extension capability: pageAssets) ────────────
@@ -969,9 +1218,7 @@ pub struct PageResource {
 
 pub async fn get_resource_tree(client: &Client, tab_id: &str) -> Result<Vec<PageResource>> {
     let id = parse_tab_id("page_assets", tab_id)?;
-    let raw = client
-        .execute_cdp(id, "Page.getResourceTree", None)
-        .await?;
+    let raw = client.execute_cdp(id, "Page.getResourceTree", None).await?;
     parse_resource_tree(&raw)
 }
 
@@ -987,6 +1234,25 @@ pub async fn get_resource_content(
             id,
             "Page.getResourceContent",
             Some(json!({ "frameId": frame_id, "url": url })),
+        )
+        .await?;
+    extract_resource_content(&raw)
+}
+
+pub async fn get_resource_content_with_timeout(
+    client: &Client,
+    tab_id: &str,
+    frame_id: &str,
+    url: &str,
+    timeout: Duration,
+) -> Result<String> {
+    let id = parse_tab_id("page_assets", tab_id)?;
+    let raw = client
+        .execute_cdp_with_timeout(
+            id,
+            "Page.getResourceContent",
+            Some(json!({ "frameId": frame_id, "url": url })),
+            timeout,
         )
         .await?;
     extract_resource_content(&raw)
@@ -1026,11 +1292,7 @@ pub async fn get_cookies(
     parse_cookies(&raw)
 }
 
-pub async fn set_cookie(
-    client: &Client,
-    tab_id: &str,
-    params: Value,
-) -> Result<()> {
+pub async fn set_cookie(client: &Client, tab_id: &str, params: Value) -> Result<()> {
     let id = parse_tab_id("network_set_cookie", tab_id)?;
     client
         .execute_cdp(id, "Network.setCookie", Some(params))
@@ -1067,7 +1329,11 @@ pub async fn find_elements(
             }
         }
         if let Some(name_filter) = name {
-            if !node.name.to_ascii_lowercase().contains(&name_filter.to_ascii_lowercase()) {
+            if !node
+                .name
+                .to_ascii_lowercase()
+                .contains(&name_filter.to_ascii_lowercase())
+            {
                 continue;
             }
         }
@@ -1087,11 +1353,7 @@ pub async fn find_elements(
 
 /// Click an element by its accessibility backend node ID.
 /// Reuses the existing DOM.resolveNode → DOM.getBoxModel → Input dispatch pipeline.
-pub async fn click_ax_element(
-    client: &Client,
-    tab_id: &str,
-    node_id: &str,
-) -> Result<()> {
+pub async fn click_ax_element(client: &Client, tab_id: &str, node_id: &str) -> Result<()> {
     dom_cua_click(client, tab_id, node_id).await
 }
 
@@ -1144,12 +1406,7 @@ fn parse_ax_tree(raw: &str) -> Result<Vec<ParsedAxNode>> {
 // ── Composite ───────────────────────────────────────────────────
 
 /// Navigate to URL and wait for page load. Reduces 2 MCP calls to 1.
-pub async fn nav_and_wait(
-    client: &Client,
-    tab_id: &str,
-    url: &str,
-    timeout_ms: u64,
-) -> Result<()> {
+pub async fn nav_and_wait(client: &Client, tab_id: &str, url: &str, timeout_ms: u64) -> Result<()> {
     navigate(client, tab_id, url).await?;
     wait_for_load(client, tab_id, timeout_ms).await?;
     Ok(())
@@ -1178,6 +1435,7 @@ pub async fn form_fill(
     let obj = fields.as_object().ok_or_else(|| {
         BridgeError::User("fields must be an object mapping selector to value".into())
     })?;
+    let delay_ms = bounded_duration_ms("delay_ms", delay_ms, 0, MAX_FORM_DELAY_MS)?;
     for (selector, value) in obj {
         if let Some(val_str) = value.as_str() {
             fill(client, tab_id, selector, val_str).await?;
@@ -1234,9 +1492,8 @@ pub async fn file_input(
         subtype: Option<String>,
     }
 
-    let eval: EvaluateResult = serde_json::from_str(raw.get()).map_err(|err| {
-        BridgeError::Protocol(format!("parse Runtime.evaluate result: {err}"))
-    })?;
+    let eval: EvaluateResult = serde_json::from_str(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("parse Runtime.evaluate result: {err}")))?;
 
     let object_id = eval
         .result
@@ -1274,7 +1531,11 @@ pub async fn handle_dialog(
         params.insert("promptText".into(), json!(text));
     }
     client
-        .execute_cdp(id, "Page.handleJavaScriptDialog", Some(serde_json::Value::Object(params)))
+        .execute_cdp(
+            id,
+            "Page.handleJavaScriptDialog",
+            Some(serde_json::Value::Object(params)),
+        )
         .await
         .map(|_| ())
 }
@@ -1325,7 +1586,7 @@ fn collect_resources(tree: &FrameTree, out: &mut Vec<PageResource>) {
             resource_type: r.resource_type.clone(),
             mime_type: r.mime_type.clone(),
             content: None,
-            size: r.content_size.map(|size| size as u64),
+            size: normalize_resource_size(r.content_size),
             failed: None,
             frame_id: frame_id.clone(),
         });
@@ -1335,11 +1596,21 @@ fn collect_resources(tree: &FrameTree, out: &mut Vec<PageResource>) {
     }
 }
 
+fn normalize_resource_size(size: Option<f64>) -> Option<u64> {
+    let size = size?;
+    if !size.is_finite() || size <= 0.0 || size > u64::MAX as f64 {
+        return None;
+    }
+    Some(size.ceil() as u64)
+}
+
 fn extract_resource_content(raw: &RawValue) -> Result<String> {
     #[derive(Deserialize)]
     struct ResourceContent {
         #[serde(default)]
         content: String,
+        #[serde(default, rename = "base64Encoded")]
+        base64_encoded: bool,
     }
 
     let result: ResourceContent = serde_json::from_str(raw.get())
@@ -1348,7 +1619,11 @@ fn extract_resource_content(raw: &RawValue) -> Result<String> {
     if result.content.is_empty() {
         return Err(BridgeError::Protocol("resource content is empty".into()));
     }
-    Ok(result.content)
+    if result.base64_encoded {
+        Ok(result.content)
+    } else {
+        Ok(general_purpose::STANDARD.encode(result.content.as_bytes()))
+    }
 }
 
 fn parse_cookies(raw: &RawValue) -> Result<Vec<Cookie>> {
@@ -1652,6 +1927,37 @@ mod tests {
         assert!(nodes.is_empty());
     }
 
+    #[test]
+    fn generic_cdp_blocks_methods_that_bypass_dedicated_safety_tools() {
+        for method in [
+            "DOM.setFileInputFiles",
+            "Network.getRequestPostData",
+            "Network.getResponseBody",
+            "Network.enable",
+            "Network.getCookies",
+            "Network.setCookie",
+            "Page.close",
+            "Page.captureScreenshot",
+            "Page.getResourceContent",
+            "Page.navigate",
+            "Page.navigateToHistoryEntry",
+            "Page.printToPDF",
+            "Performance.enable",
+            "Runtime.callFunctionOn",
+            "Runtime.evaluate",
+        ] {
+            assert!(validate_generic_cdp_method(method).is_err(), "{method}");
+        }
+
+        assert!(validate_generic_cdp_method("DOM.getDocument").is_ok());
+    }
+
+    #[test]
+    fn pdf_budget_rejects_oversized_base64() {
+        assert!(ensure_pdf_base64_budget(MAX_PDF_BASE64_BYTES).is_ok());
+        assert!(ensure_pdf_base64_budget(MAX_PDF_BASE64_BYTES + 1).is_err());
+    }
+
     // ── network_monitor event pairing (pair_network_events) ──
 
     #[test]
@@ -1708,12 +2014,74 @@ mod tests {
         assert!(pair_network_events(&events).is_empty());
     }
 
+    #[tokio::test]
+    async fn event_capture_budget_truncates_large_events() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        tx.try_send(
+            json!({"method":"Runtime.consoleAPICalled","params":{"args":[{"value":"ok"}]}}),
+        )
+        .unwrap();
+        tx.try_send(json!({"method":"Runtime.consoleAPICalled","params":{"args":[{"value":"x".repeat(200)}]}}))
+            .unwrap();
+        tx.try_send(json!({"method":"Runtime.consoleAPICalled","params":{"args":[{"value":"after-limit"}]}}))
+            .unwrap();
+        drop(tx);
+
+        let captured = drain_events_with_byte_budget(&mut rx, 120, |_| true);
+
+        assert_eq!(captured.observed_count, 3);
+        assert_eq!(captured.events.len(), 1);
+        assert!(captured.captured_bytes <= 120);
+        assert!(captured.truncated);
+        assert_eq!(captured.limit_reason, Some("event_byte_limit"));
+    }
+
+    #[tokio::test]
+    async fn event_capture_budget_allows_small_events() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        tx.try_send(json!({"method":"Network.requestWillBeSent","params":{"requestId":"1","request":{"url":"https://example.test","method":"GET"}}}))
+            .unwrap();
+        tx.try_send(json!({"method":"Network.responseReceived","params":{"requestId":"1","response":{"status":200,"mimeType":"text/html"}}}))
+            .unwrap();
+        drop(tx);
+
+        let captured = drain_events_with_byte_budget(&mut rx, 4096, |_| true);
+
+        assert_eq!(captured.observed_count, 2);
+        assert_eq!(captured.events.len(), 2);
+        assert!(!captured.truncated);
+        assert_eq!(captured.limit_reason, None);
+        assert_eq!(pair_network_events(&captured.events).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn event_capture_budget_ignores_unpairable_network_noise() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        tx.try_send(json!({"method":"Network.dataReceived","params":{"requestId":"1","dataLength":5000,"payload":"x".repeat(1000)}}))
+            .unwrap();
+        tx.try_send(json!({"method":"Network.requestWillBeSent","params":{"requestId":"1","request":{"url":"https://example.test","method":"GET"}}}))
+            .unwrap();
+        tx.try_send(json!({"method":"Network.responseReceived","params":{"requestId":"1","response":{"status":200,"mimeType":"text/html"}}}))
+            .unwrap();
+        drop(tx);
+
+        let captured = drain_events_with_byte_budget(&mut rx, 4096, is_pairable_network_event);
+
+        assert_eq!(captured.observed_count, 3);
+        assert_eq!(captured.events.len(), 2);
+        assert!(!captured.truncated);
+        assert_eq!(pair_network_events(&captured.events).len(), 1);
+    }
+
     // ── storage value parsing (runtime_value_string) ──
 
     #[test]
     fn runtime_value_string_extracts_string_value() {
         let raw = RawValue::from_string(r#"{"result":{"value":"hello"}}"#.into()).unwrap();
-        assert_eq!(runtime_value_string(&raw).unwrap(), Some("hello".to_string()));
+        assert_eq!(
+            runtime_value_string(&raw).unwrap(),
+            Some("hello".to_string())
+        );
     }
 
     #[test]
@@ -1728,5 +2096,69 @@ mod tests {
         let raw = RawValue::from_string(r#"{"result":{}}"#.into()).unwrap();
         assert_eq!(runtime_value_string(&raw).unwrap(), None);
     }
-}
 
+    #[test]
+    fn resource_content_is_normalized_to_base64() {
+        let text =
+            RawValue::from_string(r#"{"content":"hello","base64Encoded":false}"#.to_string())
+                .unwrap();
+        assert_eq!(extract_resource_content(&text).unwrap(), "aGVsbG8=");
+
+        let encoded =
+            RawValue::from_string(r#"{"content":"aGVsbG8=","base64Encoded":true}"#.to_string())
+                .unwrap();
+        assert_eq!(extract_resource_content(&encoded).unwrap(), "aGVsbG8=");
+    }
+
+    #[test]
+    fn resource_tree_treats_invalid_content_size_as_unknown() {
+        let raw = RawValue::from_string(
+            r#"{"frame":{"id":"root","url":"https://example.com"},"resources":[
+                {"url":"https://example.com/negative.bin","type":"Other","mimeType":"application/octet-stream","contentSize":-1},
+                {"url":"https://example.com/zero.bin","type":"Other","mimeType":"application/octet-stream","contentSize":0},
+                {"url":"https://example.com/ok.css","type":"Stylesheet","mimeType":"text/css","contentSize":12.7}
+            ]}"#
+                .to_string(),
+        )
+        .unwrap();
+
+        let resources = parse_resource_tree(&raw).unwrap();
+
+        assert_eq!(resources[0].size, None);
+        assert_eq!(resources[1].size, None);
+        assert_eq!(resources[2].size, Some(13));
+    }
+
+    #[test]
+    fn resource_size_normalization_rejects_non_finite_values() {
+        assert_eq!(normalize_resource_size(None), None);
+        assert_eq!(normalize_resource_size(Some(f64::NAN)), None);
+        assert_eq!(normalize_resource_size(Some(f64::INFINITY)), None);
+        assert_eq!(normalize_resource_size(Some(1.2)), Some(2));
+    }
+
+    #[test]
+    fn generic_cdp_rejects_navigation_cookie_and_unknown_methods() {
+        for method in [
+            "Page.navigate",
+            "Page.navigateToHistoryEntry",
+            "Network.getCookies",
+            "Storage.getCookies",
+            "Browser.getVersion",
+        ] {
+            assert!(validate_generic_cdp_method(method).is_err(), "{method}");
+        }
+    }
+
+    #[test]
+    fn generic_cdp_allows_known_low_level_methods() {
+        for method in [
+            "DOM.getDocument",
+            "Page.getLayoutMetrics",
+            "Performance.getMetrics",
+            "Runtime.getProperties",
+        ] {
+            assert!(validate_generic_cdp_method(method).is_ok(), "{method}");
+        }
+    }
+}

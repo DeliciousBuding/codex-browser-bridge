@@ -6,7 +6,7 @@
 
 本仓库包含项目级 skill：`skills/codex-browser/SKILL.md`
 
-该 skill 是 LLM agent 使用全部 36 个 MCP 工具的操作手册，包含工具分组速查、常用工作流、工具选择原则。支持项目级 skill 的 MCP 客户端会自动加载。
+该 skill 是 LLM agent 使用全部 52 个 MCP 工具的操作手册，包含工具分组速查、常用工作流、工具选择原则。支持项目级 skill 的 MCP 客户端会自动加载。
 
 ## MCP 工具设计规范
 
@@ -16,10 +16,10 @@
 - 每个 CDP 操作封装为一个 `pub async fn`，接受 `&Client` + 参数
 - CDP 响应解析用私有函数，返回 `Result<T>`
 - 使用 `#[derive(Deserialize)]` 私有结构体解析 CDP 响应
-- `execute_cdp_generic()` 是通用 CDP 入口
+- `execute_cdp_generic()` 是显式低风险方法 allowlist 的 raw CDP 入口；不要用域名前缀放宽，高风险能力必须走专用受控工具
 
 ### 2. MCP 层（`src/mcp/` 目录）
-- `types.rs`：`ToolHandler` 枚举新增 variant（当前 36 个变体）
+- `types.rs`：`ToolHandler` 枚举新增 variant（当前 52 个工具）
 - `handlers.rs`：`handle_tool_call` 新增 match arm + `handle_*` 方法
 - `schema.rs`：`registered_tools()` 新增工具定义
 - `profiles.rs`：如需加入 profile，更新 `BASIC_TOOLS` / `NETWORK_TOOLS` 数组
@@ -34,11 +34,13 @@
 ### 5. 测试
 - **Extractor 测试**（`src/mcp/types.rs`）：`required_str`、`required_string_vec` 等
 - **Schema 测试**（`src/mcp/schema.rs`）：验证工具 required 字段、name order、type=object
-- **E2E 测试**（`tests/cdp_tools_e2e.rs`）：`client_server_pair()` + mock CDP server
-- **Parity 测试**（`tests/mcp_parity.rs`）：跨版本工具名一致性
+- **集成测试**（`tests/browser_api.rs`）：公开 browser/helper 行为与安全边界
+- **Reconnect/mock 测试**（`src/client.rs`，`cfg(not(windows))`）：`tokio::io::duplex()` mock pipe
+- **Harness 计划**：新的真实/模拟 E2E 应放在 `tests/`，不要使用 `#[path]` 嵌入源码文件
+- Mock pipe / E2E harness 等待必须 bounded：正向 pipe read 和 spawned task join 用明确 timeout，负向“不得发 pipe 请求”断言用短 grace window；live E2E 的 doctor preflight 和 cleanup MCP 调用也必须有 timeout。
 
 ### 6. 工具数量
-- 当前：36 个 MCP 工具
+- 当前：52 个 MCP 工具
 - 新增工具命名：`codex_<domain>_<action>`，group tag 放描述开头
 
 ## 构建
@@ -48,21 +50,31 @@ cargo check --locked              # 快速检查
 cargo test --locked                # 全量测试
 cargo clippy --locked -- -D warnings  # lint
 cargo build --locked --release     # 发布构建 → target/release/codex-browser-bridge.exe
+npm --prefix npm test              # npm installer/package helper 测试
+.\scripts\live-e2e.ps1             # 可选真实 Codex Desktop + Chrome 冒烟测试
 ```
 
-Release 时确保 `Cargo.toml` 和 `npm/package.json` 版本号与 tag 一致，`CHANGELOG.md` 有对应段。
+Release 时遵循 `docs/release-process.md`：确保 `Cargo.toml` 和 `npm/package.json` 版本号与 tag 一致，`CHANGELOG.md` 有对应段，npm 包 dry-run 包含 `skills/codex-browser/SKILL.md` 和 `examples/` 多客户端模板。npm 发布走 Trusted Publishing/OIDC，不在 GitHub secrets 中放 npm write token。
+
+GitHub workflow 中的外部 `uses:` 必须固定到完整 commit SHA，并保留相邻版本注释；修改 workflow 后运行 `node scripts/check-actions-pinned.js`。
+
+Release/npm 发布自动化必须保持 Trusted Publishing 合同：`release.yml` 使用 GitHub-hosted runner、`id-token: write`、npm >= 11.5.1、无 `NODE_AUTH_TOKEN`、`actions/setup-node` 禁用 `package-manager-cache`，并在文档中记录 npm trusted publisher 的 `release.yml` / `npm publish` 配置。修改 release workflow、`npm/package.json` 或发布文档后运行 `node scripts/check-release-contract.js`。
+
+CI/release job 必须设置 `timeout-minutes`，长耗时测试步骤（Rust tests、coverage、live E2E timeout harness）也要有步骤级 timeout，避免 harness 回归占满 GitHub runner。
+
+工具、profile、README、skill、examples 或 npm package 清单变更后运行 `node scripts/check-agent-surface.js`，防止 agent 面文档和实际 Rust 工具注册 drift。
 
 ## 源码结构
 
 ```
 src/
-  main.rs       入口（clap CLI，--mode --profile --pipe --upload-base）
+  main.rs       入口（clap CLI，--mode --profile --pipe --upload-base --max-text-bytes --max-image-bytes）
   lib.rs        模块声明
   mcp/
     mod.rs      Server 结构体, run_stdio, JSON-RPC 分发
     types.rs    ToolHandler, Tool, Content, arg extractors, 响应构建
     schema.rs   registered_tools(), 工具注册
-    handlers.rs handle_tool_call + 36 个 handle_* 方法
+    handlers.rs handle_tool_call + 52 个 handle_* 方法
     profiles.rs ToolProfile (basic/network/full)
   browser.rs    CDP + 浏览器操作（list_tabs, navigate, screenshot, click, etc.）
   client.rs     Named pipe 传输, sticky attach, execute_cdp
@@ -80,7 +92,7 @@ src/
 
 - `main` — 稳定分支，CI 通过才合并
 - feature 分支 — `feat/<name>`
-- Release tag — `v*` 触发 GitHub Release + npm publish
+- Release tag — `vX.Y.Z` 触发 GitHub Release + npm publish
 
 ## 安全红线
 
@@ -90,4 +102,6 @@ src/
 - 测试数据使用示例域名（`example.com`）
 - 文件操作经过 `security::validate_file_path` 路径穿越检查
 - Cookie 值默认脱敏
-- CDP allowlist 阻止 Browser/Debugger/Target/Emulation/Security/Tracing 域
+- URL 导航只允许 `http://` / `https://`
+- CDP raw 入口只允许显式列出的诊断方法，阻止 Browser/Debugger/Target/Emulation/Security/Tracing 域，以及 navigation/cookie/screenshot/PDF/file upload/event-producing enable/arbitrary Runtime JS/page-resource content/destructive storage 等敏感 raw CDP 方法
+- MCP 输出统一经过 `Content` 层上限：`CODEX_BRIDGE_MAX_TEXT_BYTES` / `max_text_bytes` 默认 1 MiB，`CODEX_BRIDGE_MAX_IMAGE_BYTES` / `max_image_bytes` 默认 3 MiB，配置值最高 8 MiB；不要在单个 handler 里绕过该出口。

@@ -6,12 +6,20 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   rust:
     runs-on: windows-latest
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
         with:
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
           components: clippy
@@ -22,21 +30,27 @@ jobs:
         shell: bash
         run: cargo clippy --locked -- -D warnings
       - name: Test
+        timeout-minutes: 10
         shell: bash
         run: cargo test --locked
+      - name: Test live E2E timeout cleanup
+        timeout-minutes: 3
+        shell: pwsh
+        run: ./scripts/test-live-e2e-timeout.ps1
       - name: Install cargo-llvm-cov
         # Prebuilt binary via taiki-e — avoids `cargo install` compiling the
         # latest cargo-llvm-cov (0.8.7+ needs rustc 1.87, but our MSRV is 1.85).
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2
         with:
           tool: cargo-llvm-cov
       - name: Coverage
+        timeout-minutes: 10
         shell: bash
         run: |
           rustup component add llvm-tools-preview
           cargo llvm-cov --locked --lcov --output-path lcov.info
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
         with:
           files: lcov.info
           fail_ci_if_error: false
@@ -50,11 +64,21 @@ jobs:
 
   npm:
     runs-on: windows-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "22"
+      - name: Check GitHub Action pins
+        shell: bash
+        run: node scripts/check-actions-pinned.js
+      - name: Check release automation contract
+        shell: bash
+        run: node scripts/check-release-contract.js
+      - name: Check agent surface docs
+        shell: bash
+        run: node scripts/check-agent-surface.js
       - name: Test npm installer helpers
         shell: bash
         run: |
@@ -64,17 +88,7 @@ jobs:
         shell: bash
         run: |
           cd npm
-          npm pack --dry-run --json > pack.json
-          node - <<'NODE'
-          const fs = require("fs");
-          const pack = JSON.parse(fs.readFileSync("pack.json", "utf8"))[0];
-          const files = new Set(pack.files.map((f) => f.path));
-          for (const required of ["package.json", "scripts/install.js", "bin/codex-browser-bridge.js"]) {
-            if (!files.has(required)) {
-              throw new Error(`npm package is missing ${required}`);
-            }
-          }
-          NODE
+          npm run check:package
 
   test-lib:
     # The reconnect tests in client.rs use tokio duplex mocks under
@@ -82,14 +96,16 @@ jobs:
     # The shipped binary stays Windows-only; this job only exercises
     # platform-agnostic logic (reconnect state machine, frame round-trip).
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
         with:
           components: clippy
-      - name: Test lib (incl. reconnect tests)
+      - name: Test non-Windows harness
+        timeout-minutes: 10
         shell: bash
-        run: cargo test --locked --lib
-      - name: Clippy lib
+        run: cargo test --locked
+      - name: Clippy non-Windows harness
         shell: bash
-        run: cargo clippy --locked --lib -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings

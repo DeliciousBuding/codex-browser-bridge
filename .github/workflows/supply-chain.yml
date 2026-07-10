@@ -9,20 +9,23 @@ on:
     # Weekly Monday ~04:37 UTC — off-round minute to spread load across the fleet.
     - cron: "37 4 * * 1"
 
-# A daily cap so a runaway schedule loop can't burn CI minutes.
 concurrency:
-  group: supply-chain-${{ github.ref }}
-  cancel-in-progress: false
+  group: supply-chain-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   cargo-deny:
     name: cargo-deny (advisories · licenses · bans · sources)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       # `cargo deny check` runs all four checks against deny.toml. Its advisories
       # check queries the same RustSec advisory-db as cargo-audit, so it is a
       # strict superset — no separate cargo-audit job is needed.
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
         with:
           command: check

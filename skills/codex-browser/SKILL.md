@@ -9,7 +9,7 @@ You are an agent controlling a real Chrome browser through the `codex-browser` M
 
 ## Quick Check
 
-Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user to start Codex Desktop, Chrome, and the Codex extension.
+Call `codex_doctor` first. If `healthy` is true, browser pipes are ready. If `install.mcp_spawn_ready` is false, ask the user to update the MCP config with `install.suggested_mcp_config`; this is separate from browser pipe health.
 
 ## Tool Groups
 
@@ -27,7 +27,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 
 | Tool | What it does |
 |------|-------------|
-| `codex_navigate` | Go to URL. Blocks `file:`, `javascript:`, `data:` schemes |
+| `codex_navigate` | Go to URL. Only `http://` and `https://` URLs are accepted. |
 | `codex_reload` | Reload current page |
 | `codex_navigate_back` | Back |
 | `codex_navigate_forward` | Forward |
@@ -53,7 +53,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 | `codex_get_url` | Current URL via `location.href` |
 | `codex_get_title` | Current `document.title` |
 | `codex_evaluate` | Run arbitrary JS, get JSON result |
-| `codex_page_assets` | List page resources (images, CSS, JS, fonts) |
+| `codex_page_assets` | List page resources; optionally fetch bounded known-size content |
 | `codex_console_logs` | Capture `console.*` output for a duration window (frontend debugging) |
 | `codex_emulate_device` | Override viewport to emulate a device (`reset=true` to clear) |
 | `codex_performance_metrics` | Chrome Performance metrics — DOM nodes, JS heap, event listeners |
@@ -64,7 +64,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 |------|-------------|
 | `codex_screenshot` | Viewport PNG. **Times out on background tabs** — call `codex_bring_to_front` first. |
 | `codex_screenshot_element` | Capture a single element via clipped screenshot |
-| `codex_print_pdf` | Render page to PDF via `Page.printToPDF` |
+| `codex_print_pdf` | Render page to PDF via bounded `Page.printToPDF` stream; returns a size summary, not embedded PDF bytes |
 | `codex_bring_to_front` | Activate a background tab. Restores its rendering pipeline so screenshot/CDP calls respond again. |
 | `codex_dialog` | Handle `alert`/`confirm`/`prompt`. Accept or dismiss. |
 
@@ -83,7 +83,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 | `codex_cua_scroll` | Scroll at `(x, y)` by `(scroll_x, scroll_y)` delta |
 | `codex_click_and_wait` | Click and wait for load in one call |
 | `codex_form_fill` | Fill multiple fields: `{"#name": "Alice", "#email": "a@b.com"}`. Optional `submit` selector. |
-| `codex_file_input` | Upload files to `<input type=file>`. Paths must be absolute. 10 MB per file. |
+| `codex_file_input` | Upload files to `<input type=file>`. Paths must be absolute, inside `CODEX_BRIDGE_UPLOAD_BASE`, and 10 MB or smaller. |
 
 ### Network & state (5 tools)
 
@@ -99,7 +99,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 
 | Tool | What it does |
 |------|-------------|
-| `codex_execute_cdp` | Raw CDP command. `Browser`, `Debugger`, `Target`, `Emulation`, `Security`, `Tracing` domains blocked. |
+| `codex_execute_cdp` | Raw CDP diagnostics. Explicit allowlist only; browser/target/debugger/navigation/cookie/event-producing enable/arbitrary Runtime JS/destructive storage operations are blocked. |
 
 ### Session (4 tools)
 
@@ -107,7 +107,7 @@ Call `codex_doctor` first. If it reports healthy, proceed. If not, tell the user
 |------|-------------|
 | `codex_name_session` | Label the session |
 | `codex_finalize` | Clean up all tabs. **Call when done.** |
-| `codex_get_info` | Extension metadata |
+| `codex_get_info` | Bridge runtime + extension metadata |
 | `codex_doctor` | Self-check: pipe health, Chrome version, latency |
 
 ## Workflows
@@ -145,6 +145,10 @@ codex_find_element <tab_id> name="Choose File"
 codex_file_input <tab_id> "#file-input" files=["C:/Users/me/doc.pdf"]
 ```
 
+If upload fails with an allowed-directory error, ask the user to set
+`CODEX_BRIDGE_UPLOAD_BASE` to the directory containing the file and restart the
+MCP server.
+
 ### Handle a dialog
 ```
 codex_dialog <tab_id> action="accept" prompt_text="hello"
@@ -157,7 +161,10 @@ codex_dialog <tab_id> action="dismiss"
 codex_nav_and_wait <tab_id> <login_url>
 codex_wait_for_element <tab_id> selector="#username"   // SPA renders async
 codex_form_fill <tab_id> {"#username": "alice", "#password": "secret"}
-codex_click_element... or codex_click_and_wait <tab_id> "#login-btn"
+codex_find_element <tab_id> role="button" name="Login"
+codex_click_element <tab_id> <node_id>
+# Or, for stable selectors:
+codex_click_and_wait <tab_id> selector="#login-btn"
 codex_wait_for_element <tab_id> selector=".dashboard"   // confirm login landed
 ```
 
@@ -185,6 +192,7 @@ When a tool fails, the cause is usually one of these. Try the fix before retryin
 | **Click has no effect** | JS `click()` swallowed by overlay or shadow DOM | Switch to `codex_cua_click` (real CDP mouse events) |
 | **SPA never "loads"** | URL unchanged, `wait_for_load` returns instantly | Use `codex_wait_for_element` on the target element instead |
 | **All tools slow / erratic** | Pipe degraded or extension stalled | `codex_doctor`; if unhealthy, restart Codex Desktop |
+| **MCP server missing after client restart** | GUI or scheduler cannot spawn the command from `PATH` | Run CLI doctor from the absolute npm install path and use `install.suggested_mcp_config` |
 
 General: always `codex_finalize` when the browsing task is done to release tabs.
 
@@ -196,7 +204,7 @@ General: always `codex_finalize` when the browsing task is done to release tabs.
 4. **Use `codex_cua_click`** when other click methods fail — raw CDP mouse events.
 5. **Use `codex_execute_cdp`** only when no dedicated tool covers the operation.
 6. **Call `codex_finalize`** when the browsing task is complete.
-7. **Call `codex_doctor`** if tools return unexpected errors — the pipe may have disconnected.
+7. **Call `codex_doctor`** if tools return unexpected errors — check both browser `healthy` and install `mcp_spawn_ready`.
 
 ## Profiles
 
@@ -204,8 +212,8 @@ If a tool you expect is missing, the server may be running a reduced profile. Th
 
 | Profile | Count | Scope |
 |---------|:-----:|-------|
-| `basic` | 33 | tabs, nav, dom, screenshot, bring_to_front, core interaction |
-| `network` | 50 | basic + cookies, CDP, file upload, dialog |
+| `basic` | 34 | tabs, nav, dom, screenshot, bring_to_front, core interaction, doctor |
+| `network` | 51 | basic + cookies, CDP, file upload, dialog |
 | `full` | 52 | everything (default) |
 
 ## Security
@@ -213,4 +221,5 @@ If a tool you expect is missing, the server may be running a reduced profile. Th
 - Cookie values are redacted by default. Ask before passing `redact_values: false`.
 - File paths must be absolute and within the upload directory.
 - Screenshots and DOM snapshots may contain sensitive page content.
-- Dangerous URL schemes (`file:`, `javascript:`, `data:`) are blocked.
+- Navigation accepts only `http://` and `https://` URLs.
+- Use raw CDP only when no dedicated tool exists; sensitive and stateful methods are blocked.

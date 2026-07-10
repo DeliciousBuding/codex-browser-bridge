@@ -1,9 +1,10 @@
 //! Optional TOML config file for persistent defaults.
 //!
 //! Lookup order (first hit wins): `CODEX_BRIDGE_CONFIG` env path, then
-//! `./.codex-browser-bridge.toml`. A missing file is fine — returns the default
-//! (empty) config. A malformed file logs a warning and is ignored, so a typo
-//! never bricks startup.
+//! `./.codex-browser-bridge.toml`. A missing default file is fine — returns the
+//! default (empty) config. If `CODEX_BRIDGE_CONFIG` is set, that path is
+//! authoritative; missing or malformed files warn and yield the empty config
+//! instead of falling through to a working-directory config.
 //!
 //! Config precedence overall: CLI flags > config file > env > built-in default
 //! (applied in `main.rs`).
@@ -19,17 +20,19 @@ pub struct Config {
     /// Base directory `codex_file_input` may upload from.
     #[serde(default)]
     pub upload_base: Option<String>,
+    /// Maximum bytes per MCP text content item.
+    #[serde(default)]
+    pub max_text_bytes: Option<usize>,
+    /// Maximum bytes per MCP base64 image content item.
+    #[serde(default)]
+    pub max_image_bytes: Option<usize>,
 }
 
 impl Config {
     /// Load config from the first available source, or `Default::default()`.
     pub fn load() -> Self {
-        if let Some(cfg) = std::env::var_os("CODEX_BRIDGE_CONFIG")
-            .as_deref()
-            .map(Path::new)
-            .and_then(Self::load_from)
-        {
-            return cfg;
+        if let Some(path) = std::env::var_os("CODEX_BRIDGE_CONFIG") {
+            return Self::load_from(Path::new(&path)).unwrap_or_default();
         }
         Self::load_from(Path::new(".codex-browser-bridge.toml")).unwrap_or_default()
     }
@@ -64,11 +67,15 @@ mod tests {
             r#"
             profile = "network"
             upload_base = "C:/uploads"
+            max_text_bytes = 2097152
+            max_image_bytes = 4194304
             "#,
         )
         .unwrap();
         assert_eq!(cfg.profile.as_deref(), Some("network"));
         assert_eq!(cfg.upload_base.as_deref(), Some("C:/uploads"));
+        assert_eq!(cfg.max_text_bytes, Some(2_097_152));
+        assert_eq!(cfg.max_image_bytes, Some(4_194_304));
     }
 
     #[test]
@@ -76,6 +83,8 @@ mod tests {
         let cfg: Config = toml::from_str("").unwrap();
         assert!(cfg.profile.is_none());
         assert!(cfg.upload_base.is_none());
+        assert!(cfg.max_text_bytes.is_none());
+        assert!(cfg.max_image_bytes.is_none());
     }
 
     #[test]
@@ -89,5 +98,26 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cfg.profile.as_deref(), Some("basic"));
+    }
+
+    #[test]
+    fn explicit_config_path_is_authoritative_when_missing() {
+        let previous = std::env::var_os("CODEX_BRIDGE_CONFIG");
+        std::env::set_var(
+            "CODEX_BRIDGE_CONFIG",
+            "definitely-missing-codex-browser-bridge.toml",
+        );
+
+        let cfg = Config::load();
+
+        match previous {
+            Some(value) => std::env::set_var("CODEX_BRIDGE_CONFIG", value),
+            None => std::env::remove_var("CODEX_BRIDGE_CONFIG"),
+        }
+
+        assert!(cfg.profile.is_none());
+        assert!(cfg.upload_base.is_none());
+        assert!(cfg.max_text_bytes.is_none());
+        assert!(cfg.max_image_bytes.is_none());
     }
 }

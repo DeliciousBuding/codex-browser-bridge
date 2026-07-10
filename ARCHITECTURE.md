@@ -74,14 +74,15 @@ routes the whole frame to subscribers matched by method prefix
 can dispatch on the exact method themselves.
 
 ### Tool profiles
-52 tools, filtered by profile — `basic` (33) / `network` (50) / `full` (52) —
+52 tools, filtered by profile — `basic` (34) / `network` (51) / `full` (52) —
 via `CODEX_BRIDGE_PROFILE` env, `--profile` flag, or config file. Keeps the
 tool list small for agents that don't need the network/debugging surface.
 
 ### Config precedence
 CLI flags > config file (`.codex-browser-bridge.toml`) > env > built-in
-default. A missing config file is silent; a malformed one warns and is ignored
-(it never bricks startup).
+default. A missing default config file is silent; a malformed one warns and is
+ignored. If `CODEX_BRIDGE_CONFIG` is set, that path is authoritative and the
+bridge does not fall back to a working-directory config.
 
 ### MCP resources + prompts
 - **resources**: `codex://tabs` — an on-demand snapshot of open tabs
@@ -125,6 +126,7 @@ dependency under an unlisted license fails the check and forces review) + bans
 
 ## Release
 
-Tagging `v*` triggers `release.yml`: test → build x64 + arm64 → GitHub Release
-with checksums → npm publish (`--provenance`). The npm package embeds release
-checksums and downloads the matching binary on install.
+Tagging `v*` triggers `release.yml`: test → build x64 + arm64 → checksums and
+attestations → draft GitHub Release → npm publish (`--provenance`) → publish
+the GitHub Release. The npm package embeds release checksums and downloads the
+matching binary on install.

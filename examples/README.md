@@ -1,24 +1,67 @@
 # MCP Client Examples
 
-The `codex-browser-bridge` MCP server uses stdio transport — the standard MCP wire protocol.
-All MCP clients configured correctly for stdio transport will work identically.
+The bridge is an MCP stdio server. The JSON shape is intentionally similar
+across clients, but install location, config file path, and approval/restart
+steps differ.
 
 ## Supported clients
 
-| Client | Config |
-|--------|--------|
-| Claude Code | [claude-code.json](claude-code.json) |
-| OpenClaw | [openclaw.json](openclaw.json) |
-| Hermes Agent | [hermes-agent.json](hermes-agent.json) |
-| Cursor | [cursor.json](cursor.json) |
+| Client | Config | Typical config location | After editing |
+|--------|--------|-------------------------|---------------|
+| Claude Code | [claude-code.json](claude-code.json) | `%USERPROFILE%\.claude\.mcp.json` | Restart Claude Code and approve in `/mcp` |
+| Cursor | [cursor.json](cursor.json) | Cursor MCP settings / project MCP config | Reload Cursor window |
+| OpenClaw | [openclaw.json](openclaw.json) | OpenClaw MCP server config | Restart or reconnect MCP servers |
+| Hermes Agent | [hermes-agent.json](hermes-agent.json) | Hermes Agent MCP server config | Restart or reconnect MCP servers |
+
+Replace `C:\\Users\\YOUR_USER\\Downloads` with a real upload directory. This
+directory is the only location `codex_file_input` can upload from.
 
 ## Platform notes
 
 ### Windows (native)
-Use the config as-is. The `codex-browser-bridge` binary must be in `PATH` or use an absolute path:
-```json
-"command": "D:/path/to/codex-browser-bridge.exe"
+Use the config as-is after replacing `YOUR_USER`. For GUI-launched clients and
+scheduled agents, prefer the absolute `command` path printed by npm
+`postinstall`.
+
+If you need to recover the installed command path later:
+
+```powershell
+$bridge = Join-Path (npm prefix -g) "codex-browser-bridge.cmd"
+& $bridge --mode doctor
 ```
 
+```json
+"command": "C:\\Users\\YOUR_USER\\AppData\\Roaming\\npm\\codex-browser-bridge.cmd"
+```
+
+GUI-launched clients do not always inherit the same `PATH` as your terminal. If
+the client reports spawn failures, paste the `command` from
+`install.suggested_mcp_config` in the doctor output.
+
 ### WSL
-From WSL, the bridge accesses Windows named pipes. Use the Windows binary path via `/mnt/c/...`.
+The npm package is Windows-only (`os: win32`), so `npm i -g` from a Linux WSL
+environment will be rejected by npm. Install on Windows, then point the WSL MCP
+client at the Windows executable:
+
+```json
+{
+  "mcpServers": {
+    "codex-browser": {
+      "command": "/mnt/c/Users/YOUR_USER/AppData/Roaming/npm/codex-browser-bridge.cmd",
+      "args": ["--mode", "mcp"],
+      "transport": "stdio",
+      "env": {
+        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\YOUR_USER\\Downloads"
+      }
+    }
+  }
+}
+```
+
+### Profiles
+
+- `basic`: core tab/navigation/DOM/input tools plus `codex_doctor`
+- `network`: basic plus cookies, storage, file upload, dialogs, CDP diagnostics, PDF, and network logs
+- `full`: all tools, default
+
+Use `CODEX_BRIDGE_PROFILE` or `--profile`.

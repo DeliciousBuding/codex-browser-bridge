@@ -5,7 +5,7 @@ use codex_browser_bridge::{
     },
     browser_test_support::{is_tab_gone_error, is_transient_load_error},
     error::BridgeError,
-    security::validate_url,
+    security::{validate_file_path, validate_url},
 };
 use serde_json::value::RawValue;
 
@@ -36,6 +36,51 @@ fn validate_url_blocks_dangerous_schemes_case_insensitively() {
 
     assert!(validate_url("https://example.com").is_ok());
     assert!(validate_url("http://localhost:3000").is_ok());
+}
+
+#[test]
+fn validate_url_allows_only_http_and_https() {
+    for url in [
+        "ftp://example.com/file",
+        "blob:https://example.com/id",
+        "filesystem:https://example.com/tmp",
+        "view-source:https://example.com",
+        "chrome-extension://extension/page.html",
+        "example.com/no-scheme",
+    ] {
+        assert!(validate_url(url).is_err(), "{url}");
+    }
+
+    assert!(validate_url("HTTPS://EXAMPLE.COM/path").is_ok());
+}
+
+#[test]
+fn validate_url_rejects_malformed_http_urls() {
+    for url in [
+        "https://",
+        "http://",
+        "https:///path",
+        "https://example.com\r\nHost: evil.test",
+        "https://example.com/a b",
+        "https://example.com\\evil",
+    ] {
+        assert!(validate_url(url).is_err(), "{url:?}");
+    }
+}
+
+#[test]
+fn validate_url_returns_trimmed_url() {
+    assert_eq!(
+        validate_url(" https://example.com/path ").unwrap(),
+        "https://example.com/path"
+    );
+}
+
+#[test]
+fn validate_file_path_rejects_relative_paths() {
+    let cwd = std::env::current_dir().unwrap();
+    let err = validate_file_path("Cargo.toml", &cwd).unwrap_err();
+    assert!(err.to_string().contains("Upload path must be absolute"));
 }
 
 #[test]

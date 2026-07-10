@@ -45,7 +45,7 @@
 - 上传文件到 `<input type=file>` 元素
 - 处理 JavaScript 弹窗（alert / confirm / prompt）
 - 读取和设置浏览器 Cookie
-- 执行原始 CDP 命令（Chrome DevTools Protocol 逃生口）
+- 执行明确 allowlist 允许的 CDP 诊断命令（Chrome DevTools Protocol 逃生口）
 - 通过 `codex_doctor` 自检诊断
 
 适用于需要真实浏览器会话的场景——后台管理系统、已登录的 Web 应用、本地开发服务器、文档网站。
@@ -84,9 +84,63 @@ npm i -g @delicious233/codex-browser-bridge
 找到登录按钮并点击它。
 ```
 
-Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
+如果 MCP 客户端从 GUI 或定时任务启动，优先使用 npm `postinstall`
+打印的绝对 `command` 路径配置。之后如需重新找路径，可从 npm 全局安装路径运行 CLI doctor：
 
-> 💡 **Agent skill 已内置。** 仓库 [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) 包含 LLM agent 使用全部 52 个工具的操作手册。将其 symlink 或复制到 agent 的 skills 目录即可（`~/.claude/skills/`、`~/.codex/skills/` 等）。
+```powershell
+$bridge = Join-Path (npm prefix -g) "codex-browser-bridge.cmd"
+& $bridge --mode doctor
+```
+
+把输出里的 `install.suggested_mcp_config.mcpServers.codex-browser.command`
+填到客户端配置的 `command`。文件上传需要设置 `CODEX_BRIDGE_UPLOAD_BASE`；[examples/](examples/) 里有完整配置模板。
+
+Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。npm 包内也会随包发布这些 `examples/` 模板。
+
+> 💡 **Agent skill 已内置。** 仓库 [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) 包含 LLM agent 使用全部 52 个工具的操作手册。PowerShell 用户可将 npm 包内 `skills\codex-browser` 复制到 `%USERPROFILE%\.claude\skills\`；Git Bash/WSL 用户可复制到 `~/.claude/skills/`。npm 包内的 `examples/` 目录包含多客户端 MCP 配置模板。
+
+## 配置
+
+配置优先级：CLI 参数 > 配置文件 > 环境变量 > 默认值。
+
+默认配置文件是当前工作目录下的 `.codex-browser-bridge.toml`。也可以用 `CODEX_BRIDGE_CONFIG` 指定显式路径；设置后不会再回退读取工作目录配置：
+
+```toml
+profile = "full"                 # basic | network | full
+upload_base = "C:/Users/me/Downloads"
+max_text_bytes = 1048576
+max_image_bytes = 3145728
+```
+
+MCP 客户端配置中也可以设置环境变量：
+
+```json
+{
+  "mcpServers": {
+    "codex-browser": {
+      "command": "codex-browser-bridge",
+      "args": ["--mode", "mcp", "--profile", "network"],
+      "transport": "stdio",
+      "env": {
+        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\me\\Downloads",
+        "CODEX_BRIDGE_MAX_TEXT_BYTES": "1048576",
+        "CODEX_BRIDGE_MAX_IMAGE_BYTES": "3145728"
+      }
+    }
+  }
+}
+```
+
+`CODEX_BRIDGE_UPLOAD_BASE` 会启用 `codex_file_input`，并限制只能上传该目录下的文件。未显式设置时文件上传会被拒绝，因为不同 MCP 客户端启动 server 的工作目录不一定一致。
+
+MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScript、CDP 或截图 payload：
+
+- `CODEX_BRIDGE_MAX_TEXT_BYTES` 限制每个 text content，默认 `1048576`。
+- `CODEX_BRIDGE_MAX_IMAGE_BYTES` 限制每个 base64 image content，默认 `3145728`。
+- 两者都有 8 MiB 硬上限。文本截断会带原始字节数标记；超大图片返回文本摘要，不返回无效的半截 base64。
+- 也可以在 `.codex-browser-bridge.toml` 中使用 `max_text_bytes` / `max_image_bytes`，或用 CLI 参数 `--max-text-bytes` / `--max-image-bytes`。
+
+支持 MCP resources 的客户端可以读取 `codex://tabs`，它只返回当前 bridge session 拥有的标签页，不是所有 Chrome 标签页。支持 MCP prompts 的客户端还会看到 `login` 和 `extract-table` 两个提示模板。
 
 ## 全部 52 个 MCP 工具
 
@@ -114,7 +168,7 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 ### DOM 与无障碍 `[DOM]`
 | 工具 | 说明 |
 |------|------|
-| `codex_dom_snapshot` | 完整无障碍树（含 nodeId） |
+| `codex_dom_snapshot` | 完整无障碍树（含 nodeId），大响应可能截断 |
 | `codex_dom_get_visible` | 人类可读的可见 DOM 树 |
 | `codex_dom_click` | 通过无障碍 nodeId 点击 |
 | `codex_find_element` | 按 ARIA role + name 查找元素 |
@@ -125,13 +179,13 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 |------|------|
 | `codex_get_url` | 当前标签 URL |
 | `codex_get_title` | 当前页面标题 |
-| `codex_evaluate` | 执行 JavaScript，返回 JSON 结果 |
-| `codex_page_assets` | 列出页面资源（图片/CSS/JS/字体） |
+| `codex_evaluate` | 执行 JavaScript，返回有上限的 JSON 结果 |
+| `codex_page_assets` | 列出页面资源；可选抓取有已知大小且受限的内容 |
 | `codex_console_logs` | 捕获一段时间内的 console 输出 |
 | `codex_emulate_device` | 模拟移动端视口（`reset=true` 清除） |
-| `codex_screenshot` | 截取视口 PNG 截图 |
-| `codex_screenshot_element` | 截取单个元素 |
-| `codex_print_pdf` | 渲染页面为 PDF |
+| `codex_screenshot` | 截取视口截图，超大图片返回摘要 |
+| `codex_screenshot_element` | 截取单个元素，超大图片返回摘要 |
+| `codex_print_pdf` | 通过有界 CDP stream 渲染 PDF；只返回大小摘要，不嵌入 PDF 内容 |
 | `codex_bring_to_front` | 激活后台标签（修复截图超时） |
 | `codex_dialog` | 处理 alert / confirm / prompt |
 | `codex_performance_metrics` | DOM 节点数、JS 堆、事件监听数（性能） |
@@ -164,14 +218,14 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。
 ### CDP 逃生口 `[CDP]`
 | 工具 | 说明 |
 |------|------|
-| `codex_execute_cdp` | 执行任意 CDP 命令（allowlist 保护） |
+| `codex_execute_cdp` | 执行明确 allowlist 允许的 CDP 诊断命令 |
 
 ### 会话 `[Session]`
 | 工具 | 说明 |
 |------|------|
 | `codex_name_session` | 命名当前 session |
 | `codex_finalize` | 结束 session，清理标签 |
-| `codex_get_info` | 获取扩展后端元数据 |
+| `codex_get_info` | 获取 bridge 运行时 + 扩展后端元数据 |
 | `codex_doctor` | 自检诊断（pipe 连通性、延迟、版本） |
 
 ## CLI 用法
@@ -187,9 +241,12 @@ codex-browser-bridge --mode discover
 codex-browser-bridge --mode cli
 
 # 工具 profile
-codex-browser-bridge --mode mcp --profile basic     # 33 个工具
-codex-browser-bridge --mode mcp --profile network   # 50 个工具
+codex-browser-bridge --mode mcp --profile basic     # 34 个工具
+codex-browser-bridge --mode mcp --profile network   # 51 个工具
 codex-browser-bridge --mode mcp --profile full      # 全部 52 个（默认）
+
+# 限制大 MCP 输出
+codex-browser-bridge --mode mcp --max-text-bytes 1048576 --max-image-bytes 3145728
 ```
 
 ## 架构
@@ -217,7 +274,8 @@ Codex Desktop → Chrome Extension → Chrome 标签页
 - 避免在含密码、支付信息或管理后台的页面使用
 - 分享截图/DOM/日志前脱敏
 - `codex_file_input` 强制路径穿越防护（canonicalize + 前缀检查，10 MB 限制）
-- Cookie 值默认脱敏；CDP allowlist 阻止危险域
+- 导航只接受 `http://` 和 `https://` URL
+- Cookie 值默认脱敏；raw CDP 使用 allowlist，并阻止 browser/target/debugger/navigation/cookie/screenshot/PDF/file upload/event-producing enable/arbitrary Runtime JS/page-resource content/destructive storage 等敏感操作
 
 ## 开发
 
@@ -249,9 +307,9 @@ src/
 
 详见 [ROADMAP.md](ROADMAP.md)。亮点：
 
-- `codex_network_monitor` — 请求/响应检查
-- `codex_emulate_device` — 移动端视口模拟
-- `codex_storage` — localStorage / sessionStorage 访问
+- winget / scoop 安装清单
+- 可选真实 E2E harness（Codex Desktop + Chrome）
+- typed tool result schemas
 - v2.0.0: 跨平台（macOS / Linux via Unix domain socket）
 
 ## 相关资源
@@ -261,6 +319,8 @@ src/
 - [ROADMAP.md](ROADMAP.md) — 完整路线图（含 SUPER 评分）
 - [CHANGELOG.md](CHANGELOG.md) — 发布历史
 - [CONTRIBUTING.md](CONTRIBUTING.md) — 开发配置与规范
+- [docs/release-process.md](docs/release-process.md) — tag、changelog、GitHub Release、npm 发布规则
+- [scripts/live-e2e.ps1](scripts/live-e2e.ps1) — 可选真实 Codex Desktop + Chrome E2E 冒烟测试
 
 ## 许可证
 
