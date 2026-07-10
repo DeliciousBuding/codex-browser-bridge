@@ -33,9 +33,10 @@
 
 ## Current Status
 
-**Active Phase**: PR #15 finalization
-**Active Task**: PR #15 final review follow-ups: `codex_doctor` bounds pipe probing/output and separates MCP spawn readiness from browser pipe health.
-**Blockers**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
+**Active Phase**: Clean baseline — all hardening commits pushed, PR #15 green.
+**Last Completed**: Subscription-time event byte bounds (`a1b8f38`). Read loop filters monitor events by allowed method and byte budget before channel enqueue.
+**Blocker**: Release requires npm Trusted Publisher configuration before the first OIDC publish. PR #15 remains draft until final review/undraft decision.
+**Clean baseline gates**: `cargo fmt --check`, `cargo test --locked`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo check --tests --target x86_64-unknown-linux-gnu`, `cargo deny check`, `npm test`, `npm run check:package`, `node scripts/check-agent-surface.js`, `node scripts/check-release-contract.js`, `node scripts/check-actions-pinned.js`, `git diff --check` — all pass. No TODOs/FIXMEs in Rust source.
 
 ## Governance Status
 
@@ -50,14 +51,15 @@
 ```yaml
 adaptive:
   strategy: "small hardening phases before larger harness and docs work"
-  drift_score: 2
+  drift_score: 0
   thresholds:
     annotate: 3
     replan: 5
     rescope: 8
   total_tasks: 12
   completed_tasks: 12
-  last_updated: "2026-07-06"
+  followup_rounds: 20
+  last_updated: "2026-07-10"
 ```
 
 ## Task Telemetry Log
@@ -121,11 +123,10 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 
 ## Next Steps
 
-1. Push the subscription-time event byte bounds follow-up.
-2. Wait for PR #15 checks to return green.
-3. Decide whether to undraft and merge PR #15.
-4. Configure npm Trusted Publisher before the first tokenless release publish.
-5. After PR #15 lands, revisit Dependabot PR #14 against the updated MSRV/release baseline.
+1. Commit the clean-baseline MASTER.md update.
+2. Decide whether to undraft and merge PR #15.
+3. Configure npm Trusted Publisher before the first tokenless release publish.
+4. After PR #15 lands, revisit Dependabot PR #14 against the updated MSRV/release baseline.
 
 ## Session Log
 
@@ -172,3 +173,4 @@ gh issue list -R DeliciousBuding/codex-browser-bridge --state open
 | 2026-07-07 | doctor-install-diagnostics | `codex_doctor` now reports command-path diagnostics and an absolute-path MCP config while preserving browser-pipe health semantics. |
 | 2026-07-07 | bounded-doctor-probing | `codex_doctor` now uses bounded concurrent pipe probing, returns a bounded pipe sample with summary counts, and distinguishes install spawn readiness from browser pipe health. |
 | 2026-07-07 | subscription-event-byte-bounds | Added read-loop-level event subscription budget so noisy pages cannot flood the event channel before drain-time truncation. |
+| 2026-07-10 | clean-baseline-audit | Full spec-driven + superpowers baseline audit: all 9 verification gates pass, no TODOs/FIXMEs, archive structure clean, docs consistent, telemetry aligned, drift_score reset to 0. |
