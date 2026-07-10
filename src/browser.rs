@@ -751,7 +751,14 @@ struct CapturedEvents {
 pub async fn network_monitor(client: &Client, tab_id: &str, duration_ms: u64) -> Result<Value> {
     let id = parse_tab_id("network_monitor", tab_id)?;
     let duration_ms = bounded_duration_ms("duration_ms", duration_ms, 5_000, MAX_CAPTURE_MS)?;
-    let (sub_id, mut rx) = client.subscribe_events("Network.", 512).await;
+    let (sub_id, mut rx, stats) = client
+        .subscribe_events_with_budget(
+            "Network.",
+            &["Network.requestWillBeSent", "Network.responseReceived"],
+            512,
+            MAX_CAPTURE_EVENT_BYTES,
+        )
+        .await;
     if let Err(err) = client.execute_cdp(id, "Network.enable", None).await {
         client.unsubscribe_events(sub_id).await;
         return Err(err);
@@ -762,14 +769,19 @@ pub async fn network_monitor(client: &Client, tab_id: &str, duration_ms: u64) ->
 
     let captured =
         drain_events_with_byte_budget(&mut rx, MAX_CAPTURE_EVENT_BYTES, is_pairable_network_event);
+    let stats = stats.snapshot();
+    let truncated = stats.truncated || captured.truncated;
+    let limit_reason = stats.limit_reason.or(captured.limit_reason);
     let requests = pair_network_events(&captured.events);
     Ok(json!({
         "duration_ms": duration_ms,
-        "raw_event_count": captured.observed_count,
+        "raw_event_count": stats.observed_count,
+        "queued_event_count": captured.observed_count,
         "captured_event_count": captured.events.len(),
         "captured_event_bytes": captured.captured_bytes,
-        "truncated": captured.truncated,
-        "limit_reason": captured.limit_reason,
+        "dropped_event_count": stats.dropped_count,
+        "truncated": truncated,
+        "limit_reason": limit_reason,
         "request_count": requests.len(),
         "requests": requests
     }))
@@ -900,8 +912,13 @@ fn pair_network_events(events: &[Value]) -> Vec<NetEntry> {
 pub async fn console_logs(client: &Client, tab_id: &str, duration_ms: u64) -> Result<Value> {
     let id = parse_tab_id("console_logs", tab_id)?;
     let duration_ms = bounded_duration_ms("duration_ms", duration_ms, 5_000, MAX_CAPTURE_MS)?;
-    let (sub_id, mut rx) = client
-        .subscribe_events("Runtime.consoleAPICalled", 512)
+    let (sub_id, mut rx, stats) = client
+        .subscribe_events_with_budget(
+            "Runtime.consoleAPICalled",
+            &[],
+            512,
+            MAX_CAPTURE_EVENT_BYTES,
+        )
         .await;
     if let Err(err) = client.execute_cdp(id, "Runtime.enable", None).await {
         client.unsubscribe_events(sub_id).await;
@@ -911,6 +928,9 @@ pub async fn console_logs(client: &Client, tab_id: &str, duration_ms: u64) -> Re
     client.execute_cdp(id, "Runtime.disable", None).await.ok();
     client.unsubscribe_events(sub_id).await;
     let captured = drain_events_with_byte_budget(&mut rx, MAX_CAPTURE_EVENT_BYTES, |_| true);
+    let stats = stats.snapshot();
+    let truncated = stats.truncated || captured.truncated;
+    let limit_reason = stats.limit_reason.or(captured.limit_reason);
     let logs: Vec<Value> = captured
         .events
         .iter()
@@ -918,11 +938,13 @@ pub async fn console_logs(client: &Client, tab_id: &str, duration_ms: u64) -> Re
         .collect();
     Ok(json!({
         "duration_ms": duration_ms,
-        "raw_event_count": captured.observed_count,
+        "raw_event_count": stats.observed_count,
+        "queued_event_count": captured.observed_count,
         "captured_event_count": captured.events.len(),
         "captured_event_bytes": captured.captured_bytes,
-        "truncated": captured.truncated,
-        "limit_reason": captured.limit_reason,
+        "dropped_event_count": stats.dropped_count,
+        "truncated": truncated,
+        "limit_reason": limit_reason,
         "log_count": logs.len(),
         "logs": logs
     }))

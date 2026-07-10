@@ -3,6 +3,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 
 use serde_json::{json, value::RawValue, Value};
 use tokio::io::{split, ReadHalf, WriteHalf};
@@ -47,7 +48,81 @@ type ConnectionFactory =
 struct EventSubscription {
     id: u64,
     method_prefix: String,
+    allowed_methods: Option<Vec<String>>,
+    max_buffered_bytes: Option<usize>,
+    stats: Option<EventSubscriptionStats>,
     sender: mpsc::Sender<Value>,
+}
+
+struct EventDispatchTarget {
+    sender: mpsc::Sender<Value>,
+    allowed_methods: Option<Vec<String>>,
+    max_buffered_bytes: Option<usize>,
+    stats: Option<EventSubscriptionStats>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EventSubscriptionSnapshot {
+    pub observed_count: usize,
+    pub accepted_count: usize,
+    pub accepted_bytes: usize,
+    pub dropped_count: usize,
+    pub truncated: bool,
+    pub limit_reason: Option<&'static str>,
+}
+
+#[derive(Clone)]
+pub struct EventSubscriptionStats {
+    inner: Arc<StdMutex<EventSubscriptionSnapshot>>,
+}
+
+impl EventSubscriptionStats {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(StdMutex::new(EventSubscriptionSnapshot::default())),
+        }
+    }
+
+    pub fn snapshot(&self) -> EventSubscriptionSnapshot {
+        self.inner.lock().unwrap().clone()
+    }
+
+    fn record_observed(&self) {
+        let mut stats = self.inner.lock().unwrap();
+        stats.observed_count += 1;
+    }
+
+    fn can_accept(&self, bytes: usize, max_bytes: usize) -> bool {
+        let mut stats = self.inner.lock().unwrap();
+        if stats.truncated {
+            stats.dropped_count += 1;
+            return false;
+        }
+        if stats.accepted_bytes.saturating_add(bytes) > max_bytes {
+            record_event_drop(&mut stats, "event_byte_limit");
+            return false;
+        }
+        true
+    }
+
+    fn record_accepted(&self, bytes: usize) {
+        let mut stats = self.inner.lock().unwrap();
+        stats.accepted_count += 1;
+        stats.accepted_bytes += bytes;
+    }
+
+    fn record_dropped(&self, reason: &'static str) {
+        let mut stats = self.inner.lock().unwrap();
+        record_event_drop(&mut stats, reason);
+    }
+}
+
+fn record_event_drop(stats: &mut EventSubscriptionSnapshot, reason: &'static str) {
+    stats.dropped_count += 1;
+    stats.truncated = true;
+    if stats.limit_reason.is_none() {
+        stats.limit_reason = Some(reason);
+    }
 }
 
 #[derive(Clone)]
@@ -378,22 +453,51 @@ impl Client {
                 // (e.g. Network.requestWillBeSent vs Network.responseReceived).
                 if value.get("id").is_none() {
                     if let Some(method) = value.get("method").and_then(|m| m.as_str()) {
-                        let matched: Vec<mpsc::Sender<Value>> = {
+                        let matched: Vec<EventDispatchTarget> = {
                             let mut subs = inner.event_subs.lock().await;
                             subs.retain(|s| !s.sender.is_closed());
                             subs.iter()
                                 .filter(|s| method.starts_with(s.method_prefix.as_str()))
-                                .map(|s| s.sender.clone())
+                                .map(|s| EventDispatchTarget {
+                                    sender: s.sender.clone(),
+                                    allowed_methods: s.allowed_methods.clone(),
+                                    max_buffered_bytes: s.max_buffered_bytes,
+                                    stats: s.stats.clone(),
+                                })
                                 .collect()
                         };
                         let mut closed_sender = false;
-                        for tx in matched {
+                        for sub in matched {
+                            if let Some(stats) = &sub.stats {
+                                stats.record_observed();
+                            }
+                            if let Some(allowed) = &sub.allowed_methods {
+                                if !allowed.iter().any(|allowed| allowed == method) {
+                                    continue;
+                                }
+                            }
+                            if let (Some(stats), Some(max_bytes)) =
+                                (&sub.stats, sub.max_buffered_bytes)
+                            {
+                                if !stats.can_accept(frame.len(), max_bytes) {
+                                    continue;
+                                }
+                            }
                             // try_send: never block the read loop on a slow consumer
-                            if matches!(
-                                tx.try_send(value.clone()),
-                                Err(mpsc::error::TrySendError::Closed(_))
-                            ) {
-                                closed_sender = true;
+                            match sub.sender.try_send(value.clone()) {
+                                Ok(()) => {
+                                    if let Some(stats) = &sub.stats {
+                                        stats.record_accepted(frame.len());
+                                    }
+                                }
+                                Err(mpsc::error::TrySendError::Closed(_)) => {
+                                    closed_sender = true;
+                                }
+                                Err(mpsc::error::TrySendError::Full(_)) => {
+                                    if let Some(stats) = &sub.stats {
+                                        stats.record_dropped("event_buffer_full");
+                                    }
+                                }
                             }
                         }
                         if closed_sender {
@@ -449,14 +553,61 @@ impl Client {
         method_prefix: &str,
         buffer: usize,
     ) -> (u64, mpsc::Receiver<Value>) {
+        let (id, rx, _) = self
+            .subscribe_events_inner(method_prefix, buffer, None, None, None)
+            .await;
+        (id, rx)
+    }
+
+    pub async fn subscribe_events_with_budget(
+        &self,
+        method_prefix: &str,
+        allowed_methods: &[&str],
+        buffer: usize,
+        max_buffered_bytes: usize,
+    ) -> (u64, mpsc::Receiver<Value>, EventSubscriptionStats) {
+        let stats = EventSubscriptionStats::new();
+        let allowed_methods = if allowed_methods.is_empty() {
+            None
+        } else {
+            Some(
+                allowed_methods
+                    .iter()
+                    .map(|method| method.to_string())
+                    .collect(),
+            )
+        };
+        let (id, rx, _) = self
+            .subscribe_events_inner(
+                method_prefix,
+                buffer,
+                allowed_methods,
+                Some(max_buffered_bytes),
+                Some(stats.clone()),
+            )
+            .await;
+        (id, rx, stats)
+    }
+
+    async fn subscribe_events_inner(
+        &self,
+        method_prefix: &str,
+        buffer: usize,
+        allowed_methods: Option<Vec<String>>,
+        max_buffered_bytes: Option<usize>,
+        stats: Option<EventSubscriptionStats>,
+    ) -> (u64, mpsc::Receiver<Value>, Option<EventSubscriptionStats>) {
         let (tx, rx) = mpsc::channel(buffer);
         let id = self.inner.next_sub_id.fetch_add(1, Ordering::SeqCst);
         self.inner.event_subs.lock().await.push(EventSubscription {
             id,
             method_prefix: method_prefix.to_string(),
+            allowed_methods,
+            max_buffered_bytes,
+            stats: stats.clone(),
             sender: tx,
         });
-        (id, rx)
+        (id, rx, stats)
     }
 
     /// Remove an event subscription by id.
@@ -1083,6 +1234,102 @@ mod reconnect_tests {
         .unwrap();
 
         expect_event_sub_len(&client, 0).await;
+    }
+
+    #[tokio::test]
+    async fn budgeted_event_subscription_filters_before_enqueue() {
+        let (client, mut server) = test_client(8192).await;
+        let (_sub_id, mut rx, stats) = client
+            .subscribe_events_with_budget(
+                "Network.",
+                &["Network.requestWillBeSent", "Network.responseReceived"],
+                8,
+                4096,
+            )
+            .await;
+
+        encode_frame(
+            &mut server,
+            &json!({"method":"Network.dataReceived","params":{"requestId":"1","payload":"x".repeat(1000)}}),
+        )
+        .await
+        .unwrap();
+        encode_frame(
+            &mut server,
+            &json!({"method":"Network.requestWillBeSent","params":{"requestId":"1"}}),
+        )
+        .await
+        .unwrap();
+        encode_frame(
+            &mut server,
+            &json!({"method":"Network.responseReceived","params":{"requestId":"1"}}),
+        )
+        .await
+        .unwrap();
+
+        wait_until("event subscription stats observed=3", || {
+            let stats = stats.clone();
+            async move { stats.snapshot().observed_count == 3 }
+        })
+        .await;
+
+        assert_eq!(
+            rx.try_recv().unwrap()["method"],
+            json!("Network.requestWillBeSent")
+        );
+        assert_eq!(
+            rx.try_recv().unwrap()["method"],
+            json!("Network.responseReceived")
+        );
+        assert!(rx.try_recv().is_err());
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.accepted_count, 2);
+        assert_eq!(snapshot.dropped_count, 0);
+        assert!(!snapshot.truncated);
+    }
+
+    #[tokio::test]
+    async fn budgeted_event_subscription_stops_after_byte_limit() {
+        let (client, mut server) = test_client(8192).await;
+        let (_sub_id, mut rx, stats) = client
+            .subscribe_events_with_budget("Runtime.consoleAPICalled", &[], 8, 180)
+            .await;
+
+        encode_frame(
+            &mut server,
+            &json!({"method":"Runtime.consoleAPICalled","params":{"args":[{"value":"ok"}]}}),
+        )
+        .await
+        .unwrap();
+        encode_frame(
+            &mut server,
+            &json!({"method":"Runtime.consoleAPICalled","params":{"args":[{"value":"x".repeat(500)}]}}),
+        )
+        .await
+        .unwrap();
+        encode_frame(
+            &mut server,
+            &json!({"method":"Runtime.consoleAPICalled","params":{"args":[{"value":"after-limit"}]}}),
+        )
+        .await
+        .unwrap();
+
+        wait_until("event subscription stats observed=3", || {
+            let stats = stats.clone();
+            async move { stats.snapshot().observed_count == 3 }
+        })
+        .await;
+
+        assert_eq!(
+            rx.try_recv().unwrap()["method"],
+            json!("Runtime.consoleAPICalled")
+        );
+        assert!(rx.try_recv().is_err());
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.accepted_count, 1);
+        assert_eq!(snapshot.dropped_count, 2);
+        assert!(snapshot.truncated);
+        assert_eq!(snapshot.limit_reason, Some("event_byte_limit"));
     }
 
     #[tokio::test]
