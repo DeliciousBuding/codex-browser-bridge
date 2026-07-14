@@ -118,10 +118,7 @@ async fn evaluate_awaits_promises_and_returns_by_value() {
     assert_eq!(evaluate["method"], "executeCdp");
     assert_eq!(evaluate["params"]["target"]["tabId"], 9);
     assert_eq!(evaluate["params"]["method"], "Runtime.evaluate");
-    assert_eq!(
-        evaluate["params"]["commandParams"]["returnByValue"],
-        true
-    );
+    assert_eq!(evaluate["params"]["commandParams"]["returnByValue"], true);
     assert_eq!(evaluate["params"]["commandParams"]["awaitPromise"], true);
     reply_result(
         &mut server,

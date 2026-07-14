@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-07-14
+
 ### Fixed
 
 - `codex_evaluate` now sets `awaitPromise=true` on `Runtime.evaluate`, so async expressions like `fetch(...).then(...)` return real values instead of an empty Promise object `{}`.

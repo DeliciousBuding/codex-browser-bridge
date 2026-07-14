@@ -2155,7 +2155,8 @@ mod tests {
 
     #[test]
     fn evaluate_exception_message_none_on_success() {
-        let raw = RawValue::from_string(r#"{"result":{"type":"string","value":"ok"}}"#.into()).unwrap();
+        let raw =
+            RawValue::from_string(r#"{"result":{"type":"string","value":"ok"}}"#.into()).unwrap();
         assert_eq!(evaluate_exception_message(&raw), None);
     }
 

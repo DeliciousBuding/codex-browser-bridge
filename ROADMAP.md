@@ -1,13 +1,15 @@
 # ROADMAP
 
-## Status: v1.9.1 shipped (2026-06-21)
+## Status: v1.10.1 shipped (2026-07-14)
 
-52 MCP tools, CDP event architecture, structured network monitoring, `--mode doctor` CLI, JPEG/WebP screenshots. See [CHANGELOG.md](CHANGELOG.md) for the full v1.7.0 → v1.9.1 arc.
+52 MCP tools, CDP event architecture, structured network monitoring, `--mode doctor` CLI, JPEG/WebP screenshots. See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
-**Architecture health (SUPER):** S 5, U 5, P 5, E 3 (Windows-only), R 4 = **22/25**. The remaining gaps are operational maturity, not architecture — that is what v1.10.0 targets.
+**Architecture health (SUPER):** S 5, U 5, P 5, E 3 (Windows-only), R 4 = **22/25**. Remaining gaps are operational maturity (winget/scoop, protocol depth), not architecture.
 
 ### Completed releases
 
+- **v1.10.1** (2026-07-14): `codex_evaluate` awaits Promises and surfaces JS exceptions; docs for Promise/exception behavior.
+- **v1.10.0** (2026-07-10): engineering hardening — reconnect, supply-chain CI, benchmarks, release contract, bounded MCP surfaces.
 - **v1.9.1** (2026-06-21): 16 new tools → 52 total. CDP event subscription (`network_monitor`, `console_logs`). Background-tab fix (`bring_to_front` + sticky 20s timeout). JPEG/WebP screenshots, sessionStorage, `--mode doctor`, `performance_metrics`.
 - **v1.9.0** (2026-06-20): `src/mcp/` module split, 8 tools (file upload, dialog, locator layer, composite tools, profiles, doctor).
 - **v1.8.0** (2026-06-20): CDP error normalization, sticky attach, Go legacy purged, protocol/MCP stdio optimization.
@@ -15,7 +17,7 @@
 
 ---
 
-## v1.10.0 — Engineering hardening (current)
+## Next — Distribution & protocol depth
 
 The tool layer is saturated. The honest gaps are runtime robustness, supply chain, performance baselines, and test coverage — not more tools.
 
