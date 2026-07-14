@@ -245,6 +245,10 @@ impl super::Server {
         let tab_id = required_str(&args, "tab_id")?;
         let expression = required_str(&args, "expression")?;
         let raw: Box<RawValue> = browser::evaluate(&self.client, tab_id, expression).await?;
+        // Surface thrown JS exceptions as tool errors instead of silent empty/partial payloads.
+        if let Some(message) = browser::evaluate_exception_message(&raw) {
+            anyhow::bail!("evaluate threw: {message}");
+        }
         Ok(vec![Content::text(raw.get().to_string())])
     }
 

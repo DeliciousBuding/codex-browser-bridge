@@ -61,6 +61,7 @@ async fn browser_calls_use_expected_cdp_sequence_and_sticky_attach() {
         evaluate["params"]["commandParams"]["expression"],
         "document.title"
     );
+    // get_title uses Runtime.evaluate without awaitPromise; browser::evaluate does.
     reply_result(
         &mut server,
         &evaluate,
@@ -87,6 +88,52 @@ async fn browser_calls_use_expected_cdp_sequence_and_sticky_attach() {
     reply_result(&mut server, &screenshot, json!({"data":"ZmFrZQ=="})).await;
 
     assert_eq!(screenshot_task.await.unwrap().unwrap(), "ZmFrZQ==");
+}
+
+#[tokio::test]
+async fn evaluate_awaits_promises_and_returns_by_value() {
+    let (client, mut server) = test_client();
+
+    let evaluate_task = tokio::spawn({
+        let client = client.clone();
+        async move {
+            browser::evaluate(
+                &client,
+                "9",
+                "fetch('/session/current.json').then(r => r.json())",
+            )
+            .await
+        }
+    });
+
+    let detach = next_request(&mut server).await;
+    assert_eq!(detach["method"], "detach");
+    reply_result(&mut server, &detach, json!({})).await;
+
+    let attach = next_request(&mut server).await;
+    assert_eq!(attach["method"], "attach");
+    reply_result(&mut server, &attach, json!({})).await;
+
+    let evaluate = next_request(&mut server).await;
+    assert_eq!(evaluate["method"], "executeCdp");
+    assert_eq!(evaluate["params"]["target"]["tabId"], 9);
+    assert_eq!(evaluate["params"]["method"], "Runtime.evaluate");
+    assert_eq!(
+        evaluate["params"]["commandParams"]["returnByValue"],
+        true
+    );
+    assert_eq!(evaluate["params"]["commandParams"]["awaitPromise"], true);
+    reply_result(
+        &mut server,
+        &evaluate,
+        json!({"result":{"type":"object","value":{"logged_in":true}}}),
+    )
+    .await;
+
+    let raw = evaluate_task.await.unwrap().unwrap();
+    let value: Value = serde_json::from_str(raw.get()).unwrap();
+    assert_eq!(value["result"]["value"]["logged_in"], true);
+    assert!(browser::evaluate_exception_message(&raw).is_none());
 }
 
 #[tokio::test]

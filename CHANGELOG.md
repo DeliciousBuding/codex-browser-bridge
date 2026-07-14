@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `codex_evaluate` now sets `awaitPromise=true` on `Runtime.evaluate`, so async expressions like `fetch(...).then(...)` return real values instead of an empty Promise object `{}`.
+- `codex_evaluate` surfaces `exceptionDetails` as a tool error instead of returning a silent partial payload.
+
+### Documentation
+
+- Refreshed the installed agent skill from the stale Go-era notes to the Rust 1.10 tool surface (52 tools, doctor, profiles, reconnect).
+
 ## [1.10.0] - 2026-07-10
 
 ### Changed

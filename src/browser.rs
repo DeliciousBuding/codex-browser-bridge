@@ -968,11 +968,18 @@ pub async fn performance_metrics(client: &Client, tab_id: &str) -> Result<Value>
 
 pub async fn evaluate(client: &Client, tab_id: &str, expression: &str) -> Result<Box<RawValue>> {
     let id = parse_tab_id("evaluate", tab_id)?;
+    // awaitPromise=true is required for fetch()/async expressions. Without it,
+    // Chrome returns a pending Promise object whose returnByValue payload is
+    // the empty object `{}` — agents then see a false "empty result".
     client
         .execute_cdp(
             id,
             "Runtime.evaluate",
-            Some(json!({ "expression": expression, "returnByValue": true })),
+            Some(json!({
+                "expression": expression,
+                "returnByValue": true,
+                "awaitPromise": true
+            })),
         )
         .await
 }
@@ -1739,6 +1746,42 @@ fn runtime_value_string(raw: &RawValue) -> Result<Option<String>> {
         }))
 }
 
+/// Extract a human-readable message from `Runtime.evaluate` exceptionDetails, if any.
+pub fn evaluate_exception_message(raw: &RawValue) -> Option<String> {
+    #[derive(Deserialize)]
+    struct EvalEnvelope {
+        #[serde(rename = "exceptionDetails")]
+        exception_details: Option<ExceptionDetails>,
+    }
+
+    #[derive(Deserialize)]
+    struct ExceptionDetails {
+        text: Option<String>,
+        exception: Option<ExceptionValue>,
+    }
+
+    #[derive(Deserialize)]
+    struct ExceptionValue {
+        description: Option<String>,
+        value: Option<Value>,
+    }
+
+    let envelope: EvalEnvelope = serde_json::from_str(raw.get()).ok()?;
+    let details = envelope.exception_details?;
+    if let Some(exception) = details.exception {
+        if let Some(description) = exception.description.filter(|s| !s.is_empty()) {
+            return Some(description);
+        }
+        if let Some(value) = exception.value {
+            return Some(match value {
+                Value::String(s) => s,
+                other => other.to_string(),
+            });
+        }
+    }
+    details.text.filter(|s| !s.is_empty())
+}
+
 fn screenshot_data(raw: &RawValue) -> Result<String> {
     #[derive(Deserialize)]
     struct Screenshot {
@@ -2095,6 +2138,25 @@ mod tests {
     fn runtime_value_string_none_when_missing() {
         let raw = RawValue::from_string(r#"{"result":{}}"#.into()).unwrap();
         assert_eq!(runtime_value_string(&raw).unwrap(), None);
+    }
+
+    #[test]
+    fn evaluate_exception_message_reads_description() {
+        let raw = RawValue::from_string(
+            r#"{"result":{"type":"object","subtype":"error"},"exceptionDetails":{"text":"Uncaught","exception":{"description":"Error: boom"}}}"#
+                .into(),
+        )
+        .unwrap();
+        assert_eq!(
+            evaluate_exception_message(&raw).as_deref(),
+            Some("Error: boom")
+        );
+    }
+
+    #[test]
+    fn evaluate_exception_message_none_on_success() {
+        let raw = RawValue::from_string(r#"{"result":{"type":"string","value":"ok"}}"#.into()).unwrap();
+        assert_eq!(evaluate_exception_message(&raw), None);
     }
 
     #[test]
