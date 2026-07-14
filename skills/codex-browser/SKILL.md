@@ -52,7 +52,7 @@ Call `codex_doctor` first. If `healthy` is true, browser pipes are ready. If `in
 |------|-------------|
 | `codex_get_url` | Current URL via `location.href` |
 | `codex_get_title` | Current `document.title` |
-| `codex_evaluate` | Run arbitrary JS, get JSON result |
+| `codex_evaluate` | Run arbitrary JS and return the JSON result. Uses `returnByValue` + `awaitPromise`, so `fetch(...).then(...)` / async IIFEs resolve. Thrown JS errors become tool errors. |
 | `codex_page_assets` | List page resources; optionally fetch bounded known-size content |
 | `codex_console_logs` | Capture `console.*` output for a duration window (frontend debugging) |
 | `codex_emulate_device` | Override viewport to emulate a device (`reset=true` to clear) |
@@ -174,6 +174,13 @@ codex_evaluate <tab_id> "JSON.stringify([...document.querySelectorAll('table tr'
 // returns rows as JSON — parse and use directly
 ```
 
+### Async page fetches
+```
+// awaitPromise=true is always on — no manual await wrapper needed
+codex_evaluate <tab_id> "fetch('/api/me').then(r => r.json())"
+// rejected promises / thrown JS become tool errors (exceptionDetails)
+```
+
 ### Debug a failing interaction
 ```
 codex_console_logs <tab_id> duration_ms=5000   // capture while reproducing
@@ -191,6 +198,8 @@ When a tool fails, the cause is usually one of these. Try the fix before retryin
 | **Element not found** by selector | Page changed, or selector is wrong | `codex_dom_snapshot` / `codex_find_element` to re-locate by role+name |
 | **Click has no effect** | JS `click()` swallowed by overlay or shadow DOM | Switch to `codex_cua_click` (real CDP mouse events) |
 | **SPA never "loads"** | URL unchanged, `wait_for_load` returns instantly | Use `codex_wait_for_element` on the target element instead |
+| **`codex_evaluate` returns `{}` for `fetch`/async code** | Running a pre-fix binary that lacked `awaitPromise` | Upgrade the bridge binary and reconnect the MCP server |
+| **`codex_evaluate` tool error with JS stack** | Page script threw or the Promise rejected | Fix the expression; exceptionDetails are now surfaced intentionally |
 | **All tools slow / erratic** | Pipe degraded or extension stalled | `codex_doctor`; if unhealthy, restart Codex Desktop |
 | **MCP server missing after client restart** | GUI or scheduler cannot spawn the command from `PATH` | Run CLI doctor from the absolute npm install path and use `install.suggested_mcp_config` |
 

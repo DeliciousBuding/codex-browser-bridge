@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
-- Refreshed the installed agent skill from the stale Go-era notes to the Rust 1.10 tool surface (52 tools, doctor, profiles, reconnect).
+- Documented `codex_evaluate` Promise-await and exception behavior in README (EN/ZH) and the packaged agent skill.
 
 ## [1.10.0] - 2026-07-10
 

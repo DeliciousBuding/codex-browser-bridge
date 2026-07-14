@@ -218,7 +218,7 @@ JavaScript, CDP, or screenshot payloads by accident:
 |------|-------------|
 | `codex_get_url` | Current tab URL |
 | `codex_get_title` | Current page title |
-| `codex_evaluate` | Execute JavaScript, return bounded JSON result |
+| `codex_evaluate` | Execute JavaScript and return a bounded JSON result (`returnByValue` + `awaitPromise`; thrown JS becomes a tool error) |
 | `codex_page_assets` | List page resources; optionally fetch bounded known-size content |
 | `codex_console_logs` | Capture console output for a window |
 | `codex_emulate_device` | Emulate mobile viewport (`reset=true` to clear) |

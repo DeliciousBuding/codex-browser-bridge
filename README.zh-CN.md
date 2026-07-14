@@ -179,7 +179,7 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 |------|------|
 | `codex_get_url` | 当前标签 URL |
 | `codex_get_title` | 当前页面标题 |
-| `codex_evaluate` | 执行 JavaScript，返回有上限的 JSON 结果 |
+| `codex_evaluate` | 执行 JavaScript，返回有上限的 JSON 结果（`returnByValue` + `awaitPromise`；JS 异常转为 tool error） |
 | `codex_page_assets` | 列出页面资源；可选抓取有已知大小且受限的内容 |
 | `codex_console_logs` | 捕获一段时间内的 console 输出 |
 | `codex_emulate_device` | 模拟移动端视口（`reset=true` 清除） |
