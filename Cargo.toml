@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"
-base64 = "0.22"
+base64 = "0.23"
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
@@ -22,7 +22,7 @@ tokio = { version = "1.48", features = ["io-std", "io-util", "macros", "net", "p
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 uuid = { version = "1.11", features = ["v4"] }
-toml = "0.8"
+toml = "1.1"
 
 [dev-dependencies]
 assert_cmd = "2.0"
