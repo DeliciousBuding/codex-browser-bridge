@@ -1,0 +1,8 @@
+# CodeRabbit auto-review disabled (2026-08-03): 减少 bot 评论噪声与额度消耗。
+# 需要 review 时在 PR 上评论 @coderabbitai review 手动触发。
+reviews:
+  auto_review:
+    enabled: false
+  request_changes_workflow: false
+  poem: false
+  chat_auto_reply: false
