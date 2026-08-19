@@ -360,7 +360,7 @@ src/
 See [ROADMAP.md](ROADMAP.md). Highlights:
 
 - winget and scoop manifests
-- optional live E2E harness for Codex Desktop + Chrome (`scripts/live-e2e.ps1`)
+- optional live E2E harness for the ChatGPT desktop app + Chrome/Edge (`scripts/live-e2e.ps1`)
 - typed tool result schemas
 - v2.0.0: Cross-platform (macOS / Linux via Unix domain sockets)
 

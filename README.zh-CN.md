@@ -321,7 +321,7 @@ src/
 详见 [ROADMAP.md](ROADMAP.md)。亮点：
 
 - winget / scoop 安装清单
-- 可选真实 E2E harness（Codex Desktop + Chrome）
+- 可选真实 E2E harness（ChatGPT 桌面应用 + Chrome/Edge）
 - typed tool result schemas
 - v2.0.0: 跨平台（macOS / Linux via Unix domain socket）
 
@@ -333,7 +333,7 @@ src/
 - [CHANGELOG.md](CHANGELOG.md) — 发布历史
 - [CONTRIBUTING.md](CONTRIBUTING.md) — 开发配置与规范
 - [docs/release-process.md](docs/release-process.md) — tag、changelog、GitHub Release、npm 发布规则
-- [scripts/live-e2e.ps1](scripts/live-e2e.ps1) — 可选真实 Codex Desktop + Chrome E2E 冒烟测试
+- [scripts/live-e2e.ps1](scripts/live-e2e.ps1) — 可选真实 ChatGPT 桌面应用 + Chrome/Edge E2E 冒烟测试
 
 ## 许可证
 
