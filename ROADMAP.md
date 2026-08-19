@@ -1,15 +1,16 @@
 # ROADMAP
 
-## Status: v1.11.0 shipped (2026-08-19)
+## Status: v1.11.1 shipped (2026-08-19)
 
 52 MCP tools, dual-era MCP protocol support (`2024-11-05` … `2026-07-28`), tool behavior annotations, CDP event architecture, structured network monitoring, `--mode doctor` CLI, JPEG/WebP screenshots. See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 **Upstream branding:** OpenAI folded Codex Desktop into the ChatGPT desktop app and renamed the extension to the ChatGPT extension (Chrome + Edge since app build 26.730). The `codex-browser-use` pipe name and protocol are unchanged, so no bridge-side migration was needed; docs now reference both names.
 
-**Architecture health (SUPER):** S 5, U 5, P 5, E 3 (Windows-only), R 4 = **22/25**. Remaining gaps are operational maturity (winget/scoop) and platform reach, not architecture.
+**Architecture health (SUPER):** S 5, U 5, P 5, E 3 (Windows-only), R 4 = **22/25**. Remaining gap is platform reach (macOS/Linux transport), not architecture.
 
 ### Completed releases
 
+- **v1.11.1** (2026-08-19): npm installer proxy support (`HTTPS_PROXY`/`NO_PROXY` via HTTP CONNECT) — fixes `npm i -g` behind proxies.
 - **v1.11.0** (2026-08-19): MCP `2026-07-28` dual-era server (`server/discover`, stateless `_meta`-versioned requests, `resultType` + `ttlMs`/`cacheScope` cache hints, `-32022` version errors) with byte-compatible legacy era; MCP tool annotations on all 52 tools; `initialize` version negotiation + `instructions`.
 - **v1.10.1** (2026-07-14): `codex_evaluate` awaits Promises and surfaces JS exceptions; docs for Promise/exception behavior.
 - **v1.10.0** (2026-07-10): engineering hardening — reconnect, supply-chain CI, benchmarks, release contract, bounded MCP surfaces.
@@ -40,8 +41,8 @@ The tool layer is saturated. The honest gaps are runtime robustness, supply chai
 
 ### P2 — Distribution & protocol depth
 
-- [ ] **winget + scoop manifests.** `winget install codex-browser-bridge` is more native than npm for Windows users. Discovery lift, no code.
-  - Effort: S
+- [x] **winget + scoop manifests.** Decision (2026-08-19): **deferred — npm is sufficient.** The target audience (MCP clients: Claude Code / Cursor / agent users) all have Node installed, the npm channel already delivers checksummed binaries with provenance, and winget/scoop would add manifest-repo + per-release bump automation for marginal discoverability. Revisit if user demand materializes; cheapest path then is a winget `portable` manifest auto-PR from release tags.
+- [x] **Installer proxy support.** ✅ Done (v1.11.1). `install.js` honors `HTTPS_PROXY`/`NO_PROXY` via an HTTP CONNECT tunnel, so `npm i -g` works behind corporate/Clash-style proxies.
 - [x] **MCP resources/prompts.** ✅ Done. `resources/list` + `resources/read` expose `codex://tabs` (snapshot via getTabs). `prompts/list` + `prompts/get` ship `login` and `extract-table` workflow templates (each cites the concrete tools to call). `initialize` advertises `resources` + `prompts` capabilities. Subscribe / list-changes omitted — these are on-demand snapshots, not a live feed. 5 tests under `cfg(not(windows))`.
   - Effort: M · landed in `src/mcp/mod.rs`
 - [x] **Config file** (`.codex-browser-bridge.toml`) for profile + upload_base. ✅ Done. `src/config.rs` reads `CODEX_BRIDGE_CONFIG` env path or `./.codex-browser-bridge.toml`; precedence CLI flags > config > env > default. Malformed file warns + is ignored (never bricks startup).

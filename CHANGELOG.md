@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-08-19
+
+### Added
+
+- npm installer now honors `HTTPS_PROXY` / `https_proxy` (with `ALL_PROXY` fallback and `NO_PROXY` exclusions) when downloading release binaries, tunneling through the proxy with HTTP CONNECT. Fixes `npm i -g` postinstall failures on machines that can only reach GitHub through a proxy.
+
+### Notes
+
+- No Rust code changes; the binary rebuild only carries the version bump.
+
 ## [1.11.0] - 2026-08-19
 
 ### Added

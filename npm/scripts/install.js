@@ -4,6 +4,8 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const https = require("https");
+const net = require("net");
+const tls = require("tls");
 
 const defaultRepo = "DeliciousBuding/codex-browser-bridge";
 const packageRoot = path.join(__dirname, "..");
@@ -13,10 +15,98 @@ const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60000;
 const DEFAULT_MAX_REDIRECTS = 5;
 const DEFAULT_MAX_BYTES = 64 * 1024 * 1024;
 
+/// Resolve the HTTP proxy to tunnel an https:// download through.
+/// Honors HTTPS_PROXY/https_proxy (plus ALL_PROXY as a fallback) and the
+/// NO_PROXY exclusion list. Only plain `http://` proxies are supported —
+/// CONNECT through a TLS-terminating proxy is out of scope for an installer.
+function proxyForUrl(urlStr, env = process.env) {
+  let parsed;
+  try {
+    parsed = new URL(urlStr);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:") return null;
+
+  const noProxy = env.NO_PROXY || env.no_proxy;
+  if (noProxy) {
+    const host = parsed.hostname.toLowerCase();
+    const entries = noProxy
+      .split(",")
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean);
+    for (const entry of entries) {
+      if (entry === "*" || host === entry || host.endsWith(entry.replace(/^\./, ""))) {
+        return null;
+      }
+    }
+  }
+
+  const raw = env.HTTPS_PROXY || env.https_proxy || env.ALL_PROXY || env.all_proxy;
+  if (!raw) return null;
+  let proxy;
+  try {
+    proxy = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`);
+  } catch {
+    return null;
+  }
+  if (proxy.protocol !== "http:") return null;
+  const port = Number(proxy.port || 80);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
+  return { host: proxy.hostname, port };
+}
+
+function buildConnectRequest(host, port) {
+  return `CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\nProxy-Connection: keep-alive\r\n\r\n`;
+}
+
+/// Open an HTTP CONNECT tunnel to `host:port` through `proxy`. Resolves with
+/// the raw socket once the proxy answers 200, plus any bytes the proxy already
+/// forwarded after the response header (must be unshifted before TLS starts).
+function connectTunnel(proxy, host, port, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(proxy.port, proxy.host);
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(err);
+    };
+    socket.setTimeout(timeoutMs, () => fail(new Error(`timeout connecting to proxy ${proxy.host}:${proxy.port}`)));
+    socket.once("error", fail);
+    socket.once("connect", () => {
+      socket.write(buildConnectRequest(host, port));
+    });
+    let buffer = "";
+    const onData = (chunk) => {
+      buffer += chunk.toString("latin1");
+      const headerEnd = buffer.indexOf("\r\n\r\n");
+      if (headerEnd === -1) {
+        if (buffer.length > 16 * 1024) fail(new Error("proxy CONNECT response headers too large"));
+        return;
+      }
+      socket.removeListener("data", onData);
+      socket.setTimeout(0);
+      const statusLine = buffer.slice(0, buffer.indexOf("\r\n"));
+      const status = statusLine.match(/^HTTP\/1\.[01] (\d{3})/);
+      if (!status || status[1] !== "200") {
+        fail(new Error(`proxy CONNECT rejected: ${statusLine.trim()}`));
+        return;
+      }
+      if (settled) return;
+      settled = true;
+      resolve({ socket, leftover: Buffer.from(buffer.slice(headerEnd + 4), "latin1") });
+    };
+    socket.on("data", onData);
+  });
+}
+
 function requestBuffer(url, options = {}) {
   const maxBytes = options.maxBytes || DEFAULT_MAX_BYTES;
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
   const timeoutMs = options.timeoutMs || DEFAULT_DOWNLOAD_TIMEOUT_MS;
+  const env = options.env || process.env;
   const get = options.get || https.get;
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -25,7 +115,8 @@ function requestBuffer(url, options = {}) {
       settled = true;
       reject(err);
     };
-    const req = get(url, { headers: { "User-Agent": "codex-browser-bridge-npm" }, timeout: timeoutMs }, (res) => {
+    const headers = { "User-Agent": "codex-browser-bridge-npm" };
+    const onResponse = (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
         if (maxRedirects <= 0) {
@@ -33,6 +124,7 @@ function requestBuffer(url, options = {}) {
           return;
         }
         requestBuffer(new URL(res.headers.location, url).toString(), {
+          env,
           get,
           maxBytes,
           maxRedirects: maxRedirects - 1,
@@ -56,7 +148,7 @@ function requestBuffer(url, options = {}) {
       res.on("data", (c) => {
         total += c.length;
         if (total > maxBytes) {
-          req.destroy(new Error(`download too large: exceeded ${maxBytes} bytes`));
+          res.destroy(new Error(`download too large: exceeded ${maxBytes} bytes`));
           return;
         }
         chunks.push(c);
@@ -68,11 +160,46 @@ function requestBuffer(url, options = {}) {
         }
       });
       res.on("error", fail);
-    }).on("error", fail);
-    req.on("timeout", () => {
-      req.destroy();
-      fail(new Error(`timeout: ${url}`));
-    });
+    };
+    const startDirect = () => {
+      const req = get(url, { headers, timeout: timeoutMs }, onResponse).on("error", fail);
+      req.on("timeout", () => {
+        req.destroy();
+        fail(new Error(`timeout: ${url}`));
+      });
+    };
+
+    // proxyForUrl only returns a proxy for parseable https URLs, so a
+    // non-null result guarantees `new URL(url)` succeeds below.
+    const proxy = proxyForUrl(url, env);
+    if (!proxy) {
+      startDirect();
+      return;
+    }
+    const parsed = new URL(url);
+    connectTunnel(proxy, parsed.hostname, 443, timeoutMs)
+      .then(({ socket, leftover }) => {
+        if (leftover.length > 0) socket.unshift(leftover);
+        const tlsSocket = tls.connect({ socket, servername: parsed.hostname });
+        const req = https.request(
+          {
+            host: parsed.hostname,
+            port: 443,
+            path: `${parsed.pathname}${parsed.search}`,
+            headers,
+            timeout: timeoutMs,
+            createConnection: () => tlsSocket,
+          },
+          onResponse
+        );
+        req.on("error", fail);
+        req.on("timeout", () => {
+          req.destroy();
+          fail(new Error(`timeout: ${url}`));
+        });
+        req.end();
+      })
+      .catch((err) => fail(new Error(`proxy tunnel failed via ${proxy.host}:${proxy.port}: ${err.message}`)));
   });
 }
 
@@ -226,12 +353,15 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildConnectRequest,
+  connectTunnel,
   embeddedChecksum,
   findChecksum,
   install,
   logInstallHints,
   mcpConfigForTarget,
   parseChecksumLine,
+  proxyForUrl,
   requestBuffer,
   resolveWindowsArch,
   sha256,
