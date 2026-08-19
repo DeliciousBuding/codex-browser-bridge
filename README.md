@@ -5,7 +5,7 @@
 <p align="center">
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
-    Let Claude Code and other MCP agents control your existing Chrome browser through Codex Desktop's browser bridge.
+    Let Claude Code and other MCP agents control your existing Chrome or Edge browser through the ChatGPT desktop app's browser bridge (formerly Codex Desktop).
     <br>52 MCP tools. Pure Rust. Single binary. Zero config.
   </p>
 </p>
@@ -30,9 +30,11 @@
 
 ## What It Does
 
-`codex-browser-bridge` turns your **local Codex Desktop + Chrome** into an MCP server that any agent can control.
+`codex-browser-bridge` turns your **local ChatGPT desktop app + Chrome/Edge** into an MCP server that any agent can control.
 
-No browser profile copying. No WebDriver. No remote setup. It connects to the Codex browser named pipe that already exists on your machine, speaks the same JSON-RPC protocol, and exposes 52 MCP tools for browser automation.
+No browser profile copying. No WebDriver. No remote setup. It connects to the `codex-browser-use` named pipe that already exists on your machine, speaks the same JSON-RPC protocol, and exposes 52 MCP tools for browser automation.
+
+> **Naming note:** In 2026 OpenAI folded the Codex app into the new **ChatGPT desktop app**, and the browser extension was renamed from "Codex Chrome Extension" to the **ChatGPT extension** (Chrome, and Edge since app build 26.730). The underlying named pipe (`\\.\pipe\codex-browser-use-*`) and its JSON-RPC protocol kept their names — so this project, and its `codex_*` tool surface, work unchanged with both browsers.
 
 **Your agent can:**
 
@@ -58,7 +60,7 @@ npm i -g @delicious233/codex-browser-bridge
 
 Or download from [GitHub Releases](https://github.com/DeliciousBuding/codex-browser-bridge/releases).
 
-**Requires:** Windows · Chrome · Codex Desktop · Codex Chrome Extension
+**Requires:** Windows · Chrome or Edge · ChatGPT desktop app (formerly Codex Desktop) · ChatGPT browser extension
 
 ## 30-Second Setup (Claude Code)
 
@@ -300,8 +302,19 @@ codex-browser-bridge (Rust binary)
 Windows Named Pipe \\.\pipe\codex-browser-use-*
         │
         ▼
-Codex Desktop → Chrome Extension → Chrome tabs
+ChatGPT desktop app → ChatGPT extension → Chrome / Edge tabs
 ```
+
+## MCP Protocol Support
+
+The bridge is a **dual-era MCP server**:
+
+| Era | Revisions | Behavior |
+|-----|-----------|----------|
+| Legacy | `2024-11-05` … `2025-11-25` | Classic stdio lifecycle with `initialize` version negotiation (byte-compatible with older clients) |
+| Modern | `2026-07-28` | Stateless requests: version carried per-request in `_meta`, `server/discover` probe, `resultType` + cache hints (`ttlMs`/`cacheScope`) on results, `UnsupportedProtocolVersionError` (-32022) |
+
+All 52 tools carry behavior annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) for client approval UX. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ## Security
 
@@ -332,7 +345,7 @@ Source layout:
 
 ```
 src/
-  mcp/          MCP server (mod, types, schema, handlers, profiles)
+  mcp/          MCP server (mod, lifecycle, types, schema, handlers, profiles)
   browser.rs    CDP + browser operations
   client.rs     Named pipe transport + sticky attach
   security.rs   URL + file path validation
@@ -362,7 +375,7 @@ See [ROADMAP.md](ROADMAP.md). Highlights:
 
 ## License
 
-MIT. Maintained independently from Codex / Anthropic / Google.
+MIT. Maintained independently from OpenAI, Anthropic, and Google.
 
 ## Acknowledgments
 

@@ -5,7 +5,7 @@
 <p align="center">
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
-    让 Claude Code 和其他 MCP Agent 通过 Codex Desktop 控制你现有的 Chrome 浏览器。
+    让 Claude Code 和其他 MCP Agent 通过 ChatGPT 桌面应用（原 Codex Desktop）控制你现有的 Chrome 或 Edge 浏览器。
     <br>52 个 MCP 工具。纯 Rust。单文件二进制。零配置。
   </p>
 </p>
@@ -30,9 +30,11 @@
 
 ## 它能做什么
 
-`codex-browser-bridge` 把你本机的 **Codex Desktop + Chrome** 变成一个任何 agent 都能控制的 MCP 服务器。
+`codex-browser-bridge` 把你本机的 **ChatGPT 桌面应用 + Chrome/Edge** 变成一个任何 agent 都能控制的 MCP 服务器。
 
-无需复制浏览器配置。无需 WebDriver。无需远程配置。它直接连接本机已存在的 Codex 浏览器 named pipe，使用相同的 JSON-RPC 协议，暴露 52 个 MCP 工具用于浏览器自动化。
+无需复制浏览器配置。无需 WebDriver。无需远程配置。它直接连接本机已存在的 `codex-browser-use` named pipe，使用相同的 JSON-RPC 协议，暴露 52 个 MCP 工具用于浏览器自动化。
+
+> **命名说明：** 2026 年 OpenAI 将 Codex 应用并入新的 **ChatGPT 桌面应用**，浏览器扩展也从 "Codex Chrome Extension" 改名为 **ChatGPT 扩展**（支持 Chrome，应用 26.730 版本起支持 Edge）。底层 named pipe（`\\.\pipe\codex-browser-use-*`）和 JSON-RPC 协议名称保持不变——因此本项目及其 `codex_*` 工具面在两种浏览器下都无需任何改动即可工作。
 
 **你的 Agent 可以：**
 
@@ -58,7 +60,7 @@ npm i -g @delicious233/codex-browser-bridge
 
 或从 [GitHub Releases](https://github.com/DeliciousBuding/codex-browser-bridge/releases) 下载。
 
-**需要：** Windows · Chrome · Codex Desktop · Codex Chrome Extension
+**需要：** Windows · Chrome 或 Edge · ChatGPT 桌面应用（原 Codex Desktop）· ChatGPT 浏览器扩展
 
 ## 30 秒接入 Claude Code
 
@@ -261,8 +263,19 @@ codex-browser-bridge (Rust 二进制)
 Windows Named Pipe \\.\pipe\codex-browser-use-*
         │
         ▼
-Codex Desktop → Chrome Extension → Chrome 标签页
+ChatGPT 桌面应用 → ChatGPT 扩展 → Chrome / Edge 标签页
 ```
+
+## MCP 协议支持
+
+本 bridge 是一个 **双纪元（dual-era）MCP 服务器**：
+
+| 纪元 | 版本 | 行为 |
+|------|------|------|
+| Legacy | `2024-11-05` … `2025-11-25` | 经典 stdio 生命周期，`initialize` 版本协商（对旧客户端字节级兼容） |
+| Modern | `2026-07-28` | 无状态请求：版本通过每个请求的 `_meta` 携带、`server/discover` 探测、结果携带 `resultType` + 缓存提示（`ttlMs`/`cacheScope`）、不支持的版本返回 `UnsupportedProtocolVersionError` (-32022) |
+
+全部 52 个工具都携带行为注解（`readOnlyHint`、`destructiveHint`、`idempotentHint`、`openWorldHint`），供客户端审批 UX 使用。详见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 安全
 
@@ -293,7 +306,7 @@ cargo build --locked --release
 
 ```
 src/
-  mcp/          MCP 服务（mod, types, schema, handlers, profiles）
+  mcp/          MCP 服务（mod, lifecycle, types, schema, handlers, profiles）
   browser.rs    CDP + 浏览器操作
   client.rs     Named pipe 传输 + sticky attach
   security.rs   URL + 文件路径验证
@@ -324,7 +337,7 @@ src/
 
 ## 许可证
 
-MIT。独立于 Codex / Anthropic / Google 维护。
+MIT。独立于 OpenAI / Anthropic / Google 维护。
 
 ## 致谢
 

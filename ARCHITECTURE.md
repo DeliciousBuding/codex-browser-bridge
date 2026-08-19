@@ -30,7 +30,7 @@ reconnect and protocol logic can be tested with `tokio::io::duplex()` mocks.
 | `protocol.rs` | Length-prefixed frame encode/decode, `Request`/`Response`, session-param merge |
 | `discovery.rs` | Enumerate `codex-browser-use-*` pipes (PowerShell) |
 | `browser.rs` | The 52 tool implementations over `Client` (navigate, dom, screenshot, network_monitor, …) |
-| `mcp/` | MCP server: JSON-RPC dispatch, 52 tool handlers, schema, profiles, resources/prompts |
+| `mcp/` | MCP server: JSON-RPC dispatch, 52 tool handlers, schema, profiles, resources/prompts, dual-era lifecycle |
 | `security.rs` | URL scheme + file-path validation (path-traversal defense) |
 | `config.rs` | Optional TOML config (profile, upload_base) |
 | `doctor.rs` | Pipe connectivity diagnostics (`--mode doctor`) |
@@ -91,6 +91,33 @@ bridge does not fall back to a working-directory config.
 
 Subscribe / list-changes is intentionally omitted: these are on-demand
 snapshots, not a live feed.
+
+### Dual-era MCP lifecycle (`mcp/lifecycle.rs`)
+The 2026-07-28 revision removed the `initialize` handshake and protocol
+sessions; every request is stateless and carries its protocol version in
+`_meta`. The bridge serves **both eras from one binary**:
+
+- **Era detection is per request**: the presence of
+  `_meta["io.modelcontextprotocol/protocolVersion"]` selects modern handling;
+  anything else follows the legacy lifecycle. Legacy `_meta` (e.g.
+  `progressToken`) without the version key stays legacy.
+- **Legacy byte-compatibility is a hard requirement**: legacy envelopes pass
+  through untouched; modern framing (`resultType`, `_meta` serverInfo,
+  `ttlMs`/`cacheScope`) is applied only to requests that opted in. Tests pin
+  this (`legacy_tools_list_stays_byte_compatible`).
+- **Version negotiation**: `initialize` echoes a supported legacy revision or
+  offers the newest one; a modern request asking for an unsupported revision
+  gets `UnsupportedProtocolVersionError` (-32022) with the supported list.
+  A modern version requested through `initialize` negotiates down to legacy
+  semantics.
+- **`server/discover`** is always answered, even without version metadata —
+  that is the stdio compatibility probe.
+- **`ping` is legacy-only**: the 2026-07-28 revision removed it, so modern
+  requests get `-32601`.
+- **Lenient `clientCapabilities`**: the schema requires the field on modern
+  requests, but the bridge needs no client capabilities (no sampling /
+  elicitation / roots), so a missing value is treated as empty instead of
+  returning `MissingRequiredClientCapabilityError` (-32021).
 
 ## Data flow — a tool call
 

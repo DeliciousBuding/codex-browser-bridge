@@ -1,13 +1,16 @@
 # ROADMAP
 
-## Status: v1.10.1 shipped (2026-07-14)
+## Status: v1.11.0 shipped (2026-08-19)
 
-52 MCP tools, CDP event architecture, structured network monitoring, `--mode doctor` CLI, JPEG/WebP screenshots. See [CHANGELOG.md](CHANGELOG.md) for the full release history.
+52 MCP tools, dual-era MCP protocol support (`2024-11-05` … `2026-07-28`), tool behavior annotations, CDP event architecture, structured network monitoring, `--mode doctor` CLI, JPEG/WebP screenshots. See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
-**Architecture health (SUPER):** S 5, U 5, P 5, E 3 (Windows-only), R 4 = **22/25**. Remaining gaps are operational maturity (winget/scoop, protocol depth), not architecture.
+**Upstream branding:** OpenAI folded Codex Desktop into the ChatGPT desktop app and renamed the extension to the ChatGPT extension (Chrome + Edge since app build 26.730). The `codex-browser-use` pipe name and protocol are unchanged, so no bridge-side migration was needed; docs now reference both names.
+
+**Architecture health (SUPER):** S 5, U 5, P 5, E 3 (Windows-only), R 4 = **22/25**. Remaining gaps are operational maturity (winget/scoop) and platform reach, not architecture.
 
 ### Completed releases
 
+- **v1.11.0** (2026-08-19): MCP `2026-07-28` dual-era server (`server/discover`, stateless `_meta`-versioned requests, `resultType` + `ttlMs`/`cacheScope` cache hints, `-32022` version errors) with byte-compatible legacy era; MCP tool annotations on all 52 tools; `initialize` version negotiation + `instructions`.
 - **v1.10.1** (2026-07-14): `codex_evaluate` awaits Promises and surfaces JS exceptions; docs for Promise/exception behavior.
 - **v1.10.0** (2026-07-10): engineering hardening — reconnect, supply-chain CI, benchmarks, release contract, bounded MCP surfaces.
 - **v1.9.1** (2026-06-21): 16 new tools → 52 total. CDP event subscription (`network_monitor`, `console_logs`). Background-tab fix (`bring_to_front` + sticky 20s timeout). JPEG/WebP screenshots, sessionStorage, `--mode doctor`, `performance_metrics`.
