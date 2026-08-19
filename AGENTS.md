@@ -71,8 +71,9 @@ src/
   main.rs       入口（clap CLI，--mode --profile --pipe --upload-base --max-text-bytes --max-image-bytes）
   lib.rs        模块声明
   mcp/
-    mod.rs      Server 结构体, run_stdio, JSON-RPC 分发
-    types.rs    ToolHandler, Tool, Content, arg extractors, 响应构建
+    mod.rs      Server 结构体, run_stdio, JSON-RPC 分发（双纪元 era 检测入口）
+    lifecycle.rs MCP 版本协商 + 双纪元生命周期（legacy initialize / 2026-07-28 stateless、server/discover、resultType/缓存提示、-32022）
+    types.rs    ToolHandler, Tool, ToolHints(annotations), Content, arg extractors, 响应构建
     schema.rs   registered_tools(), 工具注册
     handlers.rs handle_tool_call + 52 个 handle_* 方法
     profiles.rs ToolProfile (basic/network/full)

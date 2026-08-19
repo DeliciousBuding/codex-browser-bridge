@@ -68,6 +68,7 @@ pub(crate) struct Tool {
     pub(super) description: &'static str,
     pub(super) input_schema: Value,
     pub(super) handler: ToolHandler,
+    pub(super) annotations: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,6 +104,69 @@ impl Tool {
             description,
             input_schema,
             handler,
+            annotations: None,
+        }
+    }
+
+    /// Attach MCP tool annotations (protocol revision 2025-03-26+). Clients
+    /// use the hints for approval UX and retry decisions; every bridge tool
+    /// reaches outside the process into a live browser, so `openWorldHint`
+    /// is always true.
+    pub(super) fn with_hints(mut self, hints: ToolHints) -> Self {
+        self.annotations = Some(json!({
+            "readOnlyHint": hints.read_only,
+            "destructiveHint": hints.destructive,
+            "idempotentHint": hints.idempotent,
+            "openWorldHint": true
+        }));
+        self
+    }
+}
+
+/// Behavior hints surfaced as MCP tool annotations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ToolHints {
+    read_only: bool,
+    destructive: bool,
+    idempotent: bool,
+}
+
+impl ToolHints {
+    /// Pure observation: no browser state change, safe to repeat.
+    pub(super) const fn read_only() -> Self {
+        Self {
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+        }
+    }
+
+    /// Mutates state but is harmless and stable when repeated with the same
+    /// arguments (navigate to a URL, claim a tab, name a session).
+    pub(super) const fn idempotent_write() -> Self {
+        Self {
+            read_only: false,
+            destructive: false,
+            idempotent: true,
+        }
+    }
+
+    /// Interaction with side effects that can compound when repeated
+    /// (clicks, typing, form submission).
+    pub(super) const fn interaction() -> Self {
+        Self {
+            read_only: false,
+            destructive: false,
+            idempotent: false,
+        }
+    }
+
+    /// Removes or overwrites state (close tabs, delete cookies, finalize).
+    pub(super) const fn destructive() -> Self {
+        Self {
+            read_only: false,
+            destructive: true,
+            idempotent: true,
         }
     }
 }

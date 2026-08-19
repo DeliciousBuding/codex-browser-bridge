@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-08-19
+
+### Added
+
+- **MCP protocol revision `2026-07-28` support (dual-era server).** The bridge now serves both protocol eras from one binary:
+  - Legacy era (`2024-11-05` … `2025-11-25`): the classic stdio lifecycle. `initialize` now negotiates the protocol version — supported revisions are echoed back, unknown requests get the newest legacy revision offered. The legacy wire format is byte-identical to v1.10.x, so existing clients see no change.
+  - Modern era (`2026-07-28`, SEP-2567/SEP-2575): stateless requests. Requests carrying `params._meta["io.modelcontextprotocol/protocolVersion"]` are answered without an `initialize` handshake. Results carry the required `resultType` field, server identity in `_meta["io.modelcontextprotocol/serverInfo"]`, and `ttlMs`/`cacheScope` cache hints on cacheable endpoints (`tools/list`, `resources/list`, `resources/read`, `prompts/list`, SEP-2549). Unsupported versions return `UnsupportedProtocolVersionError` (-32022) with the supported list.
+  - `server/discover` (required for servers under the new revision) advertises supported versions, capabilities, and instructions; it is also answered without version metadata so modern clients can probe compatibility on stdio.
+  - `ping` is answered for legacy clients only; the 2026-07-28 revision removed it.
+- **MCP tool annotations** (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on all 52 tools, introduced by revision `2025-03-26`. Clients use the hints for approval UX and retry decisions; `openWorldHint` is always true because every tool reaches a live browser.
+- `initialize` results now include natural-language `instructions` describing effective bridge usage.
+
+### Changed
+
+- New `src/mcp/lifecycle.rs` module owns version negotiation, era detection, modern result framing, and spec error envelopes.
+- Verified against the official `2026-07-28` schema (`DiscoverResult`, `CacheableResult`, `ResultType`, error-code allocation `-32020`…`-32099`).
+- Verified against Codex v0.148.x: extension capabilities (`viewport`, `pageAssets`, `browserTabMentions` protocol v1) remain fully covered by the existing tool surface.
+
 ## [1.10.1] - 2026-07-14
 
 ### Fixed

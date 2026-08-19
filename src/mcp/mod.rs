@@ -3,6 +3,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::client::Client;
 
+use self::lifecycle::{CacheHints, ProtocolEra};
 use self::profiles::ToolProfile;
 use self::schema::{registered_tools, tools_to_values};
 use self::types::{
@@ -10,6 +11,7 @@ use self::types::{
 };
 
 pub mod handlers;
+pub mod lifecycle;
 pub mod profiles;
 pub mod schema;
 pub mod types;
@@ -112,32 +114,74 @@ impl Server {
             return Some(error_response(Some(id), -32600, "Invalid Request"));
         }
 
+        // Era is decided per request: the 2026-07-28 revision carries the
+        // protocol version in `_meta` on every request and is served
+        // statelessly; anything without that key follows the legacy
+        // handshake lifecycle. `server/discover` is always answered — it is
+        // how modern clients learn which versions are supported.
+        let era = lifecycle::detect_era(req.params.as_ref());
+        if era == ProtocolEra::Modern && req.method != "server/discover" {
+            let requested = lifecycle::meta_protocol_version(req.params.as_ref()).unwrap_or("");
+            if !lifecycle::is_supported(requested) {
+                return Some(lifecycle::unsupported_version_error(id, requested));
+            }
+        }
+
         match req.method.as_str() {
             "initialize" => Some(result_response(
                 id,
-                json!({
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {},
-                        "resources": {},
-                        "prompts": {}
-                    },
-                    "serverInfo": { "name": "codex-browser-bridge", "version": env!("CARGO_PKG_VERSION") }
-                }),
+                lifecycle::initialize_result(
+                    req.params
+                        .as_ref()
+                        .and_then(|params| params.get("protocolVersion"))
+                        .and_then(Value::as_str),
+                ),
             )),
-            "tools/list" => Some(result_response(id, json!({ "tools": self.tool_list() }))),
-            "tools/call" => Some(self.handle_tool_call(id, req.params).await),
-            "resources/list" => Some(self.handle_resources_list(id)),
-            "resources/read" => Some(self.handle_resources_read(id, req.params).await),
-            "prompts/list" => Some(self.handle_prompts_list(id)),
-            "prompts/get" => Some(self.handle_prompts_get(id, req.params).await),
-            "ping" => Some(result_response(id, json!({}))),
+            "server/discover" => Some(result_response(id, lifecycle::discover_result())),
+            "tools/list" => Some(self.finish(
+                era,
+                result_response(id, json!({ "tools": self.tool_list() })),
+                Some(&lifecycle::LIST_CACHE),
+            )),
+            "tools/call" => {
+                Some(self.finish(era, self.handle_tool_call(id, req.params).await, None))
+            }
+            "resources/list" => Some(self.finish(
+                era,
+                self.handle_resources_list(id),
+                Some(&lifecycle::LIST_CACHE),
+            )),
+            "resources/read" => Some(self.finish(
+                era,
+                self.handle_resources_read(id, req.params).await,
+                Some(&lifecycle::LIVE_CACHE),
+            )),
+            "prompts/list" => Some(self.finish(
+                era,
+                self.handle_prompts_list(id),
+                Some(&lifecycle::LIST_CACHE),
+            )),
+            "prompts/get" => {
+                Some(self.finish(era, self.handle_prompts_get(id, req.params).await, None))
+            }
+            // `ping` was removed by the 2026-07-28 revision; keep answering
+            // it for legacy clients only.
+            "ping" if era == ProtocolEra::Legacy => Some(result_response(id, json!({}))),
             "notifications/initialized" => None,
             other => Some(error_response(
                 Some(id),
                 -32601,
                 &format!("Unknown method: {other}"),
             )),
+        }
+    }
+
+    /// Apply modern-era result framing when the request opted into it;
+    /// legacy envelopes pass through byte-identical.
+    fn finish(&self, era: ProtocolEra, envelope: String, cache: Option<&CacheHints>) -> String {
+        match era {
+            ProtocolEra::Modern => lifecycle::modernize_envelope(envelope, cache),
+            ProtocolEra::Legacy => envelope,
         }
     }
 
@@ -507,6 +551,137 @@ mod stdio_tests {
     fn mcp_line_from_utf8_rejects_invalid_input() {
         assert!(mcp_line_from_utf8(b"{\"jsonrpc\":\"2.0\"}\n").is_ok());
         assert!(mcp_line_from_utf8(&[0xff, b'\n']).is_err());
+    }
+}
+
+#[cfg(test)]
+mod protocol_era_tests {
+    use super::*;
+
+    fn lazy_server() -> Server {
+        Server::new(Client::lazy(None))
+    }
+
+    fn parse(envelope: Option<String>) -> Value {
+        serde_json::from_str(&envelope.expect("response expected")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn initialize_negotiates_requested_legacy_version() {
+        let server = lazy_server();
+        let response = parse(
+            server
+                .handle_jsonrpc_line(
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#,
+                )
+                .await,
+        );
+        assert_eq!(response["result"]["protocolVersion"], "2025-06-18");
+        assert!(response["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("codex_doctor"));
+    }
+
+    #[tokio::test]
+    async fn initialize_offers_latest_legacy_when_client_has_no_preference() {
+        let server = lazy_server();
+        let response = parse(
+            server
+                .handle_jsonrpc_line(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#)
+                .await,
+        );
+        assert_eq!(response["result"]["protocolVersion"], "2025-11-25");
+    }
+
+    #[tokio::test]
+    async fn server_discover_answers_without_version_metadata() {
+        let server = lazy_server();
+        let response = parse(
+            server
+                .handle_jsonrpc_line(r#"{"jsonrpc":"2.0","id":1,"method":"server/discover"}"#)
+                .await,
+        );
+        assert_eq!(response["result"]["resultType"], "complete");
+        assert!(response["result"]["supportedVersions"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("2026-07-28")));
+    }
+
+    #[tokio::test]
+    async fn modern_unsupported_version_yields_spec_error() {
+        let server = lazy_server();
+        let response = parse(
+            server
+                .handle_jsonrpc_line(
+                    r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"1999-01-01"}}}"#,
+                )
+                .await,
+        );
+        assert_eq!(response["error"]["code"], -32022);
+        assert!(response["error"]["data"]["supported"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("2026-07-28")));
+        assert_eq!(response["error"]["data"]["requested"], "1999-01-01");
+    }
+
+    #[tokio::test]
+    async fn legacy_tools_list_stays_byte_compatible() {
+        let server = lazy_server();
+        let response = parse(
+            server
+                .handle_jsonrpc_line(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
+                .await,
+        );
+        let result = &response["result"];
+        assert!(result["tools"].as_array().unwrap().len() >= 30);
+        assert!(result.get("resultType").is_none());
+        assert!(result.get("ttlMs").is_none());
+        assert!(result.get("_meta").is_none());
+    }
+
+    #[tokio::test]
+    async fn modern_tools_list_carries_result_type_and_cache_hints() {
+        let server = lazy_server();
+        let response = parse(
+            server
+                .handle_jsonrpc_line(
+                    r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}"#,
+                )
+                .await,
+        );
+        let result = &response["result"];
+        assert_eq!(result["resultType"], "complete");
+        assert!(result["ttlMs"].as_u64().unwrap() > 0);
+        assert_eq!(result["cacheScope"], "private");
+        assert_eq!(
+            result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
+            "codex-browser-bridge"
+        );
+        let first_tool = &result["tools"][0];
+        assert!(first_tool["annotations"]["openWorldHint"].is_boolean());
+    }
+
+    #[tokio::test]
+    async fn ping_is_legacy_only() {
+        let server = lazy_server();
+        let legacy = parse(
+            server
+                .handle_jsonrpc_line(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
+                .await,
+        );
+        assert_eq!(legacy["result"], json!({}));
+
+        let modern = parse(
+            server
+                .handle_jsonrpc_line(
+                    r#"{"jsonrpc":"2.0","id":2,"method":"ping","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}"#,
+                )
+                .await,
+        );
+        assert_eq!(modern["error"]["code"], -32601);
     }
 }
 
