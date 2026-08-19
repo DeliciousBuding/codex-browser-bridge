@@ -2,15 +2,18 @@ const assert = require("assert");
 const { EventEmitter } = require("events");
 const { spawnSync } = require("child_process");
 const fs = require("fs");
+const net = require("net");
 const path = require("path");
 const { PassThrough } = require("stream");
 const {
+  buildConnectRequest,
   embeddedChecksum,
   findChecksum,
   install,
   logInstallHints,
   mcpConfigForTarget,
   parseChecksumLine,
+  proxyForUrl,
   requestBuffer,
   resolveWindowsArch,
   sha256,
@@ -93,6 +96,7 @@ async function run() {
 
     await assert.rejects(
       requestBuffer("https://example.test/loop", {
+        env: {},
         get: fakeGet(() => ({ statusCode: 302, headers: { location: "/loop" } })),
         maxRedirects: 2,
       }),
@@ -100,6 +104,7 @@ async function run() {
     );
     await assert.rejects(
       requestBuffer("https://example.test/large-header", {
+        env: {},
         get: fakeGet({ "https://example.test/large-header": { headers: { "content-length": "5" }, body: Buffer.alloc(1) } }),
         maxBytes: 4,
       }),
@@ -107,6 +112,7 @@ async function run() {
     );
     await assert.rejects(
       requestBuffer("https://example.test/large-body", {
+        env: {},
         get: fakeGet({ "https://example.test/large-body": { body: Buffer.alloc(5) } }),
         maxBytes: 4,
       }),
@@ -292,6 +298,52 @@ async function run() {
       }),
       /checksum mismatch/
     );
+
+    // ── Proxy support ──
+    assert.strictEqual(proxyForUrl("https://github.com/x", {}), null);
+    assert.strictEqual(proxyForUrl("http://github.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897" }), null);
+    assert.deepStrictEqual(proxyForUrl("https://github.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897" }), {
+      host: "127.0.0.1",
+      port: 7897,
+    });
+    assert.deepStrictEqual(proxyForUrl("https://github.com/x", { https_proxy: "127.0.0.1:7897" }), {
+      host: "127.0.0.1",
+      port: 7897,
+    });
+    assert.deepStrictEqual(proxyForUrl("https://github.com/x", { ALL_PROXY: "http://proxy.local:8080" }), {
+      host: "proxy.local",
+      port: 8080,
+    });
+    assert.strictEqual(proxyForUrl("https://github.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: "*" }), null);
+    assert.strictEqual(proxyForUrl("https://api.github.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: ".github.com" }), null);
+    assert.deepStrictEqual(
+      proxyForUrl("https://objects.githubusercontent.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: ".github.com" }),
+      { host: "127.0.0.1", port: 7897 }
+    );
+    // TLS-terminating proxies are out of scope for the installer.
+    assert.strictEqual(proxyForUrl("https://github.com/x", { HTTPS_PROXY: "https://127.0.0.1:7897" }), null);
+
+    assert.strictEqual(
+      buildConnectRequest("github.com", 443),
+      "CONNECT github.com:443 HTTP/1.1\r\nHost: github.com:443\r\nProxy-Connection: keep-alive\r\n\r\n"
+    );
+
+    // A proxy that rejects CONNECT must surface as a download error, not a hang.
+    const rejectingProxy = net.createServer((socket) => {
+      socket.once("data", () => socket.write("HTTP/1.1 403 Forbidden\r\n\r\n"));
+    });
+    await new Promise((resolve) => rejectingProxy.listen(0, "127.0.0.1", resolve));
+    try {
+      await assert.rejects(
+        requestBuffer("https://github.com/example/asset", {
+          env: { HTTPS_PROXY: `http://127.0.0.1:${rejectingProxy.address().port}` },
+          timeoutMs: 5000,
+        }),
+        /CONNECT rejected/
+      );
+    } finally {
+      rejectingProxy.close();
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
