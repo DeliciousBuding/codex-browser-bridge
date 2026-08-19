@@ -1,11 +1,11 @@
 ---
 name: codex-browser
-description: Control Chrome via Codex Desktop's browser bridge. 52 MCP tools for tabs, navigation, DOM, input, CDP, network, file upload, dialog handling, and diagnostics.
+description: Control Chrome or Edge via the ChatGPT desktop app's browser bridge (formerly Codex Desktop). 52 MCP tools for tabs, navigation, DOM, input, CDP, network, file upload, dialog handling, and diagnostics.
 ---
 
 # Codex Browser Bridge
 
-You are an agent controlling a real Chrome browser through the `codex-browser` MCP server. This skill covers all 52 tools and their effective use.
+You are an agent controlling a real Chrome or Edge browser through the `codex-browser` MCP server. This skill covers all 52 tools and their effective use.
 
 ## Quick Check
 
@@ -200,7 +200,7 @@ When a tool fails, the cause is usually one of these. Try the fix before retryin
 | **SPA never "loads"** | URL unchanged, `wait_for_load` returns instantly | Use `codex_wait_for_element` on the target element instead |
 | **`codex_evaluate` returns `{}` for `fetch`/async code** | Running a pre-fix binary that lacked `awaitPromise` | Upgrade the bridge binary and reconnect the MCP server |
 | **`codex_evaluate` tool error with JS stack** | Page script threw or the Promise rejected | Fix the expression; exceptionDetails are now surfaced intentionally |
-| **All tools slow / erratic** | Pipe degraded or extension stalled | `codex_doctor`; if unhealthy, restart Codex Desktop |
+| **All tools slow / erratic** | Pipe degraded or extension stalled | `codex_doctor`; if unhealthy, restart the ChatGPT desktop app |
 | **MCP server missing after client restart** | GUI or scheduler cannot spawn the command from `PATH` | Run CLI doctor from the absolute npm install path and use `install.suggested_mcp_config` |
 
 General: always `codex_finalize` when the browsing task is done to release tabs.

@@ -7,13 +7,14 @@ file records the *decisions*.
 ## Overview
 
 A single-process MCP (Model Context Protocol) server that bridges MCP clients
-(Claude Code, agents) to Codex Desktop's Chrome browser. It speaks stdio
+(Claude Code, agents) to the ChatGPT desktop app's browser (formerly Codex
+Desktop; Chrome and Edge). It speaks stdio
 JSON-RPC to the client and a length-prefixed JSON wire protocol over a Windows
-named pipe to the Codex Chrome extension, which then drives Chrome via the
-Chrome DevTools Protocol (CDP).
+named pipe to the ChatGPT browser extension, which then drives the browser via
+the Chrome DevTools Protocol (CDP).
 
 ```
-MCP client ──stdio JSON-RPC──▶ bridge ──named pipe──▶ Codex Chrome ext ──CDP──▶ Chrome
+MCP client ──stdio JSON-RPC──▶ bridge ──named pipe──▶ ChatGPT ext ──CDP──▶ Chrome/Edge
 ```
 
 The shipped binary is Windows-only (named pipes). The **library** compiles on
