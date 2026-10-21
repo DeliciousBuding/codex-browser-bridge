@@ -259,7 +259,7 @@ function mcpConfigForTarget(target) {
           args: ["--mode", "mcp"],
           transport: "stdio",
           env: {
-            CODEX_BRIDGE_PROFILE: "full",
+            CODEX_BRIDGE_PROFILE: "basic",
           },
         },
       },
@@ -273,10 +273,20 @@ function logInstallHints(root, log, target) {
   const skillDir = path.join(root, "skills", "codex-browser");
   const examplesDir = path.join(root, "examples");
   const escapedSkillDir = skillDir.replace(/"/g, '\\"');
+  log(
+    [
+      "Claude Code plugin (recommended):",
+      "  claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge",
+      "  -> installs the MCP server and progressive skill; tool schemas load on demand",
+      "ChatGPT desktop / Codex plugin:",
+      "  codex plugin marketplace add DeliciousBuding/codex-browser-bridge",
+      "  -> install Codex Browser from the Plugins Directory",
+    ].join("\n")
+  );
   if (fs.existsSync(skillDir)) {
     log(
       [
-        `Skill: ${skillDir}`,
+        `Skill bundle fallback: ${skillDir}`,
         `  -> Claude Code (PowerShell): Copy-Item -Recurse -Force "${escapedSkillDir}" "$env:USERPROFILE\\.claude\\skills\\"`,
         "  -> Claude Code (Git Bash/WSL): copy or symlink to ~/.claude/skills/",
         "  -> Other skill-aware agents: copy or symlink into that agent's skills directory",

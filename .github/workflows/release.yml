@@ -157,6 +157,9 @@ jobs:
       - name: Check agent surface docs
         shell: bash
         run: node scripts/check-agent-surface.js
+      - name: Check plugin surface
+        shell: bash
+        run: node scripts/check-plugin-surface.js
       - name: Test live E2E timeout cleanup
         timeout-minutes: 3
         shell: pwsh

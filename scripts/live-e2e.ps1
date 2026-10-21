@@ -45,13 +45,15 @@ function Invoke-BridgeDoctor {
     $doctorPsi.WorkingDirectory = $RepoRoot
     $doctorProc = [System.Diagnostics.Process]::Start($doctorPsi)
     try {
+        $stdoutTask = $doctorProc.StandardOutput.ReadToEndAsync()
+        $stderrTask = $doctorProc.StandardError.ReadToEndAsync()
         if (-not $doctorProc.WaitForExit($TimeoutMs)) {
             $doctorProc.Kill()
             [void]$doctorProc.WaitForExit(5000)
             throw "doctor timed out after $TimeoutMs ms"
         }
-        $stdout = $doctorProc.StandardOutput.ReadToEnd()
-        $stderr = $doctorProc.StandardError.ReadToEnd()
+        $stdout = $stdoutTask.Result
+        $stderr = $stderrTask.Result
         if ($doctorProc.ExitCode -ne 0) {
             throw "doctor failed with exit code $($doctorProc.ExitCode). stdout: $stdout stderr: $stderr"
         }
@@ -205,6 +207,9 @@ try {
         capabilities = @{}
         clientInfo = @{ name = "codex-browser-bridge-live-e2e"; version = "0" }
     } | Out-Null
+
+    Invoke-Tool "codex_get_info" | Out-Null
+    Invoke-Tool "codex_user_tabs" | Out-Null
 
     $created = Invoke-Tool "codex_create_tab"
     $createdText = $created.content[0].text

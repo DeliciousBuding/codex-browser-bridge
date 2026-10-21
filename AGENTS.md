@@ -4,9 +4,20 @@
 
 ## 仓库级 Skill
 
-本仓库包含项目级 skill：`skills/codex-browser/SKILL.md`
+本仓库包含项目级 skill bundle：`skills/codex-browser/SKILL.md` + `references/`
 
-该 skill 是 LLM agent 使用全部 52 个 MCP 工具的操作手册，包含工具分组速查、常用工作流、工具选择原则。支持项目级 skill 的 MCP 客户端会自动加载。
+`SKILL.md` 只负责路由和工作流，任务细节按需读取一个 reference。支持项目级 skill 的客户端会自动发现；Claude Code、ChatGPT desktop 和 Codex 也可通过仓库内 marketplace 把 skill 与 MCP server 作为同一个插件安装。
+
+## 插件分发层
+
+插件是分发层，MCP server 是执行层，两者不重复实现：
+
+- `plugin.json` + `mcp.json`：portable Agent Plugins 包，供 ChatGPT desktop / Codex 使用
+- `.codex-plugin/plugin.json`：Codex 兼容清单
+- `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`：Claude Code 插件，复用根 `mcp.json`
+- `.agents/plugins/marketplace.json`：repo-scoped marketplace
+
+插件默认使用 `full` profile，因为现代 Claude Code / Codex 会通过 tool search 延迟加载 tool schema；只有 `codex_doctor` 使用 `anthropic/alwaysLoad=true`。不支持 tool search 的手工 MCP 配置仍推荐 `basic`。不要自造第二套工具路由器，也不要为节省 token 删除专用工具。
 
 ## MCP 工具设计规范
 
@@ -51,10 +62,12 @@ cargo test --locked                # 全量测试
 cargo clippy --locked -- -D warnings  # lint
 cargo build --locked --release     # 发布构建 → target/release/codex-browser-bridge.exe
 npm --prefix npm test              # npm installer/package helper 测试
-.\scripts\live-e2e.ps1             # 可选真实 Codex Desktop + Chrome 冒烟测试
+.\scripts\live-e2e.ps1             # 可选真实 ChatGPT 桌面应用 + Chromium 浏览器冒烟测试
 ```
 
-Release 时遵循 `docs/release-process.md`：确保 `Cargo.toml` 和 `npm/package.json` 版本号与 tag 一致，`CHANGELOG.md` 有对应段，npm 包 dry-run 包含 `skills/codex-browser/SKILL.md` 和 `examples/` 多客户端模板。npm 发布走 Trusted Publishing/OIDC，不在 GitHub secrets 中放 npm write token。
+Release 时遵循 `docs/release-process.md`：确保 `Cargo.toml`、`npm/package.json`、三份 plugin manifest 的版本号与 tag 一致，`CHANGELOG.md` 有对应段，npm 包 dry-run 包含完整的 `skills/codex-browser/` bundle 和 `examples/` 多客户端模板。npm 发布走 Trusted Publishing/OIDC，不在 GitHub secrets 中放 npm write token。
+
+发布前运行 `node scripts/check-plugin-surface.js` 与 `claude plugin validate --strict .`。前者在 CI 中验证 portable、Codex、Claude manifest、唯一 MCP 配置和 marketplace 不漂移。
 
 GitHub workflow 中的外部 `uses:` 必须固定到完整 commit SHA，并保留相邻版本注释；修改 workflow 后运行 `node scripts/check-actions-pinned.js`。
 

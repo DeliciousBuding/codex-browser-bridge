@@ -69,6 +69,7 @@ pub(crate) struct Tool {
     pub(super) input_schema: Value,
     pub(super) handler: ToolHandler,
     pub(super) annotations: Option<Value>,
+    pub(super) meta: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,6 +106,7 @@ impl Tool {
             input_schema,
             handler,
             annotations: None,
+            meta: None,
         }
     }
 
@@ -119,6 +121,14 @@ impl Tool {
             "idempotentHint": hints.idempotent,
             "openWorldHint": true
         }));
+        self
+    }
+
+    /// Attach MCP `_meta` hints. Claude Code uses
+    /// `anthropic/alwaysLoad` to keep a small, high-value tool schema in the
+    /// initial context while deferring the rest behind tool search.
+    pub(super) fn with_meta(mut self, meta: Value) -> Self {
+        self.meta = Some(meta);
         self
     }
 }

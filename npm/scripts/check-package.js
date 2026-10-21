@@ -18,6 +18,10 @@ function requiredFilesForEnv(env = process.env) {
     "examples/hermes-agent.json",
     "examples/openclaw.json",
     "skills/codex-browser/SKILL.md",
+    "skills/codex-browser/references/tabs-navigation.md",
+    "skills/codex-browser/references/dom-input-capture.md",
+    "skills/codex-browser/references/network-session.md",
+    "skills/codex-browser/references/recovery-safety.md",
   ];
 
   if (env.CODEX_BRIDGE_REQUIRE_CHECKSUMS === "1") {

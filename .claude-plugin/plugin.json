@@ -1,0 +1,16 @@
+{
+  "name": "codex-browser",
+  "displayName": "Codex Browser",
+  "version": "1.11.2",
+  "description": "Control an existing logged-in Chromium browser through the ChatGPT desktop app's browser extension.",
+  "author": {
+    "name": "DeliciousBuding",
+    "url": "https://github.com/DeliciousBuding"
+  },
+  "homepage": "https://github.com/DeliciousBuding/codex-browser-bridge",
+  "repository": "https://github.com/DeliciousBuding/codex-browser-bridge",
+  "license": "MIT",
+  "keywords": ["browser", "mcp", "chromium", "automation", "chatgpt"],
+  "skills": "./skills/",
+  "mcpServers": "./mcp.json"
+}

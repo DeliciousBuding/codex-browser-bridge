@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.2] - 2026-10-21
+
+### Added
+
+- Installable plugin distribution for Claude Code, ChatGPT desktop, and Codex. The repository now exposes a portable Agent Plugins manifest, Codex compatibility manifest, Claude marketplace, Claude plugin manifest, and repo-scoped Codex marketplace while retaining the complete 52-tool MCP server.
+- Claude Code MCP tool search integration. `codex_doctor` is the only tool marked `anthropic/alwaysLoad`; the remaining schemas stay deferred for progressive discovery.
+- The agent skill is now a progressive bundle: `SKILL.md` handles routing and core workflow, while four task references are loaded only when relevant.
+
+### Changed
+
+- Aligned the remaining runtime diagnostics, package metadata, architecture, contributor, security, and agent-skill wording with the current ChatGPT desktop app and ChatGPT browser extension names.
+- Documented the current compatibility matrix, the one-pipe-per-session boundary, and event-driven maintenance expectations.
+- Installer and doctor-suggested MCP configs now recommend the 34-tool `basic` profile instead of exposing all 52 tools by default. The bridge's built-in profile remains `full` when no profile is configured.
+- Plugin installs default to `full` because tool-search-capable clients defer schemas; manual MCP wiring keeps `basic` as the low-token fallback. No MCP tools were removed or replaced by a second routing layer.
+- npm installation hints now recommend the Claude Code plugin first, then the ChatGPT desktop / Codex marketplace, with the skill copy and manual MCP JSON paths retained as explicit fallbacks.
+- Pinned GitHub Actions updates merged during this maintenance cycle: `actions/attest` 4.2.2, `codecov/codecov-action` 7.1.1, and `taiki-e/install-action` 2.87.21.
+
+### Fixed
+
+- Plugin packaging reuses one root `mcp.json` for portable, Codex, and Claude surfaces. This prevents Claude from auto-loading a second project-level `.mcp.json` copy and starting the same MCP endpoint twice.
+- The live E2E harness drains doctor stdout/stderr concurrently instead of waiting on a full pipe buffer before reading.
+- Windows npm command shims (`.cmd`, `.bat`, and the extensionless npm shim) now count as spawn-ready in doctor diagnostics even when they wrap a different install path than the running executable.
+- Doctor pipe diagnostics now report current browser-extension metadata (`Edge 1.26.x`, for example) instead of leaving the browser label empty for the current extension response shape.
+
 ## [1.11.1] - 2026-08-19
 
 ### Added

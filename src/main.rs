@@ -13,7 +13,7 @@ enum Mode {
 #[derive(Debug, Parser)]
 #[command(name = "codex-browser-bridge")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
-#[command(about = "Bridge MCP clients to Codex Desktop's Chrome browser pipe")]
+#[command(about = "Bridge MCP clients to the ChatGPT desktop app's browser-extension pipe")]
 struct Args {
     #[arg(long, value_enum, default_value_t = Mode::Mcp)]
     mode: Mode,
@@ -50,7 +50,9 @@ async fn main() -> anyhow::Result<()> {
         Mode::Discover => {
             let pipes = discovery::discover_codex_pipes().await?;
             if pipes.is_empty() {
-                anyhow::bail!("No codex-browser-use pipes found. Is Codex Desktop running?");
+                anyhow::bail!(
+                    "No codex-browser-use pipes found. Is the ChatGPT desktop app running with a supported browser extension connected?"
+                );
             }
             println!("{}", serde_json::to_string_pretty(&pipes)?);
         }
@@ -97,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
         Mode::Cli => {
             let client = client::Client::connect(args.pipe.as_deref())
                 .await
-                .context("failed to connect to Codex browser pipe")?;
+                .context("failed to connect to the ChatGPT browser-extension pipe")?;
             cli::run_cli(client).await?;
         }
         Mode::Doctor => {

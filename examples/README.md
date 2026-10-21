@@ -4,11 +4,31 @@ The bridge is an MCP stdio server. The JSON shape is intentionally similar
 across clients, but install location, config file path, and approval/restart
 steps differ.
 
+## Recommended: install the plugin
+
+Install the npm package first so `codex-browser-bridge` is on `PATH`, then use
+the plugin where available. The plugin installs both the MCP server entry and
+the progressive `codex-browser` skill:
+
+```powershell
+# Claude Code 2.1.292+
+claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
+
+# ChatGPT desktop / Codex
+codex plugin marketplace add DeliciousBuding/codex-browser-bridge
+codex plugin add codex-browser@codex-browser-bridge
+```
+
+The plugin uses the `full` 52-tool profile because Claude Code and Codex defer
+tool schemas through tool search. The manual JSON examples below are the
+fallback for MCP clients without plugin or tool-search support and use the
+34-tool `basic` profile.
+
 ## Supported clients
 
 | Client | Config | Typical config location | After editing |
 |--------|--------|-------------------------|---------------|
-| Claude Code | [claude-code.json](claude-code.json) | `%USERPROFILE%\.claude\.mcp.json` | Restart Claude Code and approve in `/mcp` |
+| Claude Code | plugin, or [claude-code.json](claude-code.json) fallback | Managed by `claude plugin` | Restart Claude Code and approve in `/mcp` |
 | Cursor | [cursor.json](cursor.json) | Cursor MCP settings / project MCP config | Reload Cursor window |
 | OpenClaw | [openclaw.json](openclaw.json) | OpenClaw MCP server config | Restart or reconnect MCP servers |
 | Hermes Agent | [hermes-agent.json](hermes-agent.json) | Hermes Agent MCP server config | Restart or reconnect MCP servers |
@@ -60,7 +80,7 @@ client at the Windows executable:
 
 ### Profiles
 
-- `basic`: core tab/navigation/DOM/input tools plus `codex_doctor`
+- `basic`: recommended starting profile; core tab/navigation/DOM/input tools plus `codex_doctor`
 - `network`: basic plus cookies, storage, file upload, dialogs, CDP diagnostics, PDF, and network logs
 - `full`: all tools, default
 

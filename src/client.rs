@@ -30,7 +30,7 @@ const RECONNECT_BACKOFFS: [Duration; 3] = [
     Duration::from_millis(250),
 ];
 /// After a reconnect cycle fully fails, refuse further reconnect attempts for
-/// this long so a dead Codex Desktop does not cause a busy-loop of failed dials.
+/// this long so a dead ChatGPT desktop app does not cause a busy-loop of failed dials.
 const RECONNECT_COOLDOWN: Duration = Duration::from_secs(5);
 const RECONNECT_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -236,7 +236,7 @@ impl Client {
     }
 
     /// Test-only constructor: inject a custom connection factory so reconnect
-    /// logic can be exercised without a real Codex Desktop pipe.
+    /// logic can be exercised without a real ChatGPT desktop browser-extension pipe.
     #[cfg(all(test, not(windows)))]
     pub(crate) fn from_stream_with_factory(
         stream: PipeStream,
@@ -839,7 +839,7 @@ async fn connect_discovered_client() -> Result<Client> {
     let pipes = discovery::discover_codex_pipes().await?;
     if pipes.is_empty() {
         return Err(BridgeError::User(
-            "no codex-browser-use pipes found. Start Codex Desktop, Chrome, and the Codex Chrome extension".into(),
+            "no codex-browser-use pipes found. Start the ChatGPT desktop app, a supported Chromium browser, and the ChatGPT browser extension".into(),
         ));
     }
 
@@ -902,7 +902,7 @@ async fn discover_and_dial_from(start: usize) -> Result<PipeStream> {
     let pipes = discovery::discover_codex_pipes().await?;
     if pipes.is_empty() {
         return Err(BridgeError::User(
-            "no codex-browser-use pipes found. Start Codex Desktop, Chrome, and the Codex Chrome extension".into(),
+            "no codex-browser-use pipes found. Start the ChatGPT desktop app, a supported Chromium browser, and the ChatGPT browser extension".into(),
         ));
     }
     let mut last_err = None;

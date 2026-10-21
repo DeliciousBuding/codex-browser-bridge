@@ -7,7 +7,9 @@ This project uses explicit SemVer tags, a curated changelog, GitHub Release asse
 - Use SemVer: `MAJOR.MINOR.PATCH`.
 - Release tags must be annotated tags named `vX.Y.Z`.
 - Pre-release tags may use SemVer pre-release syntax, for example `v2.0.0-beta.1`.
-- `Cargo.toml` and `npm/package.json` must match the tag without the leading `v`.
+- `Cargo.toml`, `npm/package.json`, `plugin.json`,
+  `.codex-plugin/plugin.json`, and `.claude-plugin/plugin.json` must match the
+  tag without the leading `v`.
 - npm publishes stable versions to the `latest` dist-tag and SemVer pre-release versions to the `next` dist-tag.
 - Rust MSRV is part of the compatibility contract. Do not raise `rust-version` unless the release notes call it out.
 
@@ -32,10 +34,10 @@ Use only sections that have entries. Keep pending changes under `Unreleased`, th
 
 - Use Conventional Commits prefixes: `feat:`, `fix:`, `docs:`, `test:`, `ci:`, `chore:`, `refactor:`.
 - Prefer one logical change per commit.
-- Release PRs should be named `release/vX.Y.Z` and include:
-  - version bumps in `Cargo.toml` and `npm/package.json`
+- The release commit lands directly on `main` and includes:
+  - version bumps in `Cargo.toml`, `npm/package.json`, and all plugin manifests
   - changelog section for `X.Y.Z`
-  - any README/skill/example changes needed for user-facing behavior
+  - README, skill, plugin, and example changes needed for user-facing behavior
 
 ## Release Automation Contract
 
@@ -51,7 +53,9 @@ The release workflow must:
 7. If the npm version is already published, compare the current `checksums.txt` with the published npm package's embedded checksums before uploading release assets. Same-version reruns may only clobber GitHub Release assets when the binary hashes still match the package users already install.
 8. Create or update a draft GitHub Release from the changelog section and upload assets with clobber semantics so reruns can recover from partial failures.
 9. Publish the GitHub Release before npm publish so the npm installer can download public binary assets as soon as the package is visible.
-10. Embed release checksums into the npm package and bundle `skills/codex-browser/SKILL.md` plus `examples/` before `npm pack` or `npm publish`.
+10. Embed release checksums into the npm package and bundle the complete
+    `skills/codex-browser/` tree, including its reference files, plus
+    `examples/` before `npm pack` or `npm publish`.
 11. Publish npm via Trusted Publishing/OIDC, with no long-lived npm write token in GitHub secrets.
 
 ## npm Trusted Publishing
@@ -86,6 +90,8 @@ cargo clippy --locked --all-targets -- -D warnings
 node scripts/check-actions-pinned.js
 node scripts/check-release-contract.js
 node scripts/check-agent-surface.js
+node scripts/check-plugin-surface.js
+claude plugin validate --strict .
 cd npm && npm test
 ```
 
@@ -98,4 +104,22 @@ npm run check:package
 
 `npm prepack` stages the root `README.md`, `LICENSE`, `skills/`, and `examples/`
 directories into the npm package before `npm pack`, `npm publish`, or
-`npm run check:package`.
+`npm run check:package`. The package-content check verifies every skill
+reference, not only `SKILL.md`.
+
+## Plugin Distribution
+
+The repository tag is also the plugin source. Before tagging, verify that:
+
+- `plugin.json` uses the portable Agent Plugins schema and keeps OpenAI
+  presentation/local-executor metadata under `extensions.com.openai`.
+- `mcp.json` uses the Agent Plugins MCP schema and launches the npm-installed
+  `codex-browser-bridge` command with the `full` profile.
+- `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, and both
+  marketplace files resolve the same root without duplicate MCP processes.
+- Only `codex_doctor` carries `anthropic/alwaysLoad=true`; all other schemas
+  remain available to tool search.
+
+Public ChatGPT Directory submission is separate from npm and Git tags. It
+requires local-MCP partner allowlisting and review, so it is not part of the
+tag automation.

@@ -1,9 +1,9 @@
 [package]
 name = "codex-browser-bridge"
-version = "1.11.1"
+version = "1.11.2"
 edition = "2021"
 license = "MIT"
-description = "MCP server that exposes Codex Desktop's Chrome browser bridge."
+description = "MCP server that exposes the ChatGPT desktop app's browser-extension bridge."
 repository = "https://github.com/DeliciousBuding/codex-browser-bridge"
 rust-version = "1.85"
 

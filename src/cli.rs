@@ -1,6 +1,6 @@
 //! Interactive CLI mode for debugging the bridge without an MCP client.
 //!
-//! Connects to the Codex browser pipe and provides a simple REPL for
+//! Connects to the ChatGPT browser-extension pipe and provides a simple REPL for
 //! tab management, navigation, inspection, and raw RPC calls.
 
 use crate::browser;
@@ -10,7 +10,7 @@ use std::io::{self, Write};
 
 /// Run the interactive CLI REPL on the given client connection.
 pub async fn run_cli(client: Client) -> anyhow::Result<()> {
-    println!("Connected to Codex browser pipe");
+    println!("Connected to ChatGPT browser-extension pipe");
     println!("Commands: tabs, create, close <id>, user-tabs, claim <id>, nav <id> <url>,");
     println!("          snapshot <id>, screenshot <id>, info, ping, try <method>, quit");
 

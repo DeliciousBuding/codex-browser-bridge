@@ -5,7 +5,7 @@
 <p align="center">
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
-    Let Claude Code and other MCP agents control your existing Chrome or Edge browser through the ChatGPT desktop app's browser bridge (formerly Codex Desktop).
+    Let Claude Code and other MCP agents control your existing browser profile through the ChatGPT desktop app's browser extension.
     <br>52 MCP tools. Pure Rust. Single binary. Zero config.
   </p>
 </p>
@@ -30,11 +30,11 @@
 
 ## What It Does
 
-`codex-browser-bridge` turns your **local ChatGPT desktop app + Chrome/Edge** into an MCP server that any agent can control.
+`codex-browser-bridge` turns your **local ChatGPT desktop app + browser extension** into an MCP server that any agent can control.
 
 No browser profile copying. No WebDriver. No remote setup. It connects to the `codex-browser-use` named pipe that already exists on your machine, speaks the same JSON-RPC protocol, and exposes 52 MCP tools for browser automation.
 
-> **Naming note:** In 2026 OpenAI folded the Codex app into the new **ChatGPT desktop app**, and the browser extension was renamed from "Codex Chrome Extension" to the **ChatGPT extension** (Chrome, and Edge since app build 26.730). The underlying named pipe (`\\.\pipe\codex-browser-use-*`) and its JSON-RPC protocol kept their names — so this project, and its `codex_*` tool surface, work unchanged with both browsers.
+> **Naming note:** OpenAI now documents this surface as the **ChatGPT browser extension**. The underlying `codex-browser-use` pipe and JSON-RPC method names still use the Codex-era identifiers, so this project keeps its `codex_*` tool surface for compatibility.
 
 **Your agent can:**
 
@@ -60,11 +60,43 @@ npm i -g @delicious233/codex-browser-bridge
 
 Or download from [GitHub Releases](https://github.com/DeliciousBuding/codex-browser-bridge/releases).
 
-**Requires:** Windows · Chrome or Edge · ChatGPT desktop app (formerly Codex Desktop) · ChatGPT browser extension
+**Requires:** Windows · a supported Chromium browser · ChatGPT desktop app · ChatGPT browser extension
+
+## Compatibility
+
+Last live verification: 2026-10-21 with ChatGPT desktop app (`OpenAI.Codex` package) `26.1016.6573.0` and Edge extension `1.26.1015.10801`.
+
+| Surface | Status |
+|---------|--------|
+| ChatGPT desktop app | Current channel live-tested |
+| ChatGPT browser extension | Current channel live-tested |
+| Chrome / Edge | Supported; Edge live-tested in this audit |
+| Brave / Opera / Vivaldi | Expected to use the same Chromium/CDP pipeline, but not yet live-tested |
+| MCP `2024-11-05` … `2025-11-25` | Supported legacy lifecycle |
+| MCP `2026-07-28` | Supported stateless lifecycle and discovery |
+| macOS / Linux | Not supported in 1.x |
+
+The bridge does not install a second browser extension or copy your browser profile. One MCP server process connects to one reachable extension pipe; tabs from multiple browser profiles are not merged into a single list.
 
 ## 30-Second Setup (Claude Code)
 
-Add to your Claude Code MCP settings:
+Install the Claude Code plugin after installing the npm package above:
+
+```bash
+claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
+```
+
+This installs the skill and MCP server together. No manual MCP JSON is needed.
+Claude Code 2.1.292 or later can add the marketplace and install the plugin in
+one command. For a local checkout, use `claude --plugin-dir .`.
+
+The plugin defaults to the full 52-tool surface because Claude Code enables MCP
+tool search by default: only server instructions and tool names enter the
+initial context, and schemas are loaded on demand. `codex_doctor` is the only
+schema marked `alwaysLoad`. The companion skill then loads one reference file
+for the task instead of reading the entire 52-tool manual.
+
+For clients without tool search, or if you prefer manual MCP wiring, add:
 
 ```json
 {
@@ -72,7 +104,10 @@ Add to your Claude Code MCP settings:
     "codex-browser": {
       "command": "codex-browser-bridge",
       "args": ["--mode", "mcp"],
-      "transport": "stdio"
+      "transport": "stdio",
+      "env": {
+        "CODEX_BRIDGE_PROFILE": "basic"
+      }
     }
   }
 }
@@ -96,16 +131,32 @@ $bridge = Join-Path (npm prefix -g) "codex-browser-bridge.cmd"
 ```
 
 Paste `install.suggested_mcp_config.mcpServers.codex-browser.command` into the
-client config. File upload requires `CODEX_BRIDGE_UPLOAD_BASE`; use the
-templates in [examples/](examples/) for a full config.
+client config. The suggested config starts with the 34-tool `basic` profile;
+switch to `network` or `full` only when needed. File upload requires
+`CODEX_BRIDGE_UPLOAD_BASE`; use the templates in [examples/](examples/) for a
+full config.
+
+For ChatGPT desktop / Codex, install the same repository marketplace and
+plugin:
+
+```powershell
+codex plugin marketplace add DeliciousBuding/codex-browser-bridge
+codex plugin add codex-browser@codex-browser-bridge
+```
+
+Restart the app and open the Plugins Directory. The package follows the
+portable Agent Plugins layout (`plugin.json` + `mcp.json`) with Codex and
+Claude compatibility manifests, and includes a repo-scoped marketplace. A
+public ChatGPT Directory listing is a separate submission requiring local-MCP
+partner approval; it is not required for local use.
 
 For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/). The npm
 package also ships these examples under `examples/`.
 
-### Install the agent skill (recommended)
+### Install the agent skill only (fallback)
 
-The npm package includes a skill that teaches agents how to use all 52
-tools effectively. After install, copy it to your skills directory:
+The plugin already installs the skill. Clients without plugin support can copy
+the npm-package skill instead:
 
 ```bash
 # Git Bash / WSL: global install → Claude Code skills
@@ -142,7 +193,7 @@ Configuration precedence is:
 The default config file is `.codex-browser-bridge.toml` in the current working directory. Set `CODEX_BRIDGE_CONFIG` to use an explicit path; when it is set, the bridge does not fall back to the working-directory config:
 
 ```toml
-profile = "full"                 # basic | network | full
+profile = "basic"                # recommended; basic | network | full
 upload_base = "C:/Users/me/Downloads"
 max_text_bytes = 1048576
 max_image_bytes = 3145728
@@ -302,7 +353,7 @@ codex-browser-bridge (Rust binary)
 Windows Named Pipe \\.\pipe\codex-browser-use-*
         │
         ▼
-ChatGPT desktop app → ChatGPT extension → Chrome / Edge tabs
+ChatGPT desktop app → ChatGPT browser extension → Chromium browser tabs
 ```
 
 ## MCP Protocol Support
@@ -315,6 +366,17 @@ The bridge is a **dual-era MCP server**:
 | Modern | `2026-07-28` | Stateless requests: version carried per-request in `_meta`, `server/discover` probe, `resultType` + cache hints (`ttlMs`/`cacheScope`) on results, `UnsupportedProtocolVersionError` (-32022) |
 
 All 52 tools carry behavior annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) for client approval UX. See [CHANGELOG.md](CHANGELOG.md) for details.
+
+## Maintenance
+
+This project is intentionally a thin compatibility adapter, not a second browser runtime. Upstream desktop-app and extension upgrades do not require a bridge release by themselves. After an upstream upgrade, run this smoke sequence:
+
+1. `codex-browser-bridge --mode doctor`
+2. `codex_get_info`
+3. `codex_user_tabs`
+4. Claim one disposable tab and read its title or DOM
+
+Release a patch only when the pipe contract changes, compatibility needs documenting, or a real regression is fixed. Do not add Playwright or another browser extension as a fallback layer.
 
 ## Security
 
@@ -359,7 +421,6 @@ src/
 
 See [ROADMAP.md](ROADMAP.md). Highlights:
 
-- winget and scoop manifests
 - optional live E2E harness for the ChatGPT desktop app + Chrome/Edge (`scripts/live-e2e.ps1`)
 - typed tool result schemas
 - v2.0.0: Cross-platform (macOS / Linux via Unix domain sockets)
@@ -367,6 +428,7 @@ See [ROADMAP.md](ROADMAP.md). Highlights:
 ## Related
 
 - [examples/](examples/) — MCP configs for Claude Code, Cursor, OpenClaw, Hermes Agent
+- [.claude-plugin/](.claude-plugin/plugin.json) and [.agents/plugins/](.agents/plugins/marketplace.json) — Claude Code / ChatGPT plugin and marketplace metadata
 - [skills/codex-browser/](skills/codex-browser/SKILL.md) — Agent skill (LLM usage guide)
 - [ROADMAP.md](ROADMAP.md) — Full roadmap with SUPER scores
 - [CHANGELOG.md](CHANGELOG.md) — Release history

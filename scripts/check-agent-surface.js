@@ -15,6 +15,22 @@ function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 }
 
+function readSkillBundle() {
+  const skillRoot = path.join(
+    repoRoot,
+    "skills",
+    "codex-browser"
+  );
+  const files = [path.join(skillRoot, "SKILL.md")];
+  const references = path.join(skillRoot, "references");
+  if (fs.existsSync(references)) {
+    for (const entry of fs.readdirSync(references).sort()) {
+      if (entry.endsWith(".md")) files.push(path.join(references, entry));
+    }
+  }
+  return files.map((file) => fs.readFileSync(file, "utf8")).join("\n");
+}
+
 function fail(message) {
   throw new Error(message);
 }
@@ -47,18 +63,26 @@ function assertContains(text, needle, label) {
 
 function assertToolCoverage(relativePath, toolNames) {
   const text = read(relativePath);
+  assertToolCoverageInText(relativePath, text, toolNames);
+}
+
+function assertToolCoverageInText(label, text, toolNames) {
   const missing = toolNames.filter((name) => !text.includes(`\`${name}\``));
   if (missing.length > 0) {
-    fail(`${relativePath} is missing tool docs: ${missing.join(", ")}`);
+    fail(`${label} is missing tool docs: ${missing.join(", ")}`);
   }
 }
 
 function assertProfileCounts(relativePath, counts) {
   const text = read(relativePath);
+  assertProfileCountsInText(relativePath, text, counts);
+}
+
+function assertProfileCountsInText(label, text, counts) {
   for (const [profile, count] of Object.entries(counts)) {
     const pattern = new RegExp(`\\b${profile}\\b[\\s\\S]{0,80}\\b${count}\\b`);
     if (!pattern.test(text)) {
-      fail(`${relativePath} is missing ${profile} profile count ${count}`);
+      fail(`${label} is missing ${profile} profile count ${count}`);
     }
   }
 }
@@ -125,14 +149,13 @@ function main() {
     }
   }
 
-  for (const doc of [
-    "README.md",
-    "README.zh-CN.md",
-    "skills/codex-browser/SKILL.md",
-  ]) {
+  for (const doc of ["README.md", "README.zh-CN.md"]) {
     assertToolCoverage(doc, uniqueToolNames);
     assertProfileCounts(doc, counts);
   }
+  const skillBundle = readSkillBundle();
+  assertToolCoverageInText("codex-browser skill bundle", skillBundle, uniqueToolNames);
+  assertProfileCountsInText("codex-browser skill bundle", skillBundle, counts);
 
   assertExamples();
   assertNpmPackageFiles();

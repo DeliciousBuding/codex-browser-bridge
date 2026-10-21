@@ -131,6 +131,10 @@ async function run() {
       "examples/hermes-agent.json",
       "examples/openclaw.json",
       "skills/codex-browser/SKILL.md",
+      "skills/codex-browser/references/tabs-navigation.md",
+      "skills/codex-browser/references/dom-input-capture.md",
+      "skills/codex-browser/references/network-session.md",
+      "skills/codex-browser/references/recovery-safety.md",
     ]);
     assert.deepStrictEqual(requiredFilesForEnv({ CODEX_BRIDGE_REQUIRE_CHECKSUMS: "1" }), [
       "package.json",
@@ -144,6 +148,10 @@ async function run() {
       "examples/hermes-agent.json",
       "examples/openclaw.json",
       "skills/codex-browser/SKILL.md",
+      "skills/codex-browser/references/tabs-navigation.md",
+      "skills/codex-browser/references/dom-input-capture.md",
+      "skills/codex-browser/references/network-session.md",
+      "skills/codex-browser/references/recovery-safety.md",
       "checksums.json",
     ]);
     assert.deepStrictEqual(
@@ -217,7 +225,9 @@ async function run() {
     assert.ok(embeddedCalls[0].endsWith("/v1.10.0/codex-browser-bridge.exe"));
     assert.deepStrictEqual(fs.readFileSync(path.join(outDir, "codex-browser-bridge.exe")), binary);
     assert.ok(installLogs.some((line) => line.includes(`Installed: ${path.join(outDir, "codex-browser-bridge.exe")}`)));
-    assert.ok(installLogs.some((line) => line.includes("Skill:") && line.includes(path.join(installRoot, "skills", "codex-browser"))));
+    assert.ok(installLogs.some((line) => line.includes("claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge")));
+    assert.ok(installLogs.some((line) => line.includes("codex plugin marketplace add DeliciousBuding/codex-browser-bridge")));
+    assert.ok(installLogs.some((line) => line.includes("Skill bundle fallback:") && line.includes(path.join(installRoot, "skills", "codex-browser"))));
     assert.ok(installLogs.some((line) => line.includes("MCP config examples:") && line.includes(path.join(installRoot, "examples"))));
     const installedConfigLog = installLogs.find((line) => line.includes("Ready-to-paste MCP config"));
     assert.ok(installedConfigLog);
@@ -228,6 +238,7 @@ async function run() {
     );
     assert.deepStrictEqual(installedConfig.mcpServers["codex-browser"].args, ["--mode", "mcp"]);
     assert.strictEqual(installedConfig.mcpServers["codex-browser"].transport, "stdio");
+    assert.strictEqual(installedConfig.mcpServers["codex-browser"].env.CODEX_BRIDGE_PROFILE, "basic");
 
     assert.strictEqual(
       JSON.parse(mcpConfigForTarget("C:\\Tools\\codex-browser-bridge.exe")).mcpServers["codex-browser"].command,
@@ -241,6 +252,9 @@ async function run() {
     logInstallHints(hintsRoot, (line) => hintLogs.push(line));
     const hintText = hintLogs.join("\n");
     assert.match(hintText, /Claude Code/);
+    assert.match(hintText, /claude plugin install codex-browser/);
+    assert.match(hintText, /codex plugin marketplace add/);
+    assert.match(hintText, /Skill bundle fallback/);
     assert.match(hintText, /Other skill-aware agents/);
     assert.match(hintText, /OpenClaw/);
     assert.match(hintText, /Hermes Agent/);

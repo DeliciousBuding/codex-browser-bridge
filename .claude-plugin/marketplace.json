@@ -1,0 +1,15 @@
+{
+  "name": "codex-browser-bridge",
+  "description": "Browser automation plugins for the ChatGPT desktop app's browser extension.",
+  "owner": {
+    "name": "DeliciousBuding",
+    "url": "https://github.com/DeliciousBuding"
+  },
+  "plugins": [
+    {
+      "name": "codex-browser",
+      "source": "./",
+      "description": "Control an existing logged-in Chromium browser through the ChatGPT desktop app's browser extension."
+    }
+  ]
+}

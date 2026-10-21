@@ -75,19 +75,21 @@ pub async fn run_diagnostics() -> DiagnosticResult {
     let failed_count = probed_pipe_count.saturating_sub(connected_count);
     if pipe_count == 0 {
         warnings.push(
-            "No Codex browser pipes found. Start Codex Desktop, Chrome, and the Codex Chrome extension."
+            "No browser-extension pipes found. Start the ChatGPT desktop app, a supported Chromium browser, and the ChatGPT browser extension."
                 .into(),
         );
     }
     if connected_count == 0 && pipe_count > 0 {
         if unprobed_pipe_count > 0 {
             warnings.push(
-                "No probed pipes responded before the doctor probe budget expired. Try restarting Codex Desktop."
+                "No probed pipes responded before the doctor probe budget expired. Try restarting the ChatGPT desktop app."
                     .into(),
             );
         } else {
-            warnings
-                .push("No pipes responded to health check. Try restarting Codex Desktop.".into());
+            warnings.push(
+                "No pipes responded to health check. Try restarting the ChatGPT desktop app."
+                    .into(),
+            );
         }
     }
     let (pipes, omitted_pipe_count) = reported_pipes(pipes, MAX_REPORTED_PIPES);
@@ -162,12 +164,8 @@ async fn probe_pipe(pipe: discovery::PipeInfo) -> PipeDiagnostic {
                         let info_str = raw.get();
                         let browser = serde_json::from_str::<serde_json::Value>(info_str)
                             .ok()
-                            .and_then(|v| {
-                                v.get("browserVersion")
-                                    .or_else(|| v.get("product"))
-                                    .and_then(|v| v.as_str())
-                                    .map(String::from)
-                            });
+                            .as_ref()
+                            .and_then(browser_label_from_info);
                         (true, browser)
                     }
                     _ => (false, None),
@@ -246,7 +244,7 @@ fn install_diagnostic_for(
         _ => None,
     };
     let mcp_spawn_ready =
-        path_lookup.is_some() && !matches!(path_lookup_matches_current_exe, Some(false));
+        is_mcp_spawn_ready(path_lookup.as_deref(), path_lookup_matches_current_exe);
 
     let mut notes = Vec::new();
     if path_lookup.is_none() {
@@ -256,10 +254,12 @@ fn install_diagnostic_for(
         );
     }
     if matches!(path_lookup_matches_current_exe, Some(false)) {
-        notes.push(
-            "PATH resolves a different codex-browser-bridge command than the running process."
-                .to_string(),
-        );
+        let note = if path_lookup.as_deref().is_some_and(is_command_shim) {
+            "PATH resolves an npm command shim. It is spawnable, but may wrap a different installation than the running process."
+        } else {
+            "PATH resolves a different codex-browser-bridge executable than the running process."
+        };
+        notes.push(note.to_string());
     }
 
     InstallDiagnostic {
@@ -280,7 +280,7 @@ fn suggested_mcp_config(command: &str) -> Value {
                 "args": ["--mode", "mcp"],
                 "transport": "stdio",
                 "env": {
-                    "CODEX_BRIDGE_PROFILE": "full"
+                    "CODEX_BRIDGE_PROFILE": "basic"
                 }
             }
         }
@@ -326,6 +326,43 @@ fn command_candidates(command: &str, path_ext: Option<&OsStr>) -> Vec<String> {
 
 fn path_to_string(path: PathBuf) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn browser_label_from_info(info: &Value) -> Option<String> {
+    if let Some(label) = info
+        .get("browserVersion")
+        .or_else(|| info.get("product"))
+        .and_then(Value::as_str)
+    {
+        return Some(label.to_string());
+    }
+
+    let name = info
+        .get("name")
+        .or_else(|| info.get("family"))
+        .and_then(Value::as_str);
+    let version = info.get("version").and_then(Value::as_str);
+    match (name, version) {
+        (Some(name), Some(version)) => Some(format!("{name} {version}")),
+        (Some(name), None) => Some(name.to_string()),
+        _ => None,
+    }
+}
+
+fn is_command_shim(path: &str) -> bool {
+    let path = Path::new(path);
+    match path.extension().and_then(OsStr::to_str) {
+        Some(ext) => ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"),
+        None => path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .is_some_and(|name| name.eq_ignore_ascii_case("codex-browser-bridge")),
+    }
+}
+
+fn is_mcp_spawn_ready(path_lookup: Option<&str>, matches_current_exe: Option<bool>) -> bool {
+    path_lookup.is_some()
+        && (matches!(matches_current_exe, Some(true)) || path_lookup.is_some_and(is_command_shim))
 }
 
 fn paths_match(left: &str, right: &str) -> bool {
@@ -401,6 +438,12 @@ mod tests {
             diag.suggested_mcp_config.unwrap()["mcpServers"]["codex-browser"]["command"],
             current.to_string_lossy().as_ref()
         );
+        assert_eq!(
+            install_diagnostic_for(Some(current.clone()), None, None)
+                .suggested_mcp_config
+                .unwrap()["mcpServers"]["codex-browser"]["env"]["CODEX_BRIDGE_PROFILE"],
+            "basic"
+        );
     }
 
     #[test]
@@ -459,8 +502,45 @@ mod tests {
         assert!(diag
             .notes
             .iter()
-            .any(|note| note.contains("different codex-browser-bridge command")));
+            .any(|note| note.contains("different codex-browser-bridge executable")));
 
         fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn command_shim_is_spawnable_even_when_it_wraps_a_different_install() {
+        assert!(is_command_shim(
+            r"C:\Users\me\AppData\Roaming\npm\codex-browser-bridge.cmd"
+        ));
+        assert!(is_command_shim(
+            r"C:\Users\me\AppData\Roaming\npm\codex-browser-bridge"
+        ));
+        assert!(is_command_shim(r"C:\Tools\codex-browser-bridge.BAT"));
+        assert!(!is_command_shim(r"C:\Tools\codex-browser-bridge.exe"));
+        assert!(is_mcp_spawn_ready(
+            Some(r"C:\Users\me\AppData\Roaming\npm\codex-browser-bridge.cmd"),
+            Some(false)
+        ));
+        assert!(is_mcp_spawn_ready(
+            Some(r"C:\Users\me\AppData\Roaming\npm\codex-browser-bridge"),
+            Some(false)
+        ));
+        assert!(!is_mcp_spawn_ready(
+            Some(r"C:\Other\codex-browser-bridge.exe"),
+            Some(false)
+        ));
+    }
+
+    #[test]
+    fn browser_label_supports_legacy_and_current_extension_metadata() {
+        assert_eq!(
+            browser_label_from_info(&json!({"browserVersion": "Chrome/126"})).as_deref(),
+            Some("Chrome/126")
+        );
+        assert_eq!(
+            browser_label_from_info(&json!({"name": "Edge", "version": "1.26.1015.10801"}))
+                .as_deref(),
+            Some("Edge 1.26.1015.10801")
+        );
     }
 }

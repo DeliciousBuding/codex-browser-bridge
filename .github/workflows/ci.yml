@@ -79,6 +79,9 @@ jobs:
       - name: Check agent surface docs
         shell: bash
         run: node scripts/check-agent-surface.js
+      - name: Check plugin surface
+        shell: bash
+        run: node scripts/check-plugin-surface.js
       - name: Test npm installer helpers
         shell: bash
         run: |

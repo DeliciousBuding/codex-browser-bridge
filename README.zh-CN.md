@@ -5,7 +5,7 @@
 <p align="center">
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
-    让 Claude Code 和其他 MCP Agent 通过 ChatGPT 桌面应用（原 Codex Desktop）控制你现有的 Chrome 或 Edge 浏览器。
+    让 Claude Code 和其他 MCP Agent 通过 ChatGPT 桌面应用的浏览器扩展控制你现有的浏览器配置。
     <br>52 个 MCP 工具。纯 Rust。单文件二进制。零配置。
   </p>
 </p>
@@ -30,11 +30,11 @@
 
 ## 它能做什么
 
-`codex-browser-bridge` 把你本机的 **ChatGPT 桌面应用 + Chrome/Edge** 变成一个任何 agent 都能控制的 MCP 服务器。
+`codex-browser-bridge` 把你本机的 **ChatGPT 桌面应用 + 浏览器扩展** 变成一个任何 agent 都能控制的 MCP 服务器。
 
 无需复制浏览器配置。无需 WebDriver。无需远程配置。它直接连接本机已存在的 `codex-browser-use` named pipe，使用相同的 JSON-RPC 协议，暴露 52 个 MCP 工具用于浏览器自动化。
 
-> **命名说明：** 2026 年 OpenAI 将 Codex 应用并入新的 **ChatGPT 桌面应用**，浏览器扩展也从 "Codex Chrome Extension" 改名为 **ChatGPT 扩展**（支持 Chrome，应用 26.730 版本起支持 Edge）。底层 named pipe（`\\.\pipe\codex-browser-use-*`）和 JSON-RPC 协议名称保持不变——因此本项目及其 `codex_*` 工具面在两种浏览器下都无需任何改动即可工作。
+> **命名说明：** OpenAI 现在把这一入口称为 **ChatGPT 浏览器扩展**。底层 `codex-browser-use` pipe 和 JSON-RPC 方法名仍使用 Codex 时期标识，因此本项目继续保留 `codex_*` 工具名以维持兼容性。
 
 **你的 Agent 可以：**
 
@@ -60,11 +60,42 @@ npm i -g @delicious233/codex-browser-bridge
 
 或从 [GitHub Releases](https://github.com/DeliciousBuding/codex-browser-bridge/releases) 下载。
 
-**需要：** Windows · Chrome 或 Edge · ChatGPT 桌面应用（原 Codex Desktop）· ChatGPT 浏览器扩展
+**需要：** Windows · 支持的 Chromium 浏览器 · ChatGPT 桌面应用 · ChatGPT 浏览器扩展
+
+## 兼容性
+
+最近一次实测：2026-10-21，ChatGPT 桌面应用（`OpenAI.Codex` 包）`26.1016.6573.0`，Edge 扩展 `1.26.1015.10801`。
+
+| 层面 | 状态 |
+|------|------|
+| ChatGPT 桌面应用 | 当前频道已实测 |
+| ChatGPT 浏览器扩展 | 当前频道已实测 |
+| Chrome / Edge | 支持；本次审计实测 Edge |
+| Brave / Opera / Vivaldi | 预计使用相同 Chromium/CDP 管线，但尚未实测 |
+| MCP `2024-11-05` … `2025-11-25` | 支持 Legacy 生命周期 |
+| MCP `2026-07-28` | 支持无状态生命周期与 discovery |
+| macOS / Linux | 1.x 不支持 |
+
+Bridge 不会安装第二套浏览器扩展，也不会复制浏览器配置。一个 MCP server 进程只连接一个可用的扩展 pipe，不会把多个浏览器 profile 的标签页合并成一个列表。
 
 ## 30 秒接入 Claude Code
 
-在 Claude Code MCP 设置中添加：
+先安装上面的 npm 包，再安装 Claude Code 插件：
+
+```bash
+claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
+```
+
+这会同时安装 Skill 和 MCP server，不需要手工拼 MCP JSON。Claude Code
+2.1.292 及以上支持一条命令添加 marketplace 并安装插件。开发本地仓时可用
+`claude --plugin-dir .`。
+
+插件默认暴露完整 52 个工具，因为 Claude Code 默认启用 MCP tool search：
+启动时只加载 server instructions 和工具名，具体 schema 按需发现；
+`codex_doctor` 是唯一标记 `alwaysLoad` 的 schema。随插件安装的 Skill 也只按
+任务读取一个参考文件，不再一次加载完整 52 工具手册。
+
+不支持 tool search 的客户端，或需要手工接 MCP 时，在设置中添加：
 
 ```json
 {
@@ -72,7 +103,10 @@ npm i -g @delicious233/codex-browser-bridge
     "codex-browser": {
       "command": "codex-browser-bridge",
       "args": ["--mode", "mcp"],
-      "transport": "stdio"
+      "transport": "stdio",
+      "env": {
+        "CODEX_BRIDGE_PROFILE": "basic"
+      }
     }
   }
 }
@@ -95,11 +129,26 @@ $bridge = Join-Path (npm prefix -g) "codex-browser-bridge.cmd"
 ```
 
 把输出里的 `install.suggested_mcp_config.mcpServers.codex-browser.command`
-填到客户端配置的 `command`。文件上传需要设置 `CODEX_BRIDGE_UPLOAD_BASE`；[examples/](examples/) 里有完整配置模板。
+填到客户端配置的 `command`。建议先用 34 个工具的 `basic` profile，需要时再切到 `network` 或 `full`。文件上传需要设置 `CODEX_BRIDGE_UPLOAD_BASE`；[examples/](examples/) 里有完整配置模板。
+
+ChatGPT 桌面应用 / Codex 安装同一个仓库 marketplace：
+
+```powershell
+codex plugin marketplace add DeliciousBuding/codex-browser-bridge
+codex plugin add codex-browser@codex-browser-bridge
+```
+
+重启应用后进入 Plugins Directory。包结构遵循 portable Agent Plugins
+（`plugin.json` + `mcp.json`），同时带 Codex 与 Claude 兼容清单和
+repo-scoped marketplace。公开 ChatGPT Directory 列表是另一条提交流程，
+本地 MCP 插件提交还需要 partner allowlist，不影响本地插件安装。
 
 Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。npm 包内也会随包发布这些 `examples/` 模板。
 
-> 💡 **Agent skill 已内置。** 仓库 [`skills/codex-browser/SKILL.md`](skills/codex-browser/SKILL.md) 包含 LLM agent 使用全部 52 个工具的操作手册。PowerShell 用户可将 npm 包内 `skills\codex-browser` 复制到 `%USERPROFILE%\.claude\skills\`；Git Bash/WSL 用户可复制到 `~/.claude/skills/`。npm 包内的 `examples/` 目录包含多客户端 MCP 配置模板。
+> 💡 **Agent skill 已随插件安装。** 不支持插件的客户端可把 npm 包内
+> `skills\codex-browser` 复制到 `%USERPROFILE%\.claude\skills\`，Git
+> Bash/WSL 用户可复制到 `~/.claude/skills/`。Skill 主文件只做路由，
+> `references/` 按任务渐进加载。
 
 ## 配置
 
@@ -108,7 +157,7 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。npm 包�
 默认配置文件是当前工作目录下的 `.codex-browser-bridge.toml`。也可以用 `CODEX_BRIDGE_CONFIG` 指定显式路径；设置后不会再回退读取工作目录配置：
 
 ```toml
-profile = "full"                 # basic | network | full
+profile = "basic"                # 推荐；basic | network | full
 upload_base = "C:/Users/me/Downloads"
 max_text_bytes = 1048576
 max_image_bytes = 3145728
@@ -277,6 +326,17 @@ ChatGPT 桌面应用 → ChatGPT 扩展 → Chrome / Edge 标签页
 
 全部 52 个工具都携带行为注解（`readOnlyHint`、`destructiveHint`、`idempotentHint`、`openWorldHint`），供客户端审批 UX 使用。详见 [CHANGELOG.md](CHANGELOG.md)。
 
+## 维护策略
+
+这个项目刻意保持为很薄的兼容适配层，不是第二套浏览器运行时。ChatGPT 桌面应用或扩展升级本身不要求 bridge 发版；升级后按下面顺序冒烟验证：
+
+1. `codex-browser-bridge --mode doctor`
+2. `codex_get_info`
+3. `codex_user_tabs`
+4. 认领一个一次性标签页并读取标题或 DOM
+
+只有 pipe 契约变化、需要更新兼容说明或修复真实回归时才发 patch 版本。不要把 Playwright 或另一套浏览器扩展作为兜底层。
+
 ## 安全
 
 此工具让 agent 能访问你活跃的浏览器会话。
@@ -320,7 +380,6 @@ src/
 
 详见 [ROADMAP.md](ROADMAP.md)。亮点：
 
-- winget / scoop 安装清单
 - 可选真实 E2E harness（ChatGPT 桌面应用 + Chrome/Edge）
 - typed tool result schemas
 - v2.0.0: 跨平台（macOS / Linux via Unix domain socket）
@@ -328,6 +387,7 @@ src/
 ## 相关资源
 
 - [examples/](examples/) — MCP 配置示例（Claude Code, Cursor, OpenClaw, Hermes Agent）
+- [.claude-plugin/](.claude-plugin/plugin.json) 与 [.agents/plugins/](.agents/plugins/marketplace.json) — Claude Code / ChatGPT 插件与 marketplace 元数据
 - [skills/codex-browser/](skills/codex-browser/SKILL.md) — Agent skill（LLM 使用指南）
 - [ROADMAP.md](ROADMAP.md) — 完整路线图（含 SUPER 评分）
 - [CHANGELOG.md](CHANGELOG.md) — 发布历史

@@ -8,7 +8,7 @@ Please open an issue using the bug report template. Include:
 
 - The output of `codex-browser-bridge --version`
 - The output of `codex-browser-bridge --mode discover`, with local identifiers redacted
-- Codex Desktop version, Chrome version, Windows version
+- ChatGPT desktop app version, browser and extension versions, Windows version
 - A minimal reproduction (which tool you called, what arguments, what response)
 
 Public issues must not include screenshots, DOM snapshots, tab titles, full private URLs, logged-in page content, tokens, account IDs, or production admin pages. Use GitHub private vulnerability reporting for sensitive repros.
@@ -22,7 +22,7 @@ See [SECURITY.md](SECURITY.md) and use the private reporting path there.
 Requirements:
 - Rust 1.85+
 - Windows (the bridge depends on Windows named pipes)
-- Codex Desktop and the Codex Chrome Extension running (for real-pipe testing)
+- ChatGPT desktop app and the ChatGPT browser extension running (for real-pipe testing)
 
 Build and test:
 
@@ -35,11 +35,28 @@ cargo clippy --locked -- -D warnings  # lint
 cargo build --locked --release  # release build
 ```
 
-The default test suite is hermetic. It uses mock pipe streams to simulate the Codex pipe, so `cargo test --locked` runs without Codex Desktop. Non-Windows mock E2E tests in `tests/cdp_tools_e2e.rs` run in the Ubuntu CI harness. Optional live E2E against a real Codex Desktop + Chrome session is available with:
+The default test suite is hermetic. It uses mock pipe streams to simulate the `codex-browser-use` pipe, so `cargo test --locked` runs without a live desktop app. Non-Windows mock E2E tests in `tests/cdp_tools_e2e.rs` run in the Ubuntu CI harness. Optional live E2E against the ChatGPT desktop app and a connected Chromium browser is available with:
 
 ```powershell
 .\scripts\live-e2e.ps1 -Url https://example.com
 ```
+
+The root directory is also an installable plugin for Claude Code, ChatGPT
+desktop, and Codex. Validate the cross-surface contract after changing a
+manifest, MCP launch config, marketplace, skill, or tool profile:
+
+```bash
+node scripts/check-plugin-surface.js
+node scripts/check-agent-surface.js
+claude plugin validate --strict .
+```
+
+`plugin.json` + `mcp.json` are the portable Agent Plugins surface.
+`.codex-plugin/plugin.json` is the Codex compatibility manifest.
+`.claude-plugin/` is the Claude Code surface and reuses root `mcp.json`. The
+same plugin defaults to the full 52-tool profile because Claude Code and Codex
+defer tool schemas through tool search; manual MCP examples keep the low-token
+`basic` profile.
 
 ## Code style
 
@@ -76,8 +93,16 @@ Then document the tool in both READMEs and update `CHANGELOG.md`.
 
 Maintainer-only. See [docs/release-process.md](docs/release-process.md) for the full contract.
 
-1. Bump version in `Cargo.toml` and `npm/package.json`.
+1. Bump the version in `Cargo.toml`, `npm/package.json`, `plugin.json`,
+   `.codex-plugin/plugin.json`, and `.claude-plugin/plugin.json`.
 2. Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md`.
-3. Open a `release/vX.Y.Z` PR and merge it.
-4. Tag from `main`: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
-5. The release workflow builds Windows binaries (x64 + arm64), generates checksums and attestations, stages and publishes the GitHub Release, embeds those checksums into the npm package, then publishes npm with provenance. If a same-version rerun happens after npm is already published, the workflow refuses to clobber Release assets unless the rebuilt hashes match the published npm package checksums.
+3. Run the local release preflight in `docs/release-process.md`, including
+   plugin validation and npm package-content checks.
+4. Commit the release directly on `main` and push it.
+5. Tag from `main`: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
+6. The release workflow builds Windows binaries (x64 + arm64), generates
+   checksums and attestations, stages and publishes the GitHub Release, embeds
+   those checksums into the npm package, then publishes npm with provenance. If
+   a same-version rerun happens after npm is already published, the workflow
+   refuses to clobber Release assets unless the rebuilt hashes match the
+   published npm package checksums.

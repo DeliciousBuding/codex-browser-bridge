@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "codex-browser": {
+      "type": "stdio",
+      "command": "codex-browser-bridge",
+      "args": ["--mode", "mcp"],
+      "env": {
+        "CODEX_BRIDGE_PROFILE": "full"
+      }
+    }
+  }
+}

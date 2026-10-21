@@ -154,6 +154,12 @@ if (!/gh release create "\$TAG"[\s\S]*--draft/.test(workflow)) {
 if (!/actions\/attest@[0-9a-f]{40}/.test(workflow)) {
   fail("release.yml must generate artifact attestations with a pinned action");
 }
+if (!/node scripts\/check-plugin-surface\.js/.test(workflow)) {
+  fail("release.yml must validate the plugin distribution surface");
+}
+if (!/node scripts\/check-plugin-surface\.js/.test(ciWorkflow)) {
+  fail("ci.yml must validate the plugin distribution surface");
+}
 
 if (!/workflow filename:\s*`release\.yml`/.test(docs)) {
   fail("release docs must document the npm Trusted Publisher workflow filename");
@@ -172,6 +178,9 @@ if (!/Manual release dispatch/.test(docs) || !/same branch as `main`/.test(docs)
 }
 if (!/published npm package's embedded checksums/.test(docs)) {
   fail("release docs must document same-version rerun checksum drift protection");
+}
+if (!/claude plugin validate --strict \./.test(docs)) {
+  fail("release docs must include strict Claude plugin validation");
 }
 
 if (pkg.name !== "@delicious233/codex-browser-bridge") {
