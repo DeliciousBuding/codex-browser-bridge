@@ -350,14 +350,12 @@ fn browser_label_from_info(info: &Value) -> Option<String> {
 }
 
 fn is_command_shim(path: &str) -> bool {
-    let path = Path::new(path);
-    match path.extension().and_then(OsStr::to_str) {
-        Some(ext) => ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"),
-        None => path
-            .file_name()
-            .and_then(OsStr::to_str)
-            .is_some_and(|name| name.eq_ignore_ascii_case("codex-browser-bridge")),
-    }
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".cmd")
+        || lower.ends_with(".bat")
+        || (cfg!(windows)
+            && (lower.ends_with(r"\codex-browser-bridge")
+                || lower.ends_with("/codex-browser-bridge")))
 }
 
 fn is_mcp_spawn_ready(path_lookup: Option<&str>, matches_current_exe: Option<bool>) -> bool {
@@ -512,15 +510,21 @@ mod tests {
         assert!(is_command_shim(
             r"C:\Users\me\AppData\Roaming\npm\codex-browser-bridge.cmd"
         ));
+        assert!(is_command_shim(r"C:\Tools\codex-browser-bridge.BAT"));
+        assert!(!is_command_shim(r"C:\Tools\codex-browser-bridge.exe"));
+        #[cfg(windows)]
         assert!(is_command_shim(
             r"C:\Users\me\AppData\Roaming\npm\codex-browser-bridge"
         ));
-        assert!(is_command_shim(r"C:\Tools\codex-browser-bridge.BAT"));
-        assert!(!is_command_shim(r"C:\Tools\codex-browser-bridge.exe"));
+        #[cfg(not(windows))]
+        assert!(!is_command_shim(
+            r"C:\Users\me\AppData\Roaming\npm\codex-browser-bridge"
+        ));
         assert!(is_mcp_spawn_ready(
             Some(r"C:\Users\me\AppData\Roaming\npm\codex-browser-bridge.cmd"),
             Some(false)
         ));
+        #[cfg(windows)]
         assert!(is_mcp_spawn_ready(
             Some(r"C:\Users\me\AppData\Roaming\npm\codex-browser-bridge"),
             Some(false)
