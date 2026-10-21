@@ -13,16 +13,16 @@ the progressive `codex-browser` skill:
 ```powershell
 # Claude Code 2.1.292+
 claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
-
-# ChatGPT desktop / Codex
-codex plugin marketplace add DeliciousBuding/codex-browser-bridge
-codex plugin add codex-browser@codex-browser-bridge
 ```
 
-The plugin uses the `full` 52-tool profile because Claude Code and Codex defer
+The Claude plugin uses the `full` 52-tool profile because Claude Code defers
 tool schemas through tool search. The manual JSON examples below are the
 fallback for MCP clients without plugin or tool-search support and use the
 34-tool `basic` profile.
+
+Codex and ChatGPT desktop already control the browser extension natively. Do
+not install this bridge as a Codex plugin; these examples are for non-Codex MCP
+clients that need to reuse the same browser session.
 
 ## Supported clients
 

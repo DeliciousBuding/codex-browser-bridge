@@ -1,6 +1,6 @@
 {
   "name": "codex-browser-bridge",
-  "description": "Browser automation plugins for the ChatGPT desktop app's browser extension.",
+  "description": "Claude Code browser automation for the ChatGPT desktop app's browser extension.",
   "owner": {
     "name": "DeliciousBuding",
     "url": "https://github.com/DeliciousBuding"

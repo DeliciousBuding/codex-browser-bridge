@@ -7,9 +7,8 @@ This project uses explicit SemVer tags, a curated changelog, GitHub Release asse
 - Use SemVer: `MAJOR.MINOR.PATCH`.
 - Release tags must be annotated tags named `vX.Y.Z`.
 - Pre-release tags may use SemVer pre-release syntax, for example `v2.0.0-beta.1`.
-- `Cargo.toml`, `npm/package.json`, `plugin.json`,
-  `.codex-plugin/plugin.json`, and `.claude-plugin/plugin.json` must match the
-  tag without the leading `v`.
+- `Cargo.toml`, `npm/package.json`, and `.claude-plugin/plugin.json` must match
+  the tag without the leading `v`.
 - npm publishes stable versions to the `latest` dist-tag and SemVer pre-release versions to the `next` dist-tag.
 - Rust MSRV is part of the compatibility contract. Do not raise `rust-version` unless the release notes call it out.
 
@@ -35,7 +34,8 @@ Use only sections that have entries. Keep pending changes under `Unreleased`, th
 - Use Conventional Commits prefixes: `feat:`, `fix:`, `docs:`, `test:`, `ci:`, `chore:`, `refactor:`.
 - Prefer one logical change per commit.
 - The release commit lands directly on `main` and includes:
-  - version bumps in `Cargo.toml`, `npm/package.json`, and all plugin manifests
+  - version bumps in `Cargo.toml`, `npm/package.json`, and the Claude plugin
+    manifest
   - changelog section for `X.Y.Z`
   - README, skill, plugin, and example changes needed for user-facing behavior
 
@@ -107,19 +107,16 @@ directories into the npm package before `npm pack`, `npm publish`, or
 `npm run check:package`. The package-content check verifies every skill
 reference, not only `SKILL.md`.
 
-## Plugin Distribution
+## Claude Plugin Distribution
 
-The repository tag is also the plugin source. Before tagging, verify that:
+The repository tag is also the Claude plugin source. Before tagging, verify that:
 
-- `plugin.json` uses the portable Agent Plugins schema and keeps OpenAI
-  presentation/local-executor metadata under `extensions.com.openai`.
-- `mcp.json` uses the Agent Plugins MCP schema and launches the npm-installed
-  `codex-browser-bridge` command with the `full` profile.
-- `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, and both
-  marketplace files resolve the same root without duplicate MCP processes.
+- `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` resolve the
+  repository root and reuse `mcp.json`.
+- `mcp.json` launches the npm-installed `codex-browser-bridge` command with the
+  `full` profile.
 - Only `codex_doctor` carries `anthropic/alwaysLoad=true`; all other schemas
   remain available to tool search.
-
-Public ChatGPT Directory submission is separate from npm and Git tags. It
-requires local-MCP partner allowlisting and review, so it is not part of the
-tag automation.
+- No Codex plugin manifest or Codex marketplace is present. Codex / ChatGPT
+  desktop use native browser integration and do not install this bridge as a
+  plugin.

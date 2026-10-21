@@ -56,54 +56,19 @@ if (!cargoVersion) {
   );
 }
 
-const portable = readJson("plugin.json");
-const codex = readJson(".codex-plugin/plugin.json");
 const claude = readJson(".claude-plugin/plugin.json");
 const mcp = readJson("mcp.json");
 const claudeMarketplace = readJson(".claude-plugin/marketplace.json");
-const codexMarketplace = readJson(".agents/plugins/marketplace.json");
 
-for (const [manifest, label] of [
-  [portable, "portable plugin.json"],
-  [codex, ".codex-plugin/plugin.json"],
-  [claude, ".claude-plugin/plugin.json"],
-]) {
-  if (manifest.name !== "codex-browser") {
-    failures.push(`${label} name must remain codex-browser`);
-  }
-  requireVersion(manifest, label, packageJson.version);
+if (claude.name !== "codex-browser") {
+  failures.push(".claude-plugin/plugin.json name must remain codex-browser");
 }
+requireVersion(claude, ".claude-plugin/plugin.json", packageJson.version);
 
-const portableSchema = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
-if (portable.$schema !== portableSchema) {
-  failures.push(`portable plugin.json must use ${portableSchema}`);
-}
-if (!portable.author || portable.author.name !== "DeliciousBuding") {
-  failures.push("portable plugin.json author.name must remain DeliciousBuding");
-}
-const portableOpenAi =
-  portable.extensions && portable.extensions["com.openai"];
-if (
-  !portableOpenAi ||
-  !portableOpenAi.interface ||
-  portableOpenAi.interface.developerName !== "DeliciousBuding"
-) {
-  failures.push(
-    "portable plugin.json developerName must remain DeliciousBuding"
-  );
-}
-for (const [manifest, label] of [
-  [codex, ".codex-plugin/plugin.json"],
-  [claude, ".claude-plugin/plugin.json"],
-]) {
-  requirePathInsidePlugin(manifest.skills, `${label} skills`);
-  requirePathInsidePlugin(manifest.mcpServers, `${label} mcpServers`);
-}
+requirePathInsidePlugin(claude.skills, ".claude-plugin/plugin.json skills");
+requirePathInsidePlugin(claude.mcpServers, ".claude-plugin/plugin.json mcpServers");
 if (claude.author && claude.author.name !== "DeliciousBuding") {
   failures.push(".claude-plugin/plugin.json author.name must remain DeliciousBuding");
-}
-if (!codex.author || codex.author.name !== "DeliciousBuding") {
-  failures.push(".codex-plugin/plugin.json author.name must remain DeliciousBuding");
 }
 
 const mcpSchema = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
@@ -112,12 +77,24 @@ if (mcp.$schema !== mcpSchema) {
 }
 if (claude.mcpServers !== "./mcp.json") {
   failures.push(
-    "Claude manifest must reuse portable mcp.json to avoid a duplicate .mcp.json server"
+    "Claude manifest must reuse root mcp.json to avoid a duplicate .mcp.json server"
   );
 }
 requireAbsent(
   ".mcp.json",
   "a project-level copy makes Claude start the plugin MCP twice"
+);
+requireAbsent(
+  "plugin.json",
+  "Codex/ChatGPT desktop use native browser integration; the bridge is not a Codex plugin"
+);
+requireAbsent(
+  ".codex-plugin",
+  "Codex/ChatGPT desktop use native browser integration; the bridge is not a Codex plugin"
+);
+requireAbsent(
+  ".agents/plugins/marketplace.json",
+  "the repository no longer publishes a Codex marketplace"
 );
 
 const server = mcp.mcpServers && mcp.mcpServers["codex-browser"];
@@ -136,15 +113,6 @@ if (!server) {
   }
 }
 
-if (!portable.extensions || !portable.extensions["com.openai"]) {
-  failures.push("portable plugin must declare extensions.com.openai");
-} else if (portable.extensions["com.openai"].requires_local_executor !== true) {
-  failures.push("portable plugin must require a local executor");
-}
-if (codex.requires_local_executor !== true) {
-  failures.push("Codex compatibility manifest must require a local executor");
-}
-
 const claudeEntry = claudeMarketplace.plugins && claudeMarketplace.plugins[0];
 if (!claudeEntry || claudeEntry.name !== "codex-browser") {
   failures.push("Claude marketplace must list codex-browser");
@@ -156,17 +124,6 @@ if (
   claudeMarketplace.owner.name !== "DeliciousBuding"
 ) {
   failures.push("Claude marketplace owner must remain DeliciousBuding");
-}
-
-const codexEntry = codexMarketplace.plugins && codexMarketplace.plugins[0];
-if (!codexEntry || codexEntry.name !== "codex-browser") {
-  failures.push("Codex marketplace must list codex-browser");
-} else if (
-  !codexEntry.source ||
-  codexEntry.source.source !== "local" ||
-  codexEntry.source.path !== "./"
-) {
-  failures.push("Codex marketplace source must point at the plugin repository root");
 }
 
 const skillRoot = path.join(root, "skills", "codex-browser");
@@ -183,4 +140,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`plugin surface ok (${packageJson.version}, cross-surface package)`);
+console.log(`plugin surface ok (${packageJson.version}, Claude plugin)`);

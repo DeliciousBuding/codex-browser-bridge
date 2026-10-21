@@ -6,18 +6,17 @@
 
 本仓库包含项目级 skill bundle：`skills/codex-browser/SKILL.md` + `references/`
 
-`SKILL.md` 只负责路由和工作流，任务细节按需读取一个 reference。支持项目级 skill 的客户端会自动发现；Claude Code、ChatGPT desktop 和 Codex 也可通过仓库内 marketplace 把 skill 与 MCP server 作为同一个插件安装。
+`SKILL.md` 只负责路由和工作流，任务细节按需读取一个 reference。支持项目级 skill 的客户端会自动发现；Claude Code 可通过仓库内 marketplace 把 skill 与 MCP server 作为同一个插件安装。
 
 ## 插件分发层
 
 插件是分发层，MCP server 是执行层，两者不重复实现：
 
-- `plugin.json` + `mcp.json`：portable Agent Plugins 包，供 ChatGPT desktop / Codex 使用
-- `.codex-plugin/plugin.json`：Codex 兼容清单
 - `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`：Claude Code 插件，复用根 `mcp.json`
-- `.agents/plugins/marketplace.json`：repo-scoped marketplace
 
-插件默认使用 `full` profile，因为现代 Claude Code / Codex 会通过 tool search 延迟加载 tool schema；只有 `codex_doctor` 使用 `anthropic/alwaysLoad=true`。不支持 tool search 的手工 MCP 配置仍推荐 `basic`。不要自造第二套工具路由器，也不要为节省 token 删除专用工具。
+Codex / ChatGPT desktop 已经能通过现有浏览器扩展直接控制浏览器，不再把 bridge 包装成 Codex 插件，也不安装这个重复入口。bridge 继续作为通用 MCP server，供 Claude Code、Cursor、OpenClaw、Hermes Agent 等非 Codex 客户端复用同一登录态。
+
+Claude 插件默认使用 `full` profile，因为 Claude Code 会通过 tool search 延迟加载 tool schema；只有 `codex_doctor` 使用 `anthropic/alwaysLoad=true`。不支持 tool search 的手工 MCP 配置仍推荐 `basic`。不要自造第二套工具路由器，也不要为节省 token 删除专用工具。
 
 ## MCP 工具设计规范
 
@@ -65,9 +64,9 @@ npm --prefix npm test              # npm installer/package helper 测试
 .\scripts\live-e2e.ps1             # 可选真实 ChatGPT 桌面应用 + Chromium 浏览器冒烟测试
 ```
 
-Release 时遵循 `docs/release-process.md`：确保 `Cargo.toml`、`npm/package.json`、三份 plugin manifest 的版本号与 tag 一致，`CHANGELOG.md` 有对应段，npm 包 dry-run 包含完整的 `skills/codex-browser/` bundle 和 `examples/` 多客户端模板。npm 发布走 Trusted Publishing/OIDC，不在 GitHub secrets 中放 npm write token。
+Release 时遵循 `docs/release-process.md`：确保 `Cargo.toml`、`npm/package.json`、`.claude-plugin/plugin.json` 的版本号与 tag 一致，`CHANGELOG.md` 有对应段，npm 包 dry-run 包含完整的 `skills/codex-browser/` bundle 和 `examples/` 多客户端模板。npm 发布走 Trusted Publishing/OIDC，不在 GitHub secrets 中放 npm write token。
 
-发布前运行 `node scripts/check-plugin-surface.js` 与 `claude plugin validate --strict .`。前者在 CI 中验证 portable、Codex、Claude manifest、唯一 MCP 配置和 marketplace 不漂移。
+发布前运行 `node scripts/check-plugin-surface.js` 与 `claude plugin validate --strict .`。前者在 CI 中验证 Claude manifest、唯一 MCP 配置和 marketplace 不漂移，并阻止 Codex 插件分发文件重新进入仓库。
 
 GitHub workflow 中的外部 `uses:` 必须固定到完整 commit SHA，并保留相邻版本注释；修改 workflow 后运行 `node scripts/check-actions-pinned.js`。
 

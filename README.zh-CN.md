@@ -131,17 +131,10 @@ $bridge = Join-Path (npm prefix -g) "codex-browser-bridge.cmd"
 把输出里的 `install.suggested_mcp_config.mcpServers.codex-browser.command`
 填到客户端配置的 `command`。建议先用 34 个工具的 `basic` profile，需要时再切到 `network` 或 `full`。文件上传需要设置 `CODEX_BRIDGE_UPLOAD_BASE`；[examples/](examples/) 里有完整配置模板。
 
-ChatGPT 桌面应用 / Codex 安装同一个仓库 marketplace：
-
-```powershell
-codex plugin marketplace add DeliciousBuding/codex-browser-bridge
-codex plugin add codex-browser@codex-browser-bridge
-```
-
-重启应用后进入 Plugins Directory。包结构遵循 portable Agent Plugins
-（`plugin.json` + `mcp.json`），同时带 Codex 与 Claude 兼容清单和
-repo-scoped marketplace。公开 ChatGPT Directory 列表是另一条提交流程，
-本地 MCP 插件提交还需要 partner allowlist，不影响本地插件安装。
+Codex 和 ChatGPT 桌面应用本身已经能直接控制 ChatGPT 浏览器扩展，不要把
+这个 bridge 再安装成 Codex 插件；那会为同一个浏览器增加一条重复 MCP
+路径。bridge 面向 Claude Code 以及其他需要复用现有浏览器会话的非
+Codex MCP 客户端。
 
 Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。npm 包内也会随包发布这些 `examples/` 模板。
 
@@ -387,7 +380,7 @@ src/
 ## 相关资源
 
 - [examples/](examples/) — MCP 配置示例（Claude Code, Cursor, OpenClaw, Hermes Agent）
-- [.claude-plugin/](.claude-plugin/plugin.json) 与 [.agents/plugins/](.agents/plugins/marketplace.json) — Claude Code / ChatGPT 插件与 marketplace 元数据
+- [.claude-plugin/](.claude-plugin/plugin.json) — Claude Code 插件与 marketplace 元数据
 - [skills/codex-browser/](skills/codex-browser/SKILL.md) — Agent skill（LLM 使用指南）
 - [ROADMAP.md](ROADMAP.md) — 完整路线图（含 SUPER 评分）
 - [CHANGELOG.md](CHANGELOG.md) — 发布历史

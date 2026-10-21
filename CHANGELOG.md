@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.3] - 2026-10-21
+
+### Changed
+
+- The bridge remains a generic MCP server with the complete 52-tool surface and
+  dual-era MCP support. Claude Code remains the primary plugin distribution
+  path, including progressive skill loading and tool-search deferral.
+- Installer hints now direct Codex / ChatGPT desktop users to their native
+  browser integration instead of installing a duplicate bridge plugin.
+
+### Removed
+
+- Removed the portable Agent Plugins / OpenAI manifest, `.codex-plugin/`
+  compatibility manifest, repo-scoped Codex marketplace, and associated
+  install instructions. Codex already controls the existing browser extension
+  directly and does not need this bridge installed as a Codex plugin.
+
 ## [1.11.2] - 2026-10-21
 
 ### Added

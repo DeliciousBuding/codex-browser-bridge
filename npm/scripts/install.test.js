@@ -226,7 +226,8 @@ async function run() {
     assert.deepStrictEqual(fs.readFileSync(path.join(outDir, "codex-browser-bridge.exe")), binary);
     assert.ok(installLogs.some((line) => line.includes(`Installed: ${path.join(outDir, "codex-browser-bridge.exe")}`)));
     assert.ok(installLogs.some((line) => line.includes("claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge")));
-    assert.ok(installLogs.some((line) => line.includes("codex plugin marketplace add DeliciousBuding/codex-browser-bridge")));
+    assert.ok(installLogs.some((line) => line.includes("Codex / ChatGPT desktop already have native browser integration")));
+    assert.ok(!installLogs.some((line) => line.includes("codex plugin marketplace add")));
     assert.ok(installLogs.some((line) => line.includes("Skill bundle fallback:") && line.includes(path.join(installRoot, "skills", "codex-browser"))));
     assert.ok(installLogs.some((line) => line.includes("MCP config examples:") && line.includes(path.join(installRoot, "examples"))));
     const installedConfigLog = installLogs.find((line) => line.includes("Ready-to-paste MCP config"));
@@ -253,7 +254,8 @@ async function run() {
     const hintText = hintLogs.join("\n");
     assert.match(hintText, /Claude Code/);
     assert.match(hintText, /claude plugin install codex-browser/);
-    assert.match(hintText, /codex plugin marketplace add/);
+    assert.match(hintText, /native browser integration/);
+    assert.doesNotMatch(hintText, /codex plugin marketplace add/);
     assert.match(hintText, /Skill bundle fallback/);
     assert.match(hintText, /Other skill-aware agents/);
     assert.match(hintText, /OpenClaw/);

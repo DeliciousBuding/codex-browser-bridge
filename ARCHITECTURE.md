@@ -14,7 +14,7 @@ named pipe to the ChatGPT browser extension, which then drives the browser via
 the Chrome DevTools Protocol (CDP).
 
 ```
-plugin marketplace ──installs──▶ skill + MCP config
+Claude plugin marketplace ──installs──▶ skill + MCP config
 MCP client ──stdio JSON-RPC──▶ bridge ──named pipe──▶ ChatGPT extension ──CDP──▶ Chromium browser
 ```
 
@@ -22,9 +22,11 @@ The shipped binary is Windows-only (named pipes). The **library** compiles on
 other platforms with stub `pipe`/`discovery` modules — this exists so the
 reconnect and protocol logic can be tested with `tokio::io::duplex()` mocks.
 
-The repository is both the plugin source and the MCP server source. A plugin
-marketplace distributes the manifest, progressive skill, and MCP launch
-configuration; it does not wrap or duplicate the 52-tool protocol surface.
+The repository is both the Claude plugin source and the generic MCP server
+source. A Claude plugin marketplace distributes the manifest, progressive
+skill, and MCP launch configuration; it does not wrap or duplicate the 52-tool
+protocol surface. Codex and ChatGPT desktop already have native browser access
+and are not plugin targets for this bridge.
 
 ## Module map (`src/`)
 
@@ -84,26 +86,24 @@ can dispatch on the exact method themselves.
 via `CODEX_BRIDGE_PROFILE` env, `--profile` flag, or config file. Keeps the
 tool list small for agents that don't need the network/debugging surface.
 
-### Plugin distribution and progressive loading
+### Claude plugin distribution and progressive loading
 
-The root package follows the portable Agent Plugins layout:
+The Claude plugin surface is intentionally small:
 
-- `plugin.json` is the portable manifest. It uses the Agent Plugins schema and
-  keeps OpenAI presentation/local-executor metadata under
-  `extensions.com.openai`.
-- `mcp.json` is the portable MCP configuration. It uses the Agent Plugins MCP
-  schema and launches the installed `codex-browser-bridge` command.
-- `.codex-plugin/plugin.json` is the Codex compatibility manifest.
+- `mcp.json` launches the installed `codex-browser-bridge` command.
 - `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` make the
-  same directory a Claude Code plugin and marketplace. Its `mcpServers` path
-  reuses root `mcp.json`; a second `.mcp.json` would make Claude auto-load the
-  same server as project MCP and create a duplicate process.
-- `.agents/plugins/marketplace.json` exposes the same directory as a
-  repo-scoped ChatGPT desktop / Codex marketplace.
+  repository a Claude Code plugin and marketplace. The manifest reuses root
+  `mcp.json`; a second `.mcp.json` would make Claude auto-load the same server
+  as project MCP and create a duplicate process.
 
-The plugin profile is `full` because modern Claude Code and Codex support MCP
-tool search. They can load server instructions and tool names first, then
-discover individual schemas on demand. `codex_doctor` alone carries
+There is deliberately no `plugin.json`, `.codex-plugin/`, or Codex marketplace.
+Codex / ChatGPT desktop already controls its browser extension natively; the
+bridge exists for Claude and other non-Codex MCP clients that need to reuse the
+same logged-in browser session.
+
+The plugin profile is `full` because Claude Code supports MCP tool search. It
+loads server instructions and tool names first, then discovers individual
+schemas on demand. `codex_doctor` alone carries
 `_meta["anthropic/alwaysLoad"] = true` so connectivity recovery remains
 immediate; eagerly loading more tools would defeat deferral. Manual MCP clients
 that do not support tool search keep the `basic` profile as their documented

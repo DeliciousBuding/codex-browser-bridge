@@ -136,19 +136,10 @@ switch to `network` or `full` only when needed. File upload requires
 `CODEX_BRIDGE_UPLOAD_BASE`; use the templates in [examples/](examples/) for a
 full config.
 
-For ChatGPT desktop / Codex, install the same repository marketplace and
-plugin:
-
-```powershell
-codex plugin marketplace add DeliciousBuding/codex-browser-bridge
-codex plugin add codex-browser@codex-browser-bridge
-```
-
-Restart the app and open the Plugins Directory. The package follows the
-portable Agent Plugins layout (`plugin.json` + `mcp.json`) with Codex and
-Claude compatibility manifests, and includes a repo-scoped marketplace. A
-public ChatGPT Directory listing is a separate submission requiring local-MCP
-partner approval; it is not required for local use.
+Codex and ChatGPT desktop already control the ChatGPT browser extension
+directly. Do not install this bridge as a Codex plugin: it would add a duplicate
+MCP path to the same browser. The bridge exists for Claude Code and other
+non-Codex MCP clients that need to reuse that existing browser session.
 
 For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/). The npm
 package also ships these examples under `examples/`.
@@ -428,7 +419,7 @@ See [ROADMAP.md](ROADMAP.md). Highlights:
 ## Related
 
 - [examples/](examples/) — MCP configs for Claude Code, Cursor, OpenClaw, Hermes Agent
-- [.claude-plugin/](.claude-plugin/plugin.json) and [.agents/plugins/](.agents/plugins/marketplace.json) — Claude Code / ChatGPT plugin and marketplace metadata
+- [.claude-plugin/](.claude-plugin/plugin.json) — Claude Code plugin and marketplace metadata
 - [skills/codex-browser/](skills/codex-browser/SKILL.md) — Agent skill (LLM usage guide)
 - [ROADMAP.md](ROADMAP.md) — Full roadmap with SUPER scores
 - [CHANGELOG.md](CHANGELOG.md) — Release history

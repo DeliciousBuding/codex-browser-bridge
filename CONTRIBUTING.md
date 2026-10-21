@@ -41,9 +41,9 @@ The default test suite is hermetic. It uses mock pipe streams to simulate the `c
 .\scripts\live-e2e.ps1 -Url https://example.com
 ```
 
-The root directory is also an installable plugin for Claude Code, ChatGPT
-desktop, and Codex. Validate the cross-surface contract after changing a
-manifest, MCP launch config, marketplace, skill, or tool profile:
+The root directory is an installable Claude Code plugin. Validate the plugin
+contract after changing a manifest, MCP launch config, marketplace, skill, or
+tool profile:
 
 ```bash
 node scripts/check-plugin-surface.js
@@ -51,12 +51,11 @@ node scripts/check-agent-surface.js
 claude plugin validate --strict .
 ```
 
-`plugin.json` + `mcp.json` are the portable Agent Plugins surface.
-`.codex-plugin/plugin.json` is the Codex compatibility manifest.
-`.claude-plugin/` is the Claude Code surface and reuses root `mcp.json`. The
-same plugin defaults to the full 52-tool profile because Claude Code and Codex
-defer tool schemas through tool search; manual MCP examples keep the low-token
-`basic` profile.
+`.claude-plugin/` and `mcp.json` are the Claude Code plugin surface.
+Codex / ChatGPT desktop use native browser integration and do not install this
+bridge as a plugin. The Claude plugin defaults to the full 52-tool profile
+because Claude Code defers tool schemas through tool search; manual MCP
+examples keep the low-token `basic` profile.
 
 ## Code style
 
@@ -93,8 +92,8 @@ Then document the tool in both READMEs and update `CHANGELOG.md`.
 
 Maintainer-only. See [docs/release-process.md](docs/release-process.md) for the full contract.
 
-1. Bump the version in `Cargo.toml`, `npm/package.json`, `plugin.json`,
-   `.codex-plugin/plugin.json`, and `.claude-plugin/plugin.json`.
+1. Bump the version in `Cargo.toml`, `npm/package.json`, and
+   `.claude-plugin/plugin.json`.
 2. Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md`.
 3. Run the local release preflight in `docs/release-process.md`, including
    plugin validation and npm package-content checks.

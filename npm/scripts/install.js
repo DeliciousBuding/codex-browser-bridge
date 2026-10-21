@@ -278,9 +278,7 @@ function logInstallHints(root, log, target) {
       "Claude Code plugin (recommended):",
       "  claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge",
       "  -> installs the MCP server and progressive skill; tool schemas load on demand",
-      "ChatGPT desktop / Codex plugin:",
-      "  codex plugin marketplace add DeliciousBuding/codex-browser-bridge",
-      "  -> install Codex Browser from the Plugins Directory",
+      "Codex / ChatGPT desktop already have native browser integration; do not install this bridge as a Codex plugin.",
     ].join("\n")
   );
   if (fs.existsSync(skillDir)) {
