@@ -90,11 +90,16 @@ tool list small for agents that don't need the network/debugging surface.
 
 The Claude plugin surface is intentionally small:
 
-- `mcp.json` launches the installed `codex-browser-bridge` command.
+- `mcp.json` launches the npm package through a version-pinned `npx` entry.
+  The first start downloads the package and Windows binary; a global npm
+  install is optional and keeps later starts on the existing command.
 - `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` make the
   repository a Claude Code plugin and marketplace. The manifest reuses root
   `mcp.json`; a second `.mcp.json` would make Claude auto-load the same server
   as project MCP and create a duplicate process.
+
+The plugin does not bundle the Windows executable. `check-plugin-surface.js`
+keeps the `npx` package pin equal to the plugin and npm versions.
 
 There is deliberately no `plugin.json`, `.codex-plugin/`, or Codex marketplace.
 Codex / ChatGPT desktop already controls its browser extension natively; the

@@ -3,8 +3,13 @@
   "mcpServers": {
     "codex-browser": {
       "type": "stdio",
-      "command": "codex-browser-bridge",
-      "args": ["--mode", "mcp"],
+      "command": "npx",
+      "args": [
+        "-y",
+        "@delicious233/codex-browser-bridge@1.11.4",
+        "--mode",
+        "mcp"
+      ],
       "env": {
         "CODEX_BRIDGE_PROFILE": "full"
       }

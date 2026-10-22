@@ -277,7 +277,8 @@ function logInstallHints(root, log, target) {
     [
       "Claude Code plugin (recommended):",
       "  claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge",
-      "  -> installs the MCP server and progressive skill; tool schemas load on demand",
+      "  -> one command; the plugin launches this package via npx on first use",
+      "  -> this global install is optional and keeps startup warm",
       "Codex / ChatGPT desktop already have native browser integration; do not install this bridge as a Codex plugin.",
     ].join("\n")
   );

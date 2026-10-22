@@ -54,13 +54,24 @@ Useful when an agent needs to work with pages that require a real browser sessio
 
 ## Quick Install
 
+Claude Code plugin (recommended):
+
+```bash
+claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
+```
+
+The plugin fetches the pinned npm package and Windows binary through `npx` on
+first use. A global npm install is optional.
+
+Standalone CLI or manual MCP configuration:
+
 ```bash
 npm i -g @delicious233/codex-browser-bridge
 ```
 
-Or download from [GitHub Releases](https://github.com/DeliciousBuding/codex-browser-bridge/releases).
+Or download the binary from [GitHub Releases](https://github.com/DeliciousBuding/codex-browser-bridge/releases).
 
-**Requires:** Windows · a supported Chromium browser · ChatGPT desktop app · ChatGPT browser extension
+**Requires:** Windows · Node.js 18+ for the npm/npx plugin path · a supported Chromium browser · ChatGPT desktop app · ChatGPT browser extension
 
 ## Compatibility
 
@@ -80,15 +91,14 @@ The bridge does not install a second browser extension or copy your browser prof
 
 ## 30-Second Setup (Claude Code)
 
-Install the Claude Code plugin after installing the npm package above:
+The one-command install above adds the skill and MCP server configuration
+together; no manual MCP JSON is needed. Claude Code 2.1.292 or later can add the
+marketplace and install the plugin in one step. For a local checkout, use
+`claude --plugin-dir .`.
 
-```bash
-claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
-```
-
-This installs the skill and MCP server together. No manual MCP JSON is needed.
-Claude Code 2.1.292 or later can add the marketplace and install the plugin in
-one command. For a local checkout, use `claude --plugin-dir .`.
+The first MCP start can take a few seconds while `npx` fills its cache. After
+that, the plugin reuses the cached package, or the globally installed command
+when one is already on `PATH`.
 
 The plugin defaults to the full 52-tool surface because Claude Code enables MCP
 tool search by default: only server instructions and tool names enter the
@@ -96,7 +106,8 @@ initial context, and schemas are loaded on demand. `codex_doctor` is the only
 schema marked `alwaysLoad`. The companion skill then loads one reference file
 for the task instead of reading the entire 52-tool manual.
 
-For clients without tool search, or if you prefer manual MCP wiring, add:
+For clients without tool search, or if you prefer manual MCP wiring, install
+the npm package globally and add:
 
 ```json
 {

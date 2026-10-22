@@ -6,9 +6,9 @@ steps differ.
 
 ## Recommended: install the plugin
 
-Install the npm package first so `codex-browser-bridge` is on `PATH`, then use
-the plugin where available. The plugin installs both the MCP server entry and
-the progressive `codex-browser` skill:
+Install the plugin where available. It fetches the pinned npm package and
+Windows binary through `npx` on first use, and installs both the MCP server
+entry and the progressive `codex-browser` skill:
 
 ```powershell
 # Claude Code 2.1.292+
@@ -18,7 +18,8 @@ claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-
 The Claude plugin uses the `full` 52-tool profile because Claude Code defers
 tool schemas through tool search. The manual JSON examples below are the
 fallback for MCP clients without plugin or tool-search support and use the
-34-tool `basic` profile.
+34-tool `basic` profile. They require a global `npm i -g` install or an
+absolute command path.
 
 Codex and ChatGPT desktop already control the browser extension natively. Do
 not install this bridge as a Codex plugin; these examples are for non-Codex MCP

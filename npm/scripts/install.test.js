@@ -254,6 +254,7 @@ async function run() {
     const hintText = hintLogs.join("\n");
     assert.match(hintText, /Claude Code/);
     assert.match(hintText, /claude plugin install codex-browser/);
+    assert.match(hintText, /npx/);
     assert.match(hintText, /native browser integration/);
     assert.doesNotMatch(hintText, /codex plugin marketplace add/);
     assert.match(hintText, /Skill bundle fallback/);

@@ -13,6 +13,7 @@
 插件是分发层，MCP server 是执行层，两者不重复实现：
 
 - `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`：Claude Code 插件，复用根 `mcp.json`
+- `mcp.json` 通过 `npx` 启动固定版本的 npm 包；插件本身不分发 Windows 二进制。全局 npm 安装是可选的快速路径，手工 MCP 示例仍使用它。
 
 Codex / ChatGPT desktop 已经能通过现有浏览器扩展直接控制浏览器，不再把 bridge 包装成 Codex 插件，也不安装这个重复入口。bridge 继续作为通用 MCP server，供 Claude Code、Cursor、OpenClaw、Hermes Agent 等非 Codex 客户端复用同一登录态。
 
@@ -67,6 +68,8 @@ npm --prefix npm test              # npm installer/package helper 测试
 Release 时遵循 `docs/release-process.md`：确保 `Cargo.toml`、`npm/package.json`、`.claude-plugin/plugin.json` 的版本号与 tag 一致，`CHANGELOG.md` 有对应段，npm 包 dry-run 包含完整的 `skills/codex-browser/` bundle 和 `examples/` 多客户端模板。npm 发布走 Trusted Publishing/OIDC，不在 GitHub secrets 中放 npm write token。
 
 发布前运行 `node scripts/check-plugin-surface.js` 与 `claude plugin validate --strict .`。前者在 CI 中验证 Claude manifest、唯一 MCP 配置和 marketplace 不漂移，并阻止 Codex 插件分发文件重新进入仓库。
+
+`mcp.json` 的 npm 包版本必须与 `.claude-plugin/plugin.json`、`npm/package.json` 和 release tag 一致；`check-plugin-surface.js` 会拒绝漂移。
 
 GitHub workflow 中的外部 `uses:` 必须固定到完整 commit SHA，并保留相邻版本注释；修改 workflow 后运行 `node scripts/check-actions-pinned.js`。
 

@@ -109,14 +109,38 @@ reference, not only `SKILL.md`.
 
 ## Claude Plugin Distribution
 
-The repository tag is also the Claude plugin source. Before tagging, verify that:
+The repository default branch is the Claude plugin source; each release tag
+pins the same committed plugin version. Before tagging, verify that:
 
 - `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` resolve the
   repository root and reuse `mcp.json`.
-- `mcp.json` launches the npm-installed `codex-browser-bridge` command with the
-  `full` profile.
+- `mcp.json` launches the pinned npm package through `npx` with the `full`
+  profile. The package pin must equal `plugin.json`, `npm/package.json`, and the
+  release tag.
+- The plugin does not bundle the Windows executable. The first MCP start
+  downloads the package and binary; a global npm install remains an optional
+  warm path and is required for the manual MCP examples.
 - Only `codex_doctor` carries `anthropic/alwaysLoad=true`; all other schemas
   remain available to tool search.
 - No Codex plugin manifest or Codex marketplace is present. Codex / ChatGPT
   desktop use native browser integration and do not install this bridge as a
   plugin.
+
+Run a fresh-profile marketplace smoke test on Windows before announcing the
+release:
+
+```powershell
+$env:CLAUDE_CONFIG_DIR = Join-Path $env:TEMP "codex-browser-plugin-smoke"
+claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
+claude plugin details codex-browser
+claude mcp list
+```
+
+The install must report `codex-browser@codex-browser-bridge`, the details view
+must list one skill and one MCP server, and `claude mcp list` must show
+`plugin:codex-browser:codex-browser` connected when the ChatGPT desktop app and
+browser extension are running.
+
+The GitHub Release is published before npm. Do not announce the plugin upgrade
+until the `publish-npm` job finishes; `npx` cannot install the new package
+version before npm has it.

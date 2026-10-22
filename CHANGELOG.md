@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.4] - 2026-10-22
+
+### Changed
+
+- The Claude plugin now launches the npm package through a version-pinned
+  `npx` entry, so the one-command marketplace install works without a prior
+  global npm install. A global install remains a warm-path option and is still
+  required for the manual MCP examples.
+- README, architecture, contributor, release, and example docs now describe
+  the plugin/binary boundary consistently: the plugin ships the skill and MCP
+  configuration, while the pinned npm package supplies the Windows binary on
+  first use.
+- The plugin-surface check now enforces the `npx` package pin and the
+  user-facing one-command install string in both READMEs.
+
 ## [1.11.3] - 2026-10-21
 
 ### Changed

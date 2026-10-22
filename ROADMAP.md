@@ -1,6 +1,6 @@
 # ROADMAP
 
-## Status: v1.11.3 shipped (2026-10-21)
+## Status: v1.11.4 shipped (2026-10-22)
 
 52 MCP tools, dual-era MCP protocol support (`2024-11-05` … `2026-07-28`), tool behavior annotations, CDP event architecture, structured network monitoring, `--mode doctor` CLI, JPEG/WebP screenshots, a verified ChatGPT desktop app + browser-extension compatibility baseline, and one-command Claude Code plugin distribution. Codex / ChatGPT desktop use their native browser integration and do not install the bridge as a plugin. See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
@@ -10,6 +10,7 @@
 
 ### Completed releases
 
+- **v1.11.4** (2026-10-22): made the Claude plugin's one-command marketplace install self-contained at the package-launch layer. `mcp.json` now starts a version-pinned npm package through `npx`, so a prior global npm install is optional; the plugin-surface check enforces the pin and the README install command.
 - **v1.11.3** (2026-10-21): corrected the distribution boundary. Claude Code keeps the progressive plugin; Codex / ChatGPT desktop remain native and no longer have a duplicate bridge plugin or marketplace. The 52-tool MCP server and live browser integration are unchanged.
 - **v1.11.2** (2026-10-21): compatibility maintenance plus distribution modernization: current branding, live compatibility matrix, plugin packaging for Claude Code / ChatGPT desktop / Codex, MCP tool-search metadata, progressive skill references, npm command-shim detection, current extension browser/version diagnostics, and routine GitHub Actions updates. No MCP tools were added or removed.
 - **v1.11.1** (2026-08-19): npm installer proxy support (`HTTPS_PROXY`/`NO_PROXY` via HTTP CONNECT) — fixes `npm i -g` behind proxies.
@@ -43,7 +44,7 @@ The tool layer is saturated. The honest gaps are runtime robustness, supply chai
 
 ### P2 — Distribution & protocol depth
 
-- [x] **Claude plugin distribution and progressive loading.** ✅ Done (v1.11.3). The Claude marketplace installs the 52-tool MCP server and progressive skill. Codex / ChatGPT desktop use native browser integration instead of a duplicate plugin. Claude tool search defers schemas except `codex_doctor`; the skill routes through four on-demand references. Manual MCP clients retain the `basic` profile fallback.
+- [x] **Claude plugin distribution and progressive loading.** ✅ Done (v1.11.4). The Claude marketplace installs the 52-tool MCP server and progressive skill from one command; the pinned `npx` entry supplies the npm package and Windows binary on first use. Codex / ChatGPT desktop use native browser integration instead of a duplicate plugin. Claude tool search defers schemas except `codex_doctor`; the skill routes through four on-demand references. Manual MCP clients retain the `basic` profile fallback.
   - Effort: M · landed in `mcp.json`, `.claude-plugin/`, `skills/codex-browser/`, and the plugin-surface CI check
 - [x] **winget + scoop manifests.** Decision (2026-08-19): **deferred — npm is sufficient.** The target audience (MCP clients: Claude Code / Cursor / agent users) all have Node installed, the npm channel already delivers checksummed binaries with provenance, and winget/scoop would add manifest-repo + per-release bump automation for marginal discoverability. Revisit if user demand materializes; cheapest path then is a winget `portable` manifest auto-PR from release tags.
 - [x] **Installer proxy support.** ✅ Done (v1.11.1). `install.js` honors `HTTPS_PROXY`/`NO_PROXY` via an HTTP CONNECT tunnel, so `npm i -g` works behind corporate/Clash-style proxies.

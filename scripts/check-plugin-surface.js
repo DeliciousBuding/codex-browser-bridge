@@ -102,11 +102,18 @@ if (!server) {
   failures.push("mcp.json must define mcpServers.codex-browser");
 } else {
   if (server.type !== "stdio") failures.push("plugin MCP transport must be stdio");
-  if (server.command !== "codex-browser-bridge") {
-    failures.push("plugin MCP command must be codex-browser-bridge");
-  }
-  if (!Array.isArray(server.args) || server.args.join(" ") !== "--mode mcp") {
-    failures.push("plugin MCP args must be --mode mcp");
+  if (server.command !== "npx") failures.push("plugin MCP command must be npx");
+  const expectedArgs = [
+    "-y",
+    `@delicious233/codex-browser-bridge@${packageJson.version}`,
+    "--mode",
+    "mcp",
+  ];
+  if (
+    !Array.isArray(server.args) ||
+    JSON.stringify(server.args) !== JSON.stringify(expectedArgs)
+  ) {
+    failures.push(`plugin MCP args must be ${expectedArgs.join(" ")}`);
   }
   if (!server.env || server.env.CODEX_BRIDGE_PROFILE !== "full") {
     failures.push("plugin MCP profile must default to full for tool-search clients");
@@ -124,6 +131,14 @@ if (
   claudeMarketplace.owner.name !== "DeliciousBuding"
 ) {
   failures.push("Claude marketplace owner must remain DeliciousBuding");
+}
+
+const installCommand =
+  "claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge";
+for (const readme of ["README.md", "README.zh-CN.md"]) {
+  if (!readText(readme).includes(installCommand)) {
+    failures.push(`${readme} must include the one-command Claude plugin install`);
+  }
 }
 
 const skillRoot = path.join(root, "skills", "codex-browser");

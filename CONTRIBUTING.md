@@ -41,9 +41,11 @@ The default test suite is hermetic. It uses mock pipe streams to simulate the `c
 .\scripts\live-e2e.ps1 -Url https://example.com
 ```
 
-The root directory is an installable Claude Code plugin. Validate the plugin
-contract after changing a manifest, MCP launch config, marketplace, skill, or
-tool profile:
+The root directory is an installable Claude Code plugin. Its MCP entry uses
+`npx` with the npm package version pinned to the plugin version; keep the pin,
+`plugin.json`, and `npm/package.json` aligned. Validate the plugin contract
+after changing a manifest, MCP launch config, marketplace, skill, or tool
+profile:
 
 ```bash
 node scripts/check-plugin-surface.js

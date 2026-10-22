@@ -54,13 +54,24 @@
 
 ## 快速安装
 
+Claude Code 插件（推荐）：
+
+```bash
+claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
+```
+
+插件会在首次使用时通过 `npx` 拉取固定版本的 npm 包和 Windows 二进制；全局 npm
+安装是可选的。
+
+独立 CLI 或手工 MCP 配置：
+
 ```bash
 npm i -g @delicious233/codex-browser-bridge
 ```
 
-或从 [GitHub Releases](https://github.com/DeliciousBuding/codex-browser-bridge/releases) 下载。
+或从 [GitHub Releases](https://github.com/DeliciousBuding/codex-browser-bridge/releases) 下载二进制。
 
-**需要：** Windows · 支持的 Chromium 浏览器 · ChatGPT 桌面应用 · ChatGPT 浏览器扩展
+**需要：** Windows · npm/npx 插件路径需要 Node.js 18+ · 支持的 Chromium 浏览器 · ChatGPT 桌面应用 · ChatGPT 浏览器扩展
 
 ## 兼容性
 
@@ -80,22 +91,19 @@ Bridge 不会安装第二套浏览器扩展，也不会复制浏览器配置。�
 
 ## 30 秒接入 Claude Code
 
-先安装上面的 npm 包，再安装 Claude Code 插件：
+上面的命令会同时安装 Skill 和 MCP server 配置，不需要手工拼 MCP JSON。
+Claude Code 2.1.292 及以上支持一条命令添加 marketplace 并安装插件。开发本地仓时
+可用 `claude --plugin-dir .`。
 
-```bash
-claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
-```
-
-这会同时安装 Skill 和 MCP server，不需要手工拼 MCP JSON。Claude Code
-2.1.292 及以上支持一条命令添加 marketplace 并安装插件。开发本地仓时可用
-`claude --plugin-dir .`。
+首次启动 MCP 时，`npx` 需要几秒钟填充缓存。之后会复用缓存包；如果 PATH 上已有
+全局安装的 `codex-browser-bridge`，也会直接复用。
 
 插件默认暴露完整 52 个工具，因为 Claude Code 默认启用 MCP tool search：
 启动时只加载 server instructions 和工具名，具体 schema 按需发现；
 `codex_doctor` 是唯一标记 `alwaysLoad` 的 schema。随插件安装的 Skill 也只按
 任务读取一个参考文件，不再一次加载完整 52 工具手册。
 
-不支持 tool search 的客户端，或需要手工接 MCP 时，在设置中添加：
+不支持 tool search 的客户端，或需要手工接 MCP 时，先全局安装 npm 包，再在设置中添加：
 
 ```json
 {
