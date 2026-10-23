@@ -1,13 +1,13 @@
 # ROADMAP
 
-## Current source: unreleased (2026-10-24)
+## Latest: v1.12.0 (2026-10-24)
 
-The goal is complete browser capability access for non-Codex agents. Current
-source registers 64 tools (`basic` 45 / `network` 63 / `full` 64). A tool count
+The goal is complete browser capability access for non-Codex agents. v1.12.0
+registers 64 tools (`basic` 45 / `network` 63 / `full` 64). A tool count
 does not establish method or semantic parity; maintain the detailed status in
 [docs/official-parity.md](docs/official-parity.md).
 
-Source includes exact browser-instance binding and pinned reconnect, official
+This release includes exact browser-instance binding and pinned reconnect, official
 history/management/viewport/visibility capabilities, handoff/deliverable marks,
 full-page capture, backend-DOM-ID accessibility actions, strict locator operations,
 official CUA button/modifier/path fields, a shared non-replayed pointer dispatcher,
@@ -16,14 +16,14 @@ Turn finalization uses official `turnEnded`;
 rebinding cannot silently abandon an owned turn. Shell `tools`/`call`/`batch`
 reuse the MCP implementation and add bounded output, not extra browser parity.
 
-Linux Unix-socket transport and GNU x64/arm64 native CI/release packaging are in
-source (glibc >= 2.39 for release binaries). The current source passed all native
-gates on Ubuntu 24.04/glibc 2.39 x64 and an arm64 release compile under QEMU.
-Windows Edge passed an 18-check synthetic-tab live smoke, not the full surface.
-No Linux extension live run or published release is implied. macOS runtime
-support is unverified.
+v1.12.0 includes Linux Unix-socket transport and GNU x64/arm64 native
+CI/release packaging (glibc >= 2.39 for release binaries). It passed all native
+gates on Ubuntu 24.04/glibc 2.39 x64, an arm64 release compile under QEMU, and
+an 18-check synthetic-tab Edge smoke on Windows. That smoke is not the full
+surface, and no Linux extension live run is implied. macOS runtime support is
+unverified.
 
-## Latest published: v1.11.4 (2026-10-22)
+## Previous release: v1.11.4 (2026-10-22)
 
 52 MCP tools, dual-era MCP protocol support (`2024-11-05` … `2026-07-28`), tool behavior annotations, CDP event architecture, structured network monitoring, `--mode doctor` CLI, JPEG/WebP screenshots, a verified ChatGPT desktop app + browser-extension compatibility baseline, and one-command Claude Code plugin distribution. Codex / ChatGPT desktop use their native browser integration and do not install the bridge as a plugin. See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
@@ -31,6 +31,7 @@ support is unverified.
 
 ### Completed releases
 
+- **v1.12.0** (2026-10-24): expanded to 64 MCP tools with exact browser-instance binding, strict locators, official CUA input fields, full-page capture, history/management/viewport/visibility, handoff marks, session-virtual clipboard, WebMCP, page assets, local content exports, Linux Unix transport, and Windows/Linux x64/arm64 release packaging.
 - **v1.11.4** (2026-10-22): made the Claude plugin's one-command marketplace install self-contained at the package-launch layer. `mcp.json` now starts a version-pinned npm package through `npx`, so a prior global npm install is optional; the plugin-surface check enforces the pin and the README install command.
 - **v1.11.3** (2026-10-21): corrected the distribution boundary. Claude Code keeps the progressive plugin; Codex / ChatGPT desktop remain native and no longer have a duplicate bridge plugin or marketplace. The 52-tool MCP server and live browser integration are unchanged.
 - **v1.11.2** (2026-10-21): compatibility maintenance plus distribution modernization: current branding, live compatibility matrix, plugin packaging for Claude Code / ChatGPT desktop / Codex, MCP tool-search metadata, progressive skill references, npm command-shim detection, current extension browser/version diagnostics, and routine GitHub Actions updates. No MCP tools were added or removed.
@@ -82,10 +83,10 @@ performance checks support that goal; none replaces functional parity.
 
 ## Platform verification and distribution
 
-- [x] Linux Unix transport, identity/permission checks, and transport diagnostics in source.
-- [x] Linux GNU x64/arm64 native CI/release jobs and npm platform selection in source.
+- [x] Linux Unix transport, identity/permission checks, and transport diagnostics.
+- [x] Linux GNU x64/arm64 native CI/release jobs and npm platform selection.
+- [x] Release preflight, strict plugin validation, and v1.12.0 packaging from one tagged commit.
 - [ ] Complete full-surface Windows and Linux extension live tests. Windows x64 currently has an 18-check synthetic-tab Edge smoke; Linux x64 has native Rust/Node gates and no-browser doctor only; arm64 has compile-only evidence.
-- [ ] Run release preflight and publish a new version when release preparation is requested.
 - [ ] Research and test an actual macOS extension endpoint before claiming macOS support.
 
 WSL Linux processes use Linux sockets in their own environment. A Windows binary

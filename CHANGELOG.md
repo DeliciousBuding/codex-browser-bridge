@@ -2,11 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.12.0] - 2026-10-24
 
 ### Added
 
-- Current source registers 64 MCP tools (`basic` 45 / `network` 63 / `full` 64).
+- This release registers 64 MCP tools (`basic` 45 / `network` 63 / `full` 64).
   `codex_locator` adds strict CSS/role/text/label/placeholder/test-id reads and
   actions; iframe and chained-locator semantics remain partial. `codex_cua_move`
   adds pointer movement and coordinate/backend-node clicks support double-click.
@@ -25,10 +25,10 @@ All notable changes to this project will be documented in this file.
 - Linux `/tmp/codex-browser-use/*.sock` discovery and validated Unix transport,
   with socket owner/mode, directory and peer-UID checks. Doctor adds transport
   kind/path while retaining legacy `pipe_*` fields.
-- Native Linux GNU x64/arm64 CI/release jobs and npm package selection in source
+- Native Linux GNU x64/arm64 CI/release jobs and npm package selection
   (glibc >= 2.39 for release binaries); existing Windows asset names remain stable.
-  These additions are unreleased; configured jobs and compilation alone do not
-  establish passing CI, live Linux compatibility, or macOS runtime support.
+  Native gates and release builds do not establish live Linux extension
+  compatibility or macOS runtime support.
 - Browser-instance discovery and exact binding. `codex_list_browsers` reports
   stable extension instance IDs, browser family, profile metadata,
   capabilities, and pipe transport; `codex_bind_browser` pins one instance.
@@ -42,6 +42,17 @@ All notable changes to this project will be documented in this file.
   `browser`/`chrome` package manifests, and Chrome/Edge extension-family catalog.
 - `docs/official-parity.md` records which official capabilities are bridged,
   partial, conditional, app-private, or out of scope.
+
+### Changed
+
+- Documented bridge-owned surfaces separately from official APIs in
+  `docs/official-parity.md`: CUA input now follows official field names and
+  semantics, AX and backend DOM IDs stay distinct, and clipboard, WebMCP,
+  page-assets, exports, and the unrestricted evaluate escape hatch keep explicit
+  bridge contracts instead of imitating app-private behavior.
+- The `basic` and `network` profiles include browser discovery/binding, strict
+  locators, history, management, viewport, visibility, handoff marks, clipboard,
+  WebMCP, and content export so lower-token clients retain the new entry points.
 
 ### Fixed
 
@@ -58,6 +69,10 @@ All notable changes to this project will be documented in this file.
   turn IDs.
 - Doctor separates stale transport-name notes from health warnings and explains
   ambiguous same-family instances.
+
+### Security
+
+- Updated `tokio` to `1.53.3` to address `RUSTSEC-2026-0386`.
 
 ## [1.11.4] - 2026-10-22
 

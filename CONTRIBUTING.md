@@ -21,7 +21,7 @@ See [SECURITY.md](SECURITY.md) and use the private reporting path there.
 
 Requirements:
 - Rust 1.85+
-- Windows, or Linux for the Unix transport in current source (release GNU binaries require glibc >= 2.39)
+- Windows, or Linux for the Unix transport (release GNU binaries require glibc >= 2.39)
 - A local ChatGPT browser-extension service and connected extension for live testing
 
 Build and test:
@@ -111,7 +111,7 @@ Maintainer-only. See [docs/release-process.md](docs/release-process.md) for the 
    plugin validation and npm package-content checks.
 4. Commit the release directly on `main` and push it.
 5. Tag from `main`: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
-6. The current source release workflow builds Windows and Linux GNU binaries
+6. The release workflow builds Windows and Linux GNU binaries
    (x64 + arm64; Linux glibc >= 2.39), generates
    checksums and attestations, stages and publishes the GitHub Release, embeds
    those checksums into the npm package, then publishes npm with provenance. If

@@ -63,9 +63,9 @@ the client reports spawn failures, paste the `command` from
 
 ### Linux and WSL
 
-Current source includes Linux GNU x64/arm64 packages and Unix sockets under
-`/tmp/codex-browser-use/*.sock`; release binaries require glibc >= 2.39. These
-changes are not yet published or live-verified. WSL Linux sockets and Windows
+v1.12.0 includes Linux GNU x64/arm64 packages and Unix sockets under
+`/tmp/codex-browser-use/*.sock`; release binaries require glibc >= 2.39. The
+Linux extension path has not been live-verified. WSL Linux sockets and Windows
 named pipes are separate transports: WSL does not make them interchangeable.
 
 When using a Windows install from WSL, point the client at the Windows executable:
