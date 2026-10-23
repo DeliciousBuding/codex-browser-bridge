@@ -71,11 +71,11 @@ or Chrome instances by pipe name.
 ## Profiles
 
 The plugin default is `full`: modern clients defer schemas through tool search.
-Current source counts are `basic` 45, `network` 63, and `full` 64. Clients
+v1.12.0 counts are `basic` 45, `network` 63, and `full` 64. Clients
 without tool search can set `CODEX_BRIDGE_PROFILE=basic` or `network` when a
 smaller surface is intentional.
 
-The current source also exposes `codex_clipboard`, `codex_webmcp`, and
+v1.12.0 also exposes `codex_clipboard`, `codex_webmcp`, and
 `codex_content_export`; read their MCP schemas before use. They are
 bridge-native contracts with explicit bounds, not claims that every official
 app-side policy or artifact service is inherited.
@@ -84,6 +84,6 @@ app-side policy or artifact service is inherited.
 
 Chrome and Edge are tested. Brave, Opera, and Vivaldi use the same
 Chromium/CDP pipeline but are not live-tested by this project. Linux GNU x64
-and arm64 Unix transport is in current source and requires glibc >= 2.39 in
-published binaries; no release or live verification exists yet. A compiling
+and arm64 Unix transport ships in v1.12.0 and requires glibc >= 2.39 for
+published binaries; live extension verification is still pending. A compiling
 macOS target is not a runtime support claim.

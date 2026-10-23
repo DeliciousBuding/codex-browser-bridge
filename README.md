@@ -6,7 +6,7 @@
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
     Let Claude Code and other MCP agents control your existing browser profile through the ChatGPT desktop app's browser extension.
-    <br>64 MCP tools in current source. Pure Rust. Single binary.
+    <br>64 MCP tools. Pure Rust. Single binary.
   </p>
 </p>
 
@@ -37,9 +37,8 @@ No browser profile copying. No WebDriver. No remote setup. It discovers the
 each live browser-extension instance, speaks the same JSON-RPC protocol, and
 exposes 64 MCP tools for browser automation.
 
-This README describes current source, including unreleased changes. The published
-v1.11.4 package has 52 tools and Windows binaries. Linux packaging and the new
-tools below require a build from this checkout until a new release is published.
+This README describes v1.12.0: 64 MCP tools, with Windows and Linux GNU
+packages built from the same tagged source.
 
 The goal is complete browser capability access for non-Codex agents. Coverage
 is tracked by method and semantics in [the parity matrix](docs/official-parity.md);
@@ -98,8 +97,8 @@ package) `26.1016.8120.0` and Edge extension `1.26.1020.11845`.
 | Brave / Opera / Vivaldi | Expected to use the same Chromium/CDP pipeline, but not yet live-tested |
 | MCP `2024-11-05` … `2025-11-25` | Supported legacy lifecycle |
 | MCP `2026-07-28` | Supported stateless lifecycle and discovery |
-| Windows x64 | Current source passed the 17-check synthetic-tab Edge smoke; this is not full-surface parity |
-| Windows arm64 | Existing published binary; current source not live-tested |
+| Windows x64 | v1.12.0 passed the 18-check synthetic-tab Edge smoke; this is not full-surface parity |
+| Windows arm64 | Published binary; not live-tested for this release |
 | Linux GNU x64 | Full native Rust/Node gates, release build, and no-browser doctor passed on Ubuntu 24.04 / glibc 2.39; extension not live-tested |
 | Linux GNU arm64 | `cargo build --release --locked` passed under arm64 QEMU; no arm64 runtime or extension live test |
 | macOS | Unix code compilation alone does not establish runtime support; no published binary or live verification |
@@ -165,7 +164,7 @@ The first MCP start can take a few seconds while `npx` fills its cache. After
 that, the plugin reuses the cached package, or the globally installed command
 when one is already on `PATH`.
 
-The plugin defaults to the full 64-tool source surface because Claude Code enables MCP
+The plugin defaults to the full 64-tool surface because Claude Code enables MCP
 tool search by default: only server instructions and tool names enter the
 initial context, and schemas are loaded on demand. `codex_doctor` is the only
 schema marked `alwaysLoad`. The companion skill then loads one reference file
@@ -538,7 +537,7 @@ See [ROADMAP.md](ROADMAP.md). Highlights:
 
 - optional live E2E harness for the ChatGPT desktop app + Chrome/Edge (`scripts/live-e2e.ps1`)
 - typed tool result schemas
-- Linux Unix socket transport is in current source; fresh live verification and publication remain pending. macOS needs a real runtime test.
+- Linux Unix socket transport and GNU x64/arm64 packages ship in v1.12.0; live extension verification remains pending. macOS needs a real runtime test.
 
 The official capability matrix and drift baseline live in
 [docs/official-parity.md](docs/official-parity.md) and
@@ -549,7 +548,7 @@ The official capability matrix and drift baseline live in
 - [examples/](examples/) — MCP configs for Claude Code, Cursor, OpenClaw, Hermes Agent
 - [.claude-plugin/](.claude-plugin/plugin.json) — Claude Code plugin and marketplace metadata
 - [skills/codex-browser/](skills/codex-browser/SKILL.md) — Agent skill (LLM usage guide)
-- [ROADMAP.md](ROADMAP.md) — Published history and current source roadmap
+- [ROADMAP.md](ROADMAP.md) — Release history and roadmap
 - [CHANGELOG.md](CHANGELOG.md) — Release history
 - [CONTRIBUTING.md](CONTRIBUTING.md) — Dev setup and conventions
 - [docs/release-process.md](docs/release-process.md) — Tag, changelog, GitHub Release, and npm publishing rules

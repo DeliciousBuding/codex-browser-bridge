@@ -6,7 +6,7 @@
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
     让 Claude Code 和其他 MCP Agent 通过 ChatGPT 桌面应用的浏览器扩展控制你现有的浏览器配置。
-    <br>当前源码 64 个 MCP 工具。纯 Rust。单文件二进制。
+    <br>64 个 MCP 工具。纯 Rust。单文件二进制。
   </p>
 </p>
 
@@ -36,8 +36,8 @@
 `codex-browser-use` 本地传输，识别每个实时浏览器扩展实例，使用相同的
 JSON-RPC 协议，暴露 64 个 MCP 工具用于浏览器自动化。
 
-本文描述当前源码，包含尚未发布的改动。已发布 v1.11.4 为 52 个工具和 Windows
-二进制；下述 Linux 分发与新增工具在下一次发版前需要从源码构建。
+本文描述 v1.12.0：64 个 MCP 工具，Windows 与 Linux GNU 包均由同一份带 tag 的
+源码构建。
 
 项目目标是让非 Codex agent 获得完整浏览器能力。具体方法与语义覆盖见
 [能力对齐表](docs/official-parity.md)；工具数量或新增 CLI 入口都不代表已完整对齐。
@@ -94,8 +94,8 @@ npm i -g @delicious233/codex-browser-bridge
 | Brave / Opera / Vivaldi | 预计使用相同 Chromium/CDP 管线，但尚未实测 |
 | MCP `2024-11-05` … `2025-11-25` | 支持 Legacy 生命周期 |
 | MCP `2026-07-28` | 支持无状态生命周期与 discovery |
-| Windows x64 | 当前源码通过 17 项合成标签页 Edge 冒烟；这不等于完整能力面验证 |
-| Windows arm64 | 已有发布二进制；当前源码未实测 |
+| Windows x64 | v1.12.0 通过 18 项合成标签页 Edge 冒烟；这不等于完整能力面验证 |
+| Windows arm64 | 已发布二进制；本次发布未实测 |
 | Linux GNU x64 | Ubuntu 24.04 / glibc 2.39 上通过全量原生 Rust/Node 门禁、release 构建和无浏览器 doctor；未做扩展 live 验证 |
 | Linux GNU arm64 | arm64 QEMU 下通过 `cargo build --release --locked`；未做 arm64 运行时或扩展 live 验证 |
 | macOS | Unix 代码可编译不代表运行时支持；无发布二进制或实测记录 |
@@ -145,7 +145,7 @@ Claude Code 2.1.292 及以上支持一条命令添加 marketplace 并安装插�
 首次启动 MCP 时，`npx` 需要几秒钟填充缓存。之后会复用缓存包；如果 PATH 上已有
 全局安装的 `codex-browser-bridge`，也会直接复用。
 
-插件默认暴露当前源码完整 64 个工具，因为 Claude Code 默认启用 MCP tool search：
+插件默认暴露完整 64 个工具，因为 Claude Code 默认启用 MCP tool search：
 启动时只加载 server instructions 和工具名，具体 schema 按需发现；
 `codex_doctor` 是唯一标记 `alwaysLoad` 的 schema。随插件安装的 Skill 也只按
 任务读取一个参考文件，不再一次加载完整工具手册。
@@ -349,7 +349,7 @@ CUA 指针移动采用有上限的无 ack 窗口：当前扩展会执行 `mouseM
 
 ## CLI 用法
 
-当前源码还包括 `codex_clipboard`（session 虚拟剪贴板）、`codex_webmcp`（实验性的顶层文档注册/调用）和 `codex_content_export`（有界本地 GSuite/YouTube 导出）。
+本版本还包括 `codex_clipboard`（session 虚拟剪贴板）、`codex_webmcp`（实验性的顶层文档注册/调用）和 `codex_content_export`（有界本地 GSuite/YouTube 导出）。
 
 ```bash
 # MCP 模式（默认）

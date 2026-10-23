@@ -1,6 +1,6 @@
 [package]
 name = "codex-browser-bridge"
-version = "1.11.4"
+version = "1.12.0"
 edition = "2021"
 license = "MIT"
 description = "MCP server that exposes the ChatGPT desktop app's browser-extension bridge."

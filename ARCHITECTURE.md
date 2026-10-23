@@ -18,11 +18,12 @@ Claude plugin marketplace ──installs──▶ skill + MCP config
 MCP client ──stdio JSON-RPC──▶ bridge ──local transport──▶ ChatGPT extension ──CDP──▶ Chromium browser
 ```
 
-Published v1.11.4 binaries are Windows-only. Current source adds Linux GNU x64
-and arm64 packaging and native CI jobs (glibc >= 2.39 for release binaries).
-Linux discovery uses `/tmp/codex-browser-use/*.sock`. Unix runtime support must
-be verified against an actual local extension service; a compiling macOS target
-does not establish macOS support. These source changes are not yet released.
+v1.12.0 publishes Windows x64/arm64 and Linux GNU x64/arm64 binaries
+(glibc >= 2.39 for the Linux release builds). Linux discovery uses
+`/tmp/codex-browser-use/*.sock`, with native Rust/Node gates on Ubuntu 24.04 x64
+and arm64. Unix runtime support has not been verified against a live Linux
+extension service, and a compiling macOS target does not establish macOS
+support.
 
 The repository is both the Claude plugin source and the generic MCP server
 source. A Claude plugin marketplace distributes the manifest, progressive

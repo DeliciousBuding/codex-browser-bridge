@@ -6,7 +6,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@delicious233/codex-browser-bridge@1.11.4",
+        "@delicious233/codex-browser-bridge@1.12.0",
         "--mode",
         "mcp"
       ],
