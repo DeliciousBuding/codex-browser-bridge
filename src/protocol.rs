@@ -31,7 +31,7 @@ impl Request {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Response {
     pub id: Option<u64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present_result")]
     pub result: Option<Box<RawValue>>,
     #[serde(default)]
     pub error: Option<RpcError>,
@@ -41,6 +41,16 @@ pub struct Response {
     /// CDP event params. Present only on event frames.
     #[serde(default)]
     pub params: Option<Value>,
+}
+
+// Option<T>'s normal deserializer collapses explicit JSON null and a missing
+// field. JSON-RPC void methods legitimately return `result: null`; preserve
+// that presence while still rejecting malformed envelopes with neither field.
+fn present_result<'de, D>(deserializer: D) -> std::result::Result<Option<Box<RawValue>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Box::<RawValue>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -119,6 +129,16 @@ pub fn with_session_params(session_id: &str, turn_id: &str, params: Option<Value
 mod tests {
     use super::*;
     use tokio::io::duplex;
+
+    #[test]
+    fn response_preserves_explicit_null_and_distinguishes_missing_result() {
+        let void: Response = serde_json::from_str(r#"{"id":1,"result":null}"#).unwrap();
+        assert_eq!(void.result.unwrap().get(), "null");
+        let missing: Response = serde_json::from_str(r#"{"id":1}"#).unwrap();
+        assert!(missing.result.is_none());
+        let object: Response = serde_json::from_str(r#"{"id":1,"result":{}}"#).unwrap();
+        assert_eq!(object.result.unwrap().get(), "{}");
+    }
 
     #[tokio::test]
     async fn frame_roundtrip_uses_little_endian_length() {

@@ -15,7 +15,8 @@ const {
   parseChecksumLine,
   proxyForUrl,
   requestBuffer,
-  resolveWindowsArch,
+  resolveTarget,
+  runtimeGlibc,
   sha256,
 } = require("./install");
 const { requiredFilesForEnv } = require("./check-package");
@@ -89,10 +90,20 @@ async function run() {
     assert.strictEqual(embeddedChecksum("missing.exe", tmp), null);
 
     assert.strictEqual(sha256(Buffer.from("hello")), "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
-    assert.strictEqual(resolveWindowsArch("win32", "x64"), "amd64");
-    assert.strictEqual(resolveWindowsArch("win32", "arm64"), "arm64");
-    assert.throws(() => resolveWindowsArch("linux", "x64"), /only supports Windows/);
-    assert.throws(() => resolveWindowsArch("win32", "ia32"), /does not ship/);
+    assert.deepStrictEqual(resolveTarget("win32", "x64"), { asset: "codex-browser-bridge.exe", executable: "codex-browser-bridge.exe" });
+    assert.deepStrictEqual(resolveTarget("win32", "arm64"), { asset: "codex-browser-bridge-arm64.exe", executable: "codex-browser-bridge.exe" });
+    for (const cpu of ["x64", "arm64"]) {
+      assert.deepStrictEqual(resolveTarget("linux", cpu, "2.39"), {
+        asset: `codex-browser-bridge-linux-${cpu}-gnu`, executable: "codex-browser-bridge",
+      });
+      assert.doesNotThrow(() => resolveTarget("linux", cpu, "2.40"));
+    }
+    for (const libc of [undefined, "musl", "2.38", "1.99", "invalid"]) {
+      assert.throws(() => resolveTarget("linux", "x64", libc), /require glibc >= 2.39/);
+    }
+    assert.throws(() => resolveTarget("darwin", "arm64"), /does not ship binaries for darwin/);
+    assert.throws(() => resolveTarget("win32", "ia32"), /does not ship/);
+    assert.throws(() => resolveTarget("linux", "riscv64", "2.39"), /does not ship/);
 
     await assert.rejects(
       requestBuffer("https://example.test/loop", {
@@ -135,6 +146,8 @@ async function run() {
       "skills/codex-browser/references/dom-input-capture.md",
       "skills/codex-browser/references/network-session.md",
       "skills/codex-browser/references/recovery-safety.md",
+      "skills/codex-browser/references/cli.md",
+      "skills/codex-browser/references/official-parity.md",
     ]);
     assert.deepStrictEqual(requiredFilesForEnv({ CODEX_BRIDGE_REQUIRE_CHECKSUMS: "1" }), [
       "package.json",
@@ -152,6 +165,8 @@ async function run() {
       "skills/codex-browser/references/dom-input-capture.md",
       "skills/codex-browser/references/network-session.md",
       "skills/codex-browser/references/recovery-safety.md",
+      "skills/codex-browser/references/cli.md",
+      "skills/codex-browser/references/official-parity.md",
       "checksums.json",
     ]);
     assert.deepStrictEqual(
@@ -203,7 +218,10 @@ async function run() {
     fs.mkdirSync(path.join(installRoot, "examples"), { recursive: true });
     fs.writeFileSync(
       path.join(installRoot, "checksums.json"),
-      JSON.stringify({ files: { "codex-browser-bridge.exe": binaryHash } })
+      JSON.stringify({ files: {
+        "codex-browser-bridge.exe": binaryHash,
+        "codex-browser-bridge-linux-arm64-gnu": binaryHash,
+      } })
     );
     const embeddedCalls = [];
     const installLogs = [];
@@ -250,7 +268,7 @@ async function run() {
     fs.mkdirSync(path.join(hintsRoot, "skills", "codex-browser"), { recursive: true });
     fs.mkdirSync(path.join(hintsRoot, "examples"), { recursive: true });
     const hintLogs = [];
-    logInstallHints(hintsRoot, (line) => hintLogs.push(line));
+    logInstallHints(hintsRoot, (line) => hintLogs.push(line), undefined, "win32");
     const hintText = hintLogs.join("\n");
     assert.match(hintText, /Claude Code/);
     assert.match(hintText, /claude plugin install codex-browser/);
@@ -263,6 +281,10 @@ async function run() {
     assert.match(hintText, /Hermes Agent/);
     assert.match(hintText, /examples/);
     assert.match(hintText, /where\.exe codex-browser-bridge/);
+    const linuxHints = [];
+    logInstallHints(hintsRoot, (line) => linuxHints.push(line), undefined, "linux");
+    assert.match(linuxHints.join("\n"), /command -v codex-browser-bridge/);
+    assert.doesNotMatch(linuxHints.join("\n"), /PowerShell|where\.exe/);
 
     const fetchedRoot = path.join(tmp, "fetched-root");
     const fetchedOut = path.join(tmp, "fetched-bin");
@@ -293,13 +315,61 @@ async function run() {
       "https://github.com/owner/repo/releases/download/v9.9.9-test.1/codex-browser-bridge-arm64.exe",
     ]);
 
-    const wrapperExe = path.join(__dirname, "..", "bin", "codex-browser-bridge.exe");
+    for (const cpu of ["x64", "arm64"]) {
+      const linuxOut = path.join(tmp, `linux-${cpu}`);
+      const calls = [];
+      const result = await install({
+        platform: "linux", arch: cpu, glibcVersion: "2.39", env: {},
+        packageRoot: cpu === "arm64" ? installRoot : fetchedRoot,
+        binDir: linuxOut, version: "1.10.0", log: () => {},
+        requestBuffer: async (url) => {
+          calls.push(url);
+          return url.endsWith("checksums.txt") ? Buffer.from(`${binaryHash} *codex-browser-bridge-linux-${cpu}-gnu\n`) : binary;
+        },
+      });
+      assert.strictEqual(result.asset, `codex-browser-bridge-linux-${cpu}-gnu`);
+      assert.deepStrictEqual(calls, [
+        ...(cpu === "arm64" ? [] : ["https://github.com/DeliciousBuding/codex-browser-bridge/releases/download/v1.10.0/checksums.txt"]),
+        `https://github.com/DeliciousBuding/codex-browser-bridge/releases/download/v1.10.0/codex-browser-bridge-linux-${cpu}-gnu`,
+      ]);
+      assert.deepStrictEqual(fs.readFileSync(path.join(linuxOut, "codex-browser-bridge")), binary);
+      if (process.platform !== "win32") assert.strictEqual(fs.statSync(result.target).mode & 0o777, 0o755);
+    }
+    await assert.rejects(install({
+      platform: "linux", arch: "x64", glibcVersion: "2.38", env: {},
+      requestBuffer: async () => { throw new Error("must not download on an unsupported libc"); },
+    }), /require glibc >= 2.39/);
+
+    const nativeName = process.platform === "win32" ? "codex-browser-bridge.exe" : "codex-browser-bridge";
+    let nativeSupported = true;
+    try { resolveTarget(process.platform, process.arch, runtimeGlibc()); } catch { nativeSupported = false; }
+    const wrapperExe = path.join(__dirname, "..", "bin", nativeName);
     if (!fs.existsSync(wrapperExe)) {
       const wrapper = spawnSync(process.execPath, [path.join(__dirname, "..", "bin", "codex-browser-bridge.js")], {
         encoding: "utf8",
       });
       assert.strictEqual(wrapper.status, 1);
-      assert.match(wrapper.stderr, /codex-browser-bridge\.exe is missing/);
+      if (process.platform === "linux" && !nativeSupported) {
+        assert.match(wrapper.stderr, /require glibc >= 2.39/);
+      } else {
+        assert.ok(wrapper.stderr.includes(`${nativeName} is missing`), wrapper.stderr);
+      }
+    }
+
+    // Exercise the real Unix wrapper without downloading/running a release.
+    // The isolated shell fixture proves executable selection, argv, and exit
+    // propagation, including an argument that must not be split by a shell.
+    if (process.platform === "linux" && nativeSupported) {
+      const wrapperRoot = path.join(tmp, "wrapper-root");
+      fs.mkdirSync(path.join(wrapperRoot, "bin"), { recursive: true });
+      fs.mkdirSync(path.join(wrapperRoot, "scripts"));
+      fs.copyFileSync(path.join(__dirname, "..", "package.json"), path.join(wrapperRoot, "package.json"));
+      fs.copyFileSync(path.join(__dirname, "install.js"), path.join(wrapperRoot, "scripts", "install.js"));
+      fs.copyFileSync(path.join(__dirname, "..", "bin", "codex-browser-bridge.js"), path.join(wrapperRoot, "bin", "codex-browser-bridge.js"));
+      fs.writeFileSync(path.join(wrapperRoot, "bin", "codex-browser-bridge"), '#!/bin/sh\nprintf \'%s\\n\' "$@"\nexit 7\n', { mode: 0o755 });
+      const wrapper = spawnSync(process.execPath, [path.join(wrapperRoot, "bin", "codex-browser-bridge.js"), "--mode", "argument with spaces"], { encoding: "utf8" });
+      assert.strictEqual(wrapper.status, 7, wrapper.stderr);
+      assert.strictEqual(wrapper.stdout, "--mode\nargument with spaces\n");
     }
 
     await assert.rejects(
@@ -333,8 +403,13 @@ async function run() {
     });
     assert.strictEqual(proxyForUrl("https://github.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: "*" }), null);
     assert.strictEqual(proxyForUrl("https://api.github.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: ".github.com" }), null);
+    assert.strictEqual(proxyForUrl("https://github.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: "github.com:443" }), null);
     assert.deepStrictEqual(
       proxyForUrl("https://objects.githubusercontent.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: ".github.com" }),
+      { host: "127.0.0.1", port: 7897 }
+    );
+    assert.deepStrictEqual(
+      proxyForUrl("https://notgithub.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: ".github.com" }),
       { host: "127.0.0.1", port: 7897 }
     );
     // TLS-terminating proxies are out of scope for the installer.

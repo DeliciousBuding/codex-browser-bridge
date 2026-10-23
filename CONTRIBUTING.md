@@ -8,7 +8,7 @@ Please open an issue using the bug report template. Include:
 
 - The output of `codex-browser-bridge --version`
 - The output of `codex-browser-bridge --mode discover`, with local identifiers redacted
-- ChatGPT desktop app version, browser and extension versions, Windows version
+- ChatGPT desktop app/service version, browser and extension versions, OS and architecture
 - A minimal reproduction (which tool you called, what arguments, what response)
 
 Public issues must not include screenshots, DOM snapshots, tab titles, full private URLs, logged-in page content, tokens, account IDs, or production admin pages. Use GitHub private vulnerability reporting for sensitive repros.
@@ -21,8 +21,8 @@ See [SECURITY.md](SECURITY.md) and use the private reporting path there.
 
 Requirements:
 - Rust 1.85+
-- Windows (the bridge depends on Windows named pipes)
-- ChatGPT desktop app and the ChatGPT browser extension running (for real-pipe testing)
+- Windows, or Linux for the Unix transport in current source (release GNU binaries require glibc >= 2.39)
+- A local ChatGPT browser-extension service and connected extension for live testing
 
 Build and test:
 
@@ -35,7 +35,12 @@ cargo clippy --locked -- -D warnings  # lint
 cargo build --locked --release  # release build
 ```
 
-The default test suite is hermetic. It uses mock pipe streams to simulate the `codex-browser-use` pipe, so `cargo test --locked` runs without a live desktop app. Non-Windows mock E2E tests in `tests/cdp_tools_e2e.rs` run in the Ubuntu CI harness. Optional live E2E against the ChatGPT desktop app and a connected Chromium browser is available with:
+The default test suite is hermetic. It uses mock streams and temporary local
+sockets, so `cargo test --locked` runs without a live desktop app. Linux native
+x64/arm64 jobs are configured for full tests, clippy and release builds. They
+test transport behavior, not a live browser extension. macOS compilation alone
+does not establish runtime support. Optional Windows live E2E against the
+ChatGPT desktop app and a connected Chromium browser is available with:
 
 ```powershell
 .\scripts\live-e2e.ps1 -Url https://example.com
@@ -55,9 +60,14 @@ claude plugin validate --strict .
 
 `.claude-plugin/` and `mcp.json` are the Claude Code plugin surface.
 Codex / ChatGPT desktop use native browser integration and do not install this
-bridge as a plugin. The Claude plugin defaults to the full 52-tool profile
-because Claude Code defers tool schemas through tool search; manual MCP
-examples keep the low-token `basic` profile.
+bridge as a plugin. The Claude plugin and manual JSON examples default to the
+full 64-tool source profile. Clients without tool search can opt into `basic`
+(45 tools) or `network` (63 tools), with the corresponding capability reduction.
+
+Keep method-level coverage in `docs/official-parity.md` accurate. Added tools or
+CLI entrypoints do not establish parity with official locator, session, or
+app-private semantics. Smoke-test each supported transport against its local
+service separately; WSL does not make Linux sockets and Windows pipes interchangeable.
 
 ## Code style
 
@@ -101,7 +111,8 @@ Maintainer-only. See [docs/release-process.md](docs/release-process.md) for the 
    plugin validation and npm package-content checks.
 4. Commit the release directly on `main` and push it.
 5. Tag from `main`: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
-6. The release workflow builds Windows binaries (x64 + arm64), generates
+6. The current source release workflow builds Windows and Linux GNU binaries
+   (x64 + arm64; Linux glibc >= 2.39), generates
    checksums and attestations, stages and publishes the GitHub Release, embeds
    those checksums into the npm package, then publishes npm with provenance. If
    a same-version rerun happens after npm is already published, the workflow

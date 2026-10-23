@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Bridge Locator Fixture</title>
+    <style>
+      body { font-family: sans-serif; margin: 2rem; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Bridge Locator Fixture</h1>
+    <label for="name">Display name</label>
+    <input id="name" placeholder="Ada Lovelace">
+
+    <button id="primary" type="button">Save record</button>
+    <button id="secondary" type="button">Cancel</button>
+
+    <label>
+      <input id="enabled" type="checkbox">
+      Enable feature
+    </label>
+
+    <select id="color">
+      <option value="red">Red</option>
+      <option value="green">Green</option>
+    </select>
+
+    <p id="status">idle</p>
+    <p class="hidden" id="hidden-status">hidden</p>
+    <div id="drag-pad" style="width:160px;height:60px;background:#ddd">Drag pad</div>
+
+    <script>
+      document.querySelector("#primary").addEventListener("click", () => {
+        document.querySelector("#status").textContent = "saved";
+      });
+      document.querySelector("#enabled").addEventListener("change", (event) => {
+        document.querySelector("#status").textContent =
+          event.target.checked ? "enabled" : "disabled";
+      });
+      document.querySelector("#secondary").addEventListener("mouseover", () => {
+        document.querySelector("#status").textContent = "hovered";
+      });
+      document.querySelector("#secondary").addEventListener("click", (event) => {
+        document.querySelector("#status").textContent =
+          event.ctrlKey ? "ctrl-click" : "secondary";
+      });
+      document.querySelector("#secondary").addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        document.querySelector("#status").textContent = "context";
+      });
+      document.addEventListener("wheel", () => {
+        document.querySelector("#status").textContent = "scrolled";
+      }, {passive: true});
+      let dragging = false;
+      document.querySelector("#drag-pad").addEventListener("mousedown", () => {
+        dragging = true;
+        document.querySelector("#status").textContent = "drag-start";
+      });
+      document.addEventListener("mousemove", () => {
+        if (dragging) document.querySelector("#status").textContent = "drag-move";
+      });
+      document.addEventListener("mouseup", () => {
+        if (dragging) {
+          dragging = false;
+          document.querySelector("#status").textContent = "drag-end";
+        }
+      });
+    </script>
+  </body>
+</html>

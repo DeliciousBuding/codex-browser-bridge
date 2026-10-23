@@ -8,11 +8,21 @@ const MIN_CONFIGURABLE_CONTENT_BYTES: usize = 1024;
 
 #[derive(Clone, Copy)]
 pub(super) enum ToolHandler {
+    ListBrowsers,
+    BindBrowser,
+    BrowserHistory,
+    BrowserManagement,
+    BrowserViewport,
+    BrowserVisibility,
+    Clipboard,
+    WebMcp,
+    ContentExport,
     ListTabs,
     CreateTab,
     CloseTab,
     UserTabs,
     ClaimTab,
+    MarkTab,
     Navigate,
     Reload,
     NavigateBack,
@@ -24,6 +34,7 @@ pub(super) enum ToolHandler {
     Fill,
     Evaluate,
     CuaClick,
+    CuaMove,
     CuaType,
     CuaKeypress,
     CuaScroll,
@@ -40,6 +51,7 @@ pub(super) enum ToolHandler {
     Dialog,
     FindElement,
     ClickElement,
+    Locator,
     NavAndWait,
     ClickAndWait,
     FormFill,
@@ -304,10 +316,23 @@ pub(super) fn required_string_value<'a>(args: &'a Value, name: &str) -> anyhow::
         .ok_or_else(|| anyhow::anyhow!("missing required argument: {name}"))
 }
 
-pub(super) fn required_i64(args: &Value, name: &str) -> anyhow::Result<i64> {
+pub(super) fn required_f64(args: &Value, name: &str) -> anyhow::Result<f64> {
     args.get(name)
-        .and_then(Value::as_i64)
-        .ok_or_else(|| anyhow::anyhow!("missing required argument: {name}"))
+        .and_then(Value::as_f64)
+        .ok_or_else(|| anyhow::anyhow!("missing required numeric argument: {name}"))
+}
+
+pub(super) fn required_alias_f64(
+    args: &Value,
+    snake_case: &str,
+    camel_case: &str,
+) -> anyhow::Result<f64> {
+    args.get(snake_case)
+        .or_else(|| args.get(camel_case))
+        .and_then(Value::as_f64)
+        .ok_or_else(|| {
+            anyhow::anyhow!("missing required numeric argument: {snake_case} (or {camel_case})")
+        })
 }
 
 pub(super) fn optional_u64(args: &Value, name: &str) -> anyhow::Result<Option<u64>> {

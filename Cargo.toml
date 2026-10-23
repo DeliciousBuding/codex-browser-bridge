@@ -24,6 +24,9 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 uuid = { version = "1.11", features = ["v4"] }
 toml = "0.8"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 assert_cmd = "2.0"
 criterion = { version = "0.5", features = ["async_tokio"] }

@@ -1,3 +1,5 @@
+use std::sync::{Arc, RwLock};
+
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -20,7 +22,10 @@ const MAX_MCP_LINE_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone)]
 pub struct Server {
-    pub(crate) client: Client,
+    pub(crate) client: Arc<RwLock<Client>>,
+    pub(crate) clipboard: Arc<tokio::sync::Mutex<crate::clipboard::VirtualClipboard>>,
+    pub(crate) webmcp: Arc<crate::webmcp::WebMcpRegistry>,
+    pub(crate) page_assets: crate::page_assets::PageAssetsRegistry,
     pub(crate) tools: Vec<Tool>,
     #[allow(dead_code)]
     profile: ToolProfile,
@@ -35,7 +40,12 @@ impl Server {
             .filter(|t| profile.includes(t.name))
             .collect();
         Self {
-            client,
+            client: Arc::new(RwLock::new(client)),
+            clipboard: Arc::new(tokio::sync::Mutex::new(
+                crate::clipboard::VirtualClipboard::default(),
+            )),
+            webmcp: Arc::new(crate::webmcp::WebMcpRegistry::default()),
+            page_assets: crate::page_assets::PageAssetsRegistry::default(),
             tools,
             profile,
         }
@@ -48,7 +58,12 @@ impl Server {
             .filter(|t| profile.includes(t.name))
             .collect();
         Self {
-            client,
+            client: Arc::new(RwLock::new(client)),
+            clipboard: Arc::new(tokio::sync::Mutex::new(
+                crate::clipboard::VirtualClipboard::default(),
+            )),
+            webmcp: Arc::new(crate::webmcp::WebMcpRegistry::default()),
+            page_assets: crate::page_assets::PageAssetsRegistry::default(),
             tools,
             profile,
         }
@@ -189,6 +204,18 @@ impl Server {
         tools_to_values(&self.tools)
     }
 
+    pub(crate) fn client_snapshot(&self) -> Client {
+        self.client
+            .read()
+            .expect("browser client lock poisoned")
+            .clone()
+    }
+
+    pub(crate) fn replace_client(&self, client: Client) -> Client {
+        let mut current = self.client.write().expect("browser client lock poisoned");
+        std::mem::replace(&mut *current, client)
+    }
+
     pub(crate) fn bridge_runtime_info(&self) -> Value {
         Self::runtime_info_for(
             self.profile,
@@ -241,7 +268,8 @@ impl Server {
         if uri != "codex://tabs" {
             return error_response(Some(id), -32602, &format!("unknown resource uri: {uri}"));
         }
-        match crate::browser::list_tabs(&self.client).await {
+        let client = self.client_snapshot();
+        match crate::browser::list_tabs(&client).await {
             Ok(tabs) => {
                 let text = bounded_text_for_mcp(
                     serde_json::to_string(&tabs).unwrap_or_else(|_| "[]".into()),
@@ -735,8 +763,11 @@ mod tools_call_tests {
     }
 
     async fn no_request(server: &mut DuplexStream, reason: &str) {
-        if let Ok(request) = timeout(NO_REQUEST_GRACE, next_request(server)).await {
-            panic!("{reason}: unexpected pipe request {request}");
+        if let Ok(Ok(frame)) = timeout(NO_REQUEST_GRACE, protocol::decode_frame(server)).await {
+            panic!(
+                "{reason}: unexpected pipe request {}",
+                String::from_utf8_lossy(&frame)
+            );
         }
     }
 

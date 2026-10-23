@@ -30,7 +30,7 @@ Claude 插件默认使用 `full` profile，因为 Claude Code 会通过 tool sea
 - `execute_cdp_generic()` 是显式低风险方法 allowlist 的 raw CDP 入口；不要用域名前缀放宽，高风险能力必须走专用受控工具
 
 ### 2. MCP 层（`src/mcp/` 目录）
-- `types.rs`：`ToolHandler` 枚举新增 variant（当前 52 个工具）
+- `types.rs`：`ToolHandler` 枚举新增 variant（当前 64 个工具）
 - `handlers.rs`：`handle_tool_call` 新增 match arm + `handle_*` 方法
 - `schema.rs`：`registered_tools()` 新增工具定义
 - `profiles.rs`：如需加入 profile，更新 `BASIC_TOOLS` / `NETWORK_TOOLS` 数组
@@ -51,7 +51,7 @@ Claude 插件默认使用 `full` profile，因为 Claude Code 会通过 tool sea
 - Mock pipe / E2E harness 等待必须 bounded：正向 pipe read 和 spawned task join 用明确 timeout，负向“不得发 pipe 请求”断言用短 grace window；live E2E 的 doctor preflight 和 cleanup MCP 调用也必须有 timeout。
 
 ### 6. 工具数量
-- 当前：52 个 MCP 工具
+- 当前：64 个 MCP 工具；profile 为 basic=45、network=63、full=64
 - 新增工具命名：`codex_<domain>_<action>`，group tag 放描述开头
 
 ## 构建
@@ -90,17 +90,18 @@ src/
     lifecycle.rs MCP 版本协商 + 双纪元生命周期（legacy initialize / 2026-07-28 stateless、server/discover、resultType/缓存提示、-32022）
     types.rs    ToolHandler, Tool, ToolHints(annotations), Content, arg extractors, 响应构建
     schema.rs   registered_tools(), 工具注册
-    handlers.rs handle_tool_call + 52 个 handle_* 方法
+    handlers.rs handle_tool_call + 64 个 handle_* 方法
     profiles.rs ToolProfile (basic/network/full)
   browser.rs    CDP + 浏览器操作（list_tabs, navigate, screenshot, click, etc.）
   client.rs     Named pipe 传输, sticky attach, execute_cdp
   security.rs   URL scheme 验证 + 文件路径穿越防护
   doctor.rs     Pipe 诊断（枚举 + 探活 + 延迟测量）
-  cli.rs        交互式调试 REPL
-  discovery.rs  Named pipe 自动发现
+  registry.rs   浏览器实例清单、身份识别与 fail-closed 选择
+  cli.rs        tools/call/batch 命令和交互式调试 REPL
+  discovery.rs  Windows named pipe / Linux Unix socket 自动发现
   protocol.rs   Length-prefixed JSON-RPC 帧编解码
   error.rs      BridgeError 枚举
-  pipe.rs       Windows named pipe 连接
+  pipe.rs       Windows named pipe / Unix socket 连接
   logging.rs    日志初始化
 ```
 

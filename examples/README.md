@@ -7,7 +7,7 @@ steps differ.
 ## Recommended: install the plugin
 
 Install the plugin where available. It fetches the pinned npm package and
-Windows binary through `npx` on first use, and installs both the MCP server
+platform binary through `npx` on first use, and installs both the MCP server
 entry and the progressive `codex-browser` skill:
 
 ```powershell
@@ -15,10 +15,12 @@ entry and the progressive `codex-browser` skill:
 claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
 ```
 
-The Claude plugin uses the `full` 52-tool profile because Claude Code defers
+The Claude plugin uses the `full` 61-tool source profile because Claude Code defers
 tool schemas through tool search. The manual JSON examples below are the
 fallback for MCP clients without plugin or tool-search support and use the
-34-tool `basic` profile. They require a global `npm i -g` install or an
+`full` profile so they expose the same source capability set. Set `basic` (42)
+or `network` (60) only when deliberately reducing the surface. They require a
+global `npm i -g` install or an
 absolute command path.
 
 Codex and ChatGPT desktop already control the browser extension natively. Do
@@ -59,10 +61,14 @@ GUI-launched clients do not always inherit the same `PATH` as your terminal. If
 the client reports spawn failures, paste the `command` from
 `install.suggested_mcp_config` in the doctor output.
 
-### WSL
-The npm package is Windows-only (`os: win32`), so `npm i -g` from a Linux WSL
-environment will be rejected by npm. Install on Windows, then point the WSL MCP
-client at the Windows executable:
+### Linux and WSL
+
+Current source includes Linux GNU x64/arm64 packages and Unix sockets under
+`/tmp/codex-browser-use/*.sock`; release binaries require glibc >= 2.39. These
+changes are not yet published or live-verified. WSL Linux sockets and Windows
+named pipes are separate transports: WSL does not make them interchangeable.
+
+When using a Windows install from WSL, point the client at the Windows executable:
 
 ```json
 {

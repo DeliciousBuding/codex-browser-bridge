@@ -1,5 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
+use codex_browser_bridge::registry::BrowserSelector;
 use codex_browser_bridge::{cli, client, config, discovery, doctor, logging, mcp};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -21,6 +22,12 @@ struct Args {
     #[arg(long)]
     pipe: Option<String>,
 
+    #[arg(long)]
+    browser_family: Option<String>,
+
+    #[arg(long)]
+    browser_instance: Option<String>,
+
     #[arg(long, value_enum)]
     profile: Option<Profile>,
 
@@ -32,6 +39,13 @@ struct Args {
 
     #[arg(long)]
     max_image_bytes: Option<usize>,
+
+    /// Maximum JSON bytes per command result (not a token count).
+    #[arg(long, global = true, default_value = "16384", value_parser = cli::parse_output_budget)]
+    max_output_bytes: usize,
+
+    #[command(subcommand)]
+    command: Option<cli::Command>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -45,6 +59,24 @@ enum Profile {
 async fn main() -> anyhow::Result<()> {
     logging::init();
     let args = Args::parse_from(normalized_args(std::env::args()));
+    if args.command.is_some() && !matches!(args.mode, Mode::Mcp) {
+        anyhow::bail!("commands cannot be combined with --mode; omit --mode for tools/call/batch");
+    }
+    let config = config::Config::load();
+    let selector = BrowserSelector::new(
+        args.browser_family
+            .clone()
+            .or(config.browser_family.clone())
+            .or_else(|| std::env::var("CODEX_BRIDGE_BROWSER_FAMILY").ok()),
+        args.browser_instance
+            .clone()
+            .or(config.browser_instance.clone())
+            .or_else(|| std::env::var("CODEX_BRIDGE_BROWSER_INSTANCE").ok()),
+    );
+    selector.validate()?;
+    if args.pipe.is_some() && !selector.is_empty() {
+        anyhow::bail!("--pipe cannot be combined with a browser family or instance selector");
+    }
 
     match args.mode {
         Mode::Discover => {
@@ -57,9 +89,8 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&pipes)?);
         }
         Mode::Mcp => {
-            let client = client::Client::lazy(args.pipe.clone());
+            let client = client::Client::lazy_with_selector(args.pipe.clone(), selector);
             // Precedence: CLI flags > config file > env > default.
-            let config = config::Config::load();
             if let Some(base) = args.upload_base.clone().or(config.upload_base) {
                 std::env::set_var("CODEX_BRIDGE_UPLOAD_BASE", base);
             }
@@ -94,10 +125,14 @@ async fn main() -> anyhow::Result<()> {
                 ),
                 None => mcp::Server::new(client),
             };
-            server.run_stdio().await?;
+            if let Some(command) = args.command {
+                cli::run_command(&server, command, args.max_output_bytes).await?;
+            } else {
+                server.run_stdio().await?;
+            }
         }
         Mode::Cli => {
-            let client = client::Client::connect(args.pipe.as_deref())
+            let client = client::Client::connect_with_selector(args.pipe.as_deref(), selector)
                 .await
                 .context("failed to connect to the ChatGPT browser-extension pipe")?;
             cli::run_cli(client).await?;
@@ -119,9 +154,17 @@ where
         .map(|arg| match arg.as_str() {
             "-mode" => "--mode".to_string(),
             "-pipe" => "--pipe".to_string(),
+            "-browser-family" => "--browser-family".to_string(),
+            "-browser-instance" => "--browser-instance".to_string(),
             "-version" => "--version".to_string(),
             _ if arg.starts_with("-mode=") => arg.replacen("-mode=", "--mode=", 1),
             _ if arg.starts_with("-pipe=") => arg.replacen("-pipe=", "--pipe=", 1),
+            _ if arg.starts_with("-browser-family=") => {
+                arg.replacen("-browser-family=", "--browser-family=", 1)
+            }
+            _ if arg.starts_with("-browser-instance=") => {
+                arg.replacen("-browser-instance=", "--browser-instance=", 1)
+            }
             _ => arg,
         })
         .collect()

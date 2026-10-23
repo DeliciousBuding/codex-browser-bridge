@@ -99,12 +99,115 @@ pub async fn claim_user_tab(client: &Client, tab_id: &str) -> Result<Tab> {
         .await?;
     let tab: Tab = serde_json::from_str(raw.get())
         .map_err(|err| BridgeError::Protocol(format!("decode claimUserTab: {err}")))?;
-    let _ = client
+    client
         .send_request("attach", Some(json!({ "tabId": id })))
-        .await;
-    // Mark as attached so subsequent CDP calls skip the detach+attach cycle
+        .await?;
+    // Mark as attached only after attach succeeds so subsequent CDP calls can
+    // safely skip the detach+attach cycle.
     client.mark_attached(id).await;
     Ok(tab.normalize())
+}
+
+pub async fn get_user_history(client: &Client, params: Value) -> Result<Value> {
+    let raw = client.send_request("getUserHistory", Some(params)).await?;
+    serde_json::from_str(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("decode getUserHistory: {err}")))
+}
+
+pub async fn mark_tab(client: &Client, tab_id: &str, status: &str) -> Result<()> {
+    let id = parse_tab_id("markTab", tab_id)?;
+    client
+        .send_request("markTab", Some(json!({ "tabId": id, "status": status })))
+        .await
+        .map(|_| ())
+}
+
+pub async fn browser_management(
+    client: &Client,
+    namespace: &str,
+    method: &str,
+    args: Vec<Value>,
+) -> Result<Value> {
+    let raw = client
+        .send_request(
+            "executeUnhandledCommand",
+            Some(json!({
+                "type": "browser_management_call",
+                // Commands are connection-scoped; the extension ignores this
+                // app-level browser id and uses the pipe's browser instance.
+                "browser_id": "0",
+                "namespace": namespace,
+                "method": method,
+                "args": args
+            })),
+        )
+        .await?;
+    parse_native_result(&raw, "browser_management_call")
+}
+
+pub async fn browser_management_audit(client: &Client) -> Result<Value> {
+    let raw = client
+        .send_request(
+            "executeUnhandledCommand",
+            Some(json!({
+                "type": "browser_management_get_audit_trail",
+                "browser_id": "0"
+            })),
+        )
+        .await?;
+    parse_native_result(&raw, "browser_management_get_audit_trail")
+}
+
+pub async fn browser_viewport(
+    client: &Client,
+    width: Option<u64>,
+    height: Option<u64>,
+) -> Result<()> {
+    let command = match (width, height) {
+        (Some(width), Some(height)) => json!({
+            "type": "browser_viewport_set",
+            "browser_id": "0",
+            "width": width,
+            "height": height
+        }),
+        (None, None) => json!({
+            "type": "browser_viewport_reset",
+            "browser_id": "0"
+        }),
+        _ => {
+            return Err(BridgeError::User(
+                "viewport width and height must be provided together, or both omitted to reset"
+                    .into(),
+            ));
+        }
+    };
+    client
+        .send_request("executeUnhandledCommand", Some(command))
+        .await
+        .map(|_| ())
+}
+
+pub async fn browser_visibility(client: &Client, visible: Option<bool>) -> Result<Value> {
+    let command = match visible {
+        Some(visible) => json!({
+            "type": "browser_visibility_set",
+            "browser_id": "0",
+            "visible": visible
+        }),
+        None => json!({
+            "type": "browser_visibility_get",
+            "browser_id": "0"
+        }),
+    };
+    let raw = client
+        .send_request("executeUnhandledCommand", Some(command))
+        .await?;
+    parse_native_result(&raw, "browser_visibility")
+}
+
+fn parse_native_result(raw: &RawValue, command: &str) -> Result<Value> {
+    serde_json::from_str(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("decode {command}: {err}")))
 }
 
 pub async fn close_tab(client: &Client, tab_id: &str) -> Result<()> {
@@ -234,7 +337,12 @@ pub async fn dom_snapshot(client: &Client, tab_id: &str) -> Result<String> {
                 })?;
             let text =
                 runtime_value_string(&fallback)?.unwrap_or_else(|| fallback.get().to_string());
-            Ok(format!("/* fallback: plain text */\n{text}"))
+            Ok(json!({
+                "mode": "text-fallback",
+                "text": text,
+                "primary_error": primary.to_string()
+            })
+            .to_string())
         }
     }
 }
@@ -246,12 +354,28 @@ pub async fn screenshot(
     format: &str,
     quality: Option<u64>,
 ) -> Result<String> {
-    let _ = full_page;
     let id = parse_tab_id("screenshot", tab_id)?;
     let mut params = serde_json::Map::new();
     params.insert("format".into(), json!(format));
     if format == "jpeg" {
         params.insert("quality".into(), json!(quality.unwrap_or(80).min(100)));
+    }
+    if full_page {
+        let metrics = client
+            .execute_cdp(id, "Page.getLayoutMetrics", None)
+            .await?;
+        let (width, height) = content_size(&metrics)?;
+        params.insert("captureBeyondViewport".into(), json!(true));
+        params.insert(
+            "clip".into(),
+            json!({
+                "x": 0,
+                "y": 0,
+                "width": width,
+                "height": height,
+                "scale": 1
+            }),
+        );
     }
     let raw = client
         .execute_cdp(
@@ -261,6 +385,23 @@ pub async fn screenshot(
         )
         .await?;
     screenshot_data(&raw)
+}
+
+fn content_size(raw: &RawValue) -> Result<(f64, f64)> {
+    let value: Value = serde_json::from_str(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("decode layout metrics: {err}")))?;
+    let size = value
+        .get("cssContentSize")
+        .or_else(|| value.get("contentSize"))
+        .ok_or_else(|| BridgeError::Protocol("layout metrics omitted content size".into()))?;
+    let width = size.get("width").and_then(Value::as_f64);
+    let height = size.get("height").and_then(Value::as_f64);
+    match (width, height) {
+        (Some(width), Some(height)) if width > 0.0 && height > 0.0 => Ok((width, height)),
+        _ => Err(BridgeError::Protocol(
+            "layout metrics contained invalid content size".into(),
+        )),
+    }
 }
 
 /// Bring a tab to the foreground via `Page.bringToFront`.
@@ -315,8 +456,8 @@ pub async fn wait_for_element(
     let id = parse_tab_id("wait_for_element", tab_id)?;
     let timeout_ms = bounded_duration_ms("timeout_ms", timeout_ms, 10_000, MAX_WAIT_MS)?;
     let deadline = deadline_from_now(timeout_ms)?;
-    let escaped = selector.replace('\\', "\\\\").replace('`', "\\`");
-    let expr = format!("document.querySelector(`{escaped}`) !== null");
+    let selector_json = json_escaped(selector);
+    let expr = format!("document.querySelector({selector_json}) !== null");
 
     loop {
         if Instant::now() >= deadline {
@@ -388,21 +529,17 @@ pub async fn wait_for_url(
     }
 }
 
-/// Hover over an element by CSS selector. Dispatches mouseover + mousemove via JS.
+/// Hover over an element by CSS selector using the same resolver and trusted
+/// pointer path as locator clicks.
 pub async fn hover(client: &Client, tab_id: &str, selector: &str) -> Result<()> {
     let id = parse_tab_id("hover", tab_id)?;
-    let escaped = selector.replace('\\', "\\\\").replace('`', "\\`");
-    let expr = format!(
-        "(function(){{var e=document.querySelector(`{escaped}`);if(!e)return{{ok:false,error:'element not found'}};e.dispatchEvent(new MouseEvent('mouseover',{{bubbles:true}}));e.dispatchEvent(new MouseEvent('mousemove',{{bubbles:true}}));return{{ok:true}}}})()"
-    );
-    let raw = client
-        .execute_cdp(
-            id,
-            "Runtime.evaluate",
-            Some(json!({ "expression": expr, "returnByValue": true })),
-        )
-        .await?;
-    parse_action_result(&raw, "hover")
+    let (x, y) = pointer_target(client, tab_id, selector).await?;
+    crate::pointer::move_to(client, id, x, y, &[]).await?;
+    // Pointer movement is dispatched without waiting for an extension ack.
+    // Give the renderer a short turn to process mouseover before a subsequent
+    // locator read observes hover-driven DOM changes.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    Ok(())
 }
 
 /// Render the page to PDF via `Page.printToPDF`. Returns base64 byte count.
@@ -580,23 +717,19 @@ pub async fn select_option(
     selector: &str,
     value: &str,
 ) -> Result<()> {
-    let id = parse_tab_id("select_option", tab_id)?;
-    let sel = serde_json::to_string(selector).unwrap_or_else(|_| "null".into());
-    let val = serde_json::to_string(value).unwrap_or_else(|_| "null".into());
-    let expr = format!(
-        "(function(){{var s=document.querySelector({sel});if(!s)return{{ok:false,error:'element not found'}};s.value={val};s.dispatchEvent(new Event('input',{{bubbles:true}}));s.dispatchEvent(new Event('change',{{bubbles:true}}));return{{ok:true}}}})()"
-    );
-    let raw = client
-        .execute_cdp(
-            id,
-            "Runtime.evaluate",
-            Some(json!({ "expression": expr, "returnByValue": true })),
-        )
-        .await?;
-    parse_action_result(&raw, "select_option")
+    let spec = json!({
+        "action": "select_option",
+        "selector": selector,
+        "value": value,
+        "strict": false,
+        "nth": 0
+    });
+    locator(client, tab_id, spec).await.map(|_| ())
 }
 
-/// Drag from one point to another via CDP mouse events (down → interpolated moves → up).
+/// Drag through the official CUA path shape. Legacy from/to calls become a
+/// two-point path; the browser receives exactly those points rather than a
+/// bridge-invented interpolation.
 pub async fn drag(
     client: &Client,
     tab_id: &str,
@@ -605,35 +738,23 @@ pub async fn drag(
     to_x: i64,
     to_y: i64,
 ) -> Result<()> {
+    drag_path(
+        client,
+        tab_id,
+        vec![(from_x as f64, from_y as f64), (to_x as f64, to_y as f64)],
+        &[],
+    )
+    .await
+}
+
+pub async fn drag_path(
+    client: &Client,
+    tab_id: &str,
+    path: Vec<(f64, f64)>,
+    keys: &[String],
+) -> Result<()> {
     let id = parse_tab_id("drag", tab_id)?;
-    client
-        .execute_cdp(
-            id,
-            "Input.dispatchMouseEvent",
-            Some(json!({ "type": "mousePressed", "x": from_x, "y": from_y, "button": "left", "clickCount": 1 })),
-        )
-        .await?;
-    let steps = 5;
-    for i in 1..=steps {
-        let t = i as f64 / steps as f64;
-        let x = from_x as f64 + (to_x as f64 - from_x as f64) * t;
-        let y = from_y as f64 + (to_y as f64 - from_y as f64) * t;
-        client
-            .execute_cdp(
-                id,
-                "Input.dispatchMouseEvent",
-                Some(json!({ "type": "mouseMoved", "x": x as i64, "y": y as i64 })),
-            )
-            .await?;
-    }
-    client
-        .execute_cdp(
-            id,
-            "Input.dispatchMouseEvent",
-            Some(json!({ "type": "mouseReleased", "x": to_x, "y": to_y, "button": "left", "clickCount": 1 })),
-        )
-        .await
-        .map(|_| ())
+    crate::pointer::drag(client, id, &path, keys).await
 }
 
 /// Screenshot a single element by clipping to its bounding rect.
@@ -986,17 +1107,8 @@ pub async fn evaluate(client: &Client, tab_id: &str, expression: &str) -> Result
 
 pub async fn click(client: &Client, tab_id: &str, selector: &str) -> Result<()> {
     let id = parse_tab_id("click", tab_id)?;
-    let raw = client
-        .execute_cdp(
-            id,
-            "Runtime.evaluate",
-            Some(json!({
-                "expression": build_click_script(selector),
-                "returnByValue": true
-            })),
-        )
-        .await?;
-    parse_action_result(&raw, "click")
+    let (x, y) = pointer_target(client, tab_id, selector).await?;
+    crate::pointer::click(client, id, x, y, 1, 1, &[]).await
 }
 
 pub async fn fill(client: &Client, tab_id: &str, selector: &str, value: &str) -> Result<()> {
@@ -1014,24 +1126,28 @@ pub async fn fill(client: &Client, tab_id: &str, selector: &str, value: &str) ->
     parse_action_result(&raw, "fill")
 }
 
-pub async fn cua_click(client: &Client, tab_id: &str, x: i64, y: i64) -> Result<()> {
+pub async fn cua_click_with_count(
+    client: &Client,
+    tab_id: &str,
+    x: f64,
+    y: f64,
+    button: u8,
+    click_count: u8,
+    keypress: &[String],
+) -> Result<()> {
     let id = parse_tab_id("cua_click", tab_id)?;
-    for event_type in ["mousePressed", "mouseReleased"] {
-        client
-            .execute_cdp(
-                id,
-                "Input.dispatchMouseEvent",
-                Some(json!({
-                    "type": event_type,
-                    "x": x,
-                    "y": y,
-                    "button": "left",
-                    "clickCount": 1
-                })),
-            )
-            .await?;
-    }
-    Ok(())
+    crate::pointer::click(client, id, x, y, button, click_count, keypress).await
+}
+
+pub async fn cua_move(
+    client: &Client,
+    tab_id: &str,
+    x: f64,
+    y: f64,
+    keys: &[String],
+) -> Result<()> {
+    let id = parse_tab_id("cua_move", tab_id)?;
+    crate::pointer::move_to(client, id, x, y, keys).await
 }
 
 pub async fn cua_type(client: &Client, tab_id: &str, text: &str) -> Result<()> {
@@ -1047,43 +1163,20 @@ pub async fn cua_type(client: &Client, tab_id: &str, text: &str) -> Result<()> {
 
 pub async fn cua_keypress(client: &Client, tab_id: &str, keys: &[String]) -> Result<()> {
     let id = parse_tab_id("cua_keypress", tab_id)?;
-    for key in keys {
-        for event_type in ["keyDown", "keyUp"] {
-            client
-                .execute_cdp(
-                    id,
-                    "Input.dispatchKeyEvent",
-                    Some(json!({ "type": event_type, "key": key })),
-                )
-                .await?;
-        }
-    }
-    Ok(())
+    crate::input::keypress(client, id, keys).await
 }
 
 pub async fn cua_scroll(
     client: &Client,
     tab_id: &str,
-    x: i64,
-    y: i64,
-    scroll_x: i64,
-    scroll_y: i64,
+    x: f64,
+    y: f64,
+    scroll_x: f64,
+    scroll_y: f64,
+    keypress: &[String],
 ) -> Result<()> {
     let id = parse_tab_id("cua_scroll", tab_id)?;
-    client
-        .execute_cdp(
-            id,
-            "Input.dispatchMouseEvent",
-            Some(json!({
-                "type": "mouseWheel",
-                "x": x,
-                "y": y,
-                "deltaX": scroll_x as f64,
-                "deltaY": scroll_y as f64
-            })),
-        )
-        .await
-        .map(|_| ())
+    crate::pointer::scroll(client, id, x, y, scroll_x, scroll_y, keypress).await
 }
 
 pub async fn get_visible_dom(client: &Client, tab_id: &str) -> Result<String> {
@@ -1102,6 +1195,15 @@ pub async fn get_visible_dom(client: &Client, tab_id: &str) -> Result<String> {
 }
 
 pub async fn dom_cua_click(client: &Client, tab_id: &str, node_id: &str) -> Result<()> {
+    dom_cua_click_with_count(client, tab_id, node_id, 1).await
+}
+
+pub async fn dom_cua_click_with_count(
+    client: &Client,
+    tab_id: &str,
+    node_id: &str,
+    click_count: u64,
+) -> Result<()> {
     let id = parse_tab_id("dom_cua_click", tab_id)?;
     let node_id = parse_node_id(node_id)?;
     client
@@ -1119,7 +1221,7 @@ pub async fn dom_cua_click(client: &Client, tab_id: &str, node_id: &str) -> Resu
         )
         .await?;
     let (x, y) = box_model_center(&raw)?;
-    cua_click(client, tab_id, x as i64, y as i64).await
+    cua_click_with_count(client, tab_id, x, y, 1, click_count as u8, &[]).await
 }
 
 pub async fn dom_cua_type(client: &Client, tab_id: &str, text: &str) -> Result<()> {
@@ -1311,10 +1413,17 @@ pub async fn set_cookie(client: &Client, tab_id: &str, params: Value) -> Result<
 
 #[derive(Debug, Serialize)]
 pub struct AxMatch {
-    pub node_id: String,
+    /// Numeric backend DOM node id accepted by DOM.resolveNode/getBoxModel.
+    /// Missing for AX-only nodes that cannot be targeted by DOM actions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
+    /// Chrome's accessibility-tree node id. Diagnostic only; it is not a
+    /// backend DOM node id and must not be passed to DOM.* commands.
+    pub ax_node_id: String,
     pub role: String,
     pub name: String,
     pub backend_node_id: Option<i64>,
+    pub actionable: bool,
 }
 
 /// Find elements by ARIA role and/or accessible name in the AX tree.
@@ -1344,11 +1453,14 @@ pub async fn find_elements(
                 continue;
             }
         }
+        let backend_node_id = node.backend_dom_node_id;
         matches.push(AxMatch {
-            node_id: node.node_id,
+            node_id: backend_node_id.map(|id| id.to_string()),
+            ax_node_id: node.node_id,
             role: node.role,
             name: node.name,
-            backend_node_id: node.backend_dom_node_id,
+            backend_node_id,
+            actionable: backend_node_id.is_some(),
         });
         if matches.len() >= max_results {
             break;
@@ -1363,6 +1475,66 @@ pub async fn find_elements(
 pub async fn click_ax_element(client: &Client, tab_id: &str, node_id: &str) -> Result<()> {
     dom_cua_click(client, tab_id, node_id).await
 }
+
+/// Resolve an element by CSS selector, ARIA role/name, text, label,
+/// placeholder, or test id and perform a bounded read or action in one page
+/// round trip. This is a result-level bridge for the official Playwright
+/// locator surface, not a second locator engine.
+pub async fn locator(client: &Client, tab_id: &str, spec: Value) -> Result<Value> {
+    let id = parse_tab_id("locator", tab_id)?;
+    let spec_json = serde_json::to_string(&spec)
+        .map_err(|err| BridgeError::Protocol(format!("encode locator spec: {err}")))?;
+    let expression = LOCATOR_SCRIPT.replace("__CODEX_LOCATOR_SPEC__", &spec_json);
+    let raw = client
+        .execute_cdp(
+            id,
+            "Runtime.evaluate",
+            Some(json!({ "expression": expression, "returnByValue": true })),
+        )
+        .await?;
+    if let Some(message) = evaluate_exception_message(&raw) {
+        return Err(BridgeError::User(format!(
+            "locator evaluation failed: {message}"
+        )));
+    }
+    let encoded = runtime_value_string(&raw)?
+        .ok_or_else(|| BridgeError::Protocol("locator returned no value".into()))?;
+    let result: Value = serde_json::from_str(&encoded)
+        .map_err(|err| BridgeError::Protocol(format!("decode locator result: {err}")))?;
+    if result.get("ok").and_then(Value::as_bool) == Some(false) {
+        let message = result
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("locator failed");
+        return Err(BridgeError::User(message.to_string()));
+    }
+    Ok(result)
+}
+
+async fn pointer_target(client: &Client, tab_id: &str, selector: &str) -> Result<(f64, f64)> {
+    let result = locator(
+        client,
+        tab_id,
+        json!({
+            "action": "pointer",
+            "selector": selector,
+            "strict": false,
+            "nth": 0
+        }),
+    )
+    .await?;
+    let x = result
+        .pointer("/rect/x")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| BridgeError::Protocol("pointer resolver omitted rect.x".into()))?;
+    let y = result
+        .pointer("/rect/y")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| BridgeError::Protocol("pointer resolver omitted rect.y".into()))?;
+    Ok((x, y))
+}
+
+const LOCATOR_SCRIPT: &str = include_str!("locator.js");
 
 // AX tree parsing — defensive: all fields optional
 
@@ -1469,16 +1641,13 @@ pub async fn file_input(
     let id = parse_tab_id("file_input", tab_id)?;
 
     // 1. Resolve the file input element via Runtime.evaluate
-    let escaped_selector = selector.replace('\\', "\\\\").replace('\'', "\\'");
+    let escaped_selector = json_escaped(selector);
     let raw = client
         .execute_cdp(
             id,
             "Runtime.evaluate",
             Some(json!({
-                "expression": format!(
-                    "document.querySelector('{}')",
-                    escaped_selector
-                ),
+                "expression": format!("document.querySelector({escaped_selector})"),
                 "returnByValue": false,
             })),
         )
@@ -1823,7 +1992,7 @@ fn parse_action_result(raw: &RawValue, action: &str) -> Result<()> {
 fn parse_node_id(node_id: &str) -> Result<i64> {
     node_id.parse::<i64>().map_err(|_| {
         BridgeError::User(format!(
-            "dom_cua_click requires numeric node_id, got {node_id:?}"
+            "DOM actions require a numeric backend node_id, got {node_id:?}"
         ))
     })
 }
@@ -1862,13 +2031,6 @@ fn box_model_center(raw: &RawValue) -> Result<(f64, f64)> {
 
 pub fn json_escaped(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| "\"\"".into())
-}
-
-pub fn build_click_script(selector: &str) -> String {
-    let s = json_escaped(selector);
-    format!(
-        "(function(){{try{{var el=document.querySelector({s});if(!el)return JSON.stringify({{error:'element not found: '+{s}}});el.click();return JSON.stringify({{ok:true}})}}catch(e){{return JSON.stringify({{error:String(e&&e.message||e)}})}}}})()"
-    )
 }
 
 pub fn build_fill_script(selector: &str, value: &str) -> String {

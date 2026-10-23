@@ -67,6 +67,29 @@ const docs = read(releaseDocsPath);
 const pkg = JSON.parse(read(packageJsonPath));
 
 const publishNpm = indentedBlock(workflowLines, /^  publish-npm:/, /^  [A-Za-z0-9_-]+:/);
+const releaseJob = indentedBlock(workflowLines, /^  release:/, /^  [A-Za-z0-9_-]+:/);
+const linuxJob = indentedBlock(workflowLines, /^  test-lib:/, /^  [A-Za-z0-9_-]+:/);
+const assets = ["codex-browser-bridge.exe", "codex-browser-bridge-arm64.exe", "codex-browser-bridge-linux-x64-gnu", "codex-browser-bridge-linux-arm64-gnu"];
+for (const asset of assets) {
+  // The checksum drift guard, attestation subjects, release upload, and npm
+  // checksum embedding must all cover every shipped platform.
+  if (countMatches(releaseJob, new RegExp(asset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) < 3) {
+    fail(`release.yml must guard, attest, and upload ${asset}`);
+  }
+  if (!publishNpm.includes(`"${asset}"`)) fail(`publish-npm must require an embedded checksum for ${asset}`);
+  if (!docs.includes(`\`${asset}\``)) fail(`release docs must list ${asset}`);
+}
+for (const target of ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]) {
+  if (!linuxJob.includes(target) || !ciWorkflow.includes(target)) {
+    fail(`CI and release must build/test ${target}`);
+  }
+}
+for (const runner of ["ubuntu-24.04", "ubuntu-24.04-arm"]) {
+  if (!linuxJob.includes(`os: ${runner}`) || !ciWorkflow.includes(`os: ${runner}`)) {
+    fail(`Linux builds must use native ${runner} runners for the documented glibc floor`);
+  }
+}
+if (!/glibc >= 2\.39/.test(docs)) fail("release docs must state the Linux glibc compatibility floor");
 if (!publishNpm) {
   fail("release.yml is missing the publish-npm job");
 } else {
@@ -133,7 +156,7 @@ if (setupNodeNoCacheCount < setupNodeCount) {
 }
 
 for (const [name, text, jobs] of [
-  ["release.yml", workflow, ["test", "test-lib", "release", "publish-npm"]],
+  ["release.yml", workflow, ["validate-release", "test", "test-lib", "release", "publish-npm"]],
   ["ci.yml", ciWorkflow, ["rust", "npm", "test-lib"]],
   ["supply-chain.yml", supplyChainWorkflow, ["cargo-deny"]],
 ]) {
@@ -188,6 +211,10 @@ if (pkg.name !== "@delicious233/codex-browser-bridge") {
 }
 if (pkg.private !== false) {
   fail("npm package must remain public (private=false)");
+}
+if (JSON.stringify(pkg.os) !== JSON.stringify(["win32", "linux"]) ||
+    JSON.stringify(pkg.cpu) !== JSON.stringify(["x64", "arm64"])) {
+  fail("npm package platform metadata must match the Windows/Linux x64/arm64 release matrix");
 }
 if (!pkg.repository || !String(pkg.repository.url).includes("DeliciousBuding/codex-browser-bridge")) {
   fail("npm package repository.url must point at DeliciousBuding/codex-browser-bridge");

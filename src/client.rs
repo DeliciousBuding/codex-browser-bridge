@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex as StdMutex;
+use std::sync::{Arc, Weak};
 
 use serde_json::{json, value::RawValue, Value};
 use tokio::io::{split, ReadHalf, WriteHalf};
@@ -13,10 +13,12 @@ use uuid::Uuid;
 
 use crate::discovery;
 use crate::error::{BridgeError, Result};
-use crate::pipe::{dial_named_pipe, PipeStream};
+use crate::pipe::{dial_transport, PipeStream, TransportIo};
 use crate::protocol::{self, Request, Response};
+use crate::registry::{self, BrowserSelector};
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const TURN_END_TIMEOUT: Duration = Duration::from_secs(10);
 /// Sticky-attach fast-path timeout. A healthy attached tab answers CDP within
 /// milliseconds; if it stays silent this long, assume Chrome has throttled or
 /// discarded the background tab and fall through to a full re-attach instead of
@@ -35,6 +37,12 @@ const RECONNECT_COOLDOWN: Duration = Duration::from_secs(5);
 const RECONNECT_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 type PendingMap = HashMap<u64, oneshot::Sender<Response>>;
+
+#[derive(Clone)]
+struct SessionTurn {
+    session_id: String,
+    turn_id: String,
+}
 
 /// A factory that dials a fresh pipe connection. Production uses real
 /// discovery and dial; tests inject a mock returning a `tokio::io::duplex()`
@@ -137,8 +145,7 @@ struct ClientInner {
     writer: Mutex<Option<WriteHalf<PipeStream>>>,
     pending: Mutex<PendingMap>,
     next_id: AtomicU64,
-    session_id: String,
-    turn_id: String,
+    session: tokio::sync::RwLock<SessionTurn>,
     tab_locks: Mutex<HashMap<i64, Arc<Mutex<()>>>>,
     /// Per-tab sticky attach cache: tabs known to have an active CDP debugger session.
     /// Avoids detach+attach round-trips for repeated CDP calls on the same tab.
@@ -154,6 +161,11 @@ struct ClientInner {
     /// Connection health. Set false by the read loop on exit; set true after a
     /// successful reconnect. Read with Acquire, written with Release.
     alive: AtomicBool,
+    /// A deliberately closed client must never reconnect in the background.
+    closed: AtomicBool,
+    /// Current read task. Kept so rebinding can close the previous pipe instead
+    /// of leaking its half-open session.
+    read_task: StdMutex<Option<tokio::task::JoinHandle<()>>>,
     /// Serializes reconnect attempts so concurrent dead-connection callers only
     /// trigger one dial cycle.
     reconnect_lock: Mutex<()>,
@@ -163,33 +175,61 @@ struct ClientInner {
     connection_factory: ConnectionFactory,
 }
 
+impl Drop for ClientInner {
+    fn drop(&mut self) {
+        // The read task holds only a Weak reference while waiting for a frame.
+        // Abort it when the last Client drops so forgetting shutdown() cannot
+        // leave a blocked read half and its task alive indefinitely.
+        self.closed.store(true, Ordering::Release);
+        self.alive.store(false, Ordering::Release);
+        self.connection_epoch.fetch_add(1, Ordering::AcqRel);
+        if let Ok(read_task) = self.read_task.get_mut() {
+            if let Some(handle) = read_task.take() {
+                handle.abort();
+            }
+        }
+    }
+}
+
 impl Client {
     pub async fn connect(pipe_name: Option<&str>) -> Result<Self> {
-        match pipe_name {
-            Some(name) => Self::from_stream_inner(
-                dial_named_pipe(&discovery::pipe_path(name)).await?,
-                named_connection_factory(name.to_string()),
-            ),
-            None => connect_discovered_client().await,
-        }
+        Self::connect_with_selector(pipe_name, BrowserSelector::default()).await
+    }
+
+    pub async fn connect_with_selector(
+        pipe_name: Option<&str>,
+        selector: BrowserSelector,
+    ) -> Result<Self> {
+        selector.validate()?;
+        let factory = selected_connection_factory(pipe_name.map(str::to_string), selector);
+        let mut stream = factory().await?;
+        let session_id = Uuid::new_v4().to_string();
+        let turn_id = Uuid::new_v4().to_string();
+        verify_pipe_stream(&mut stream, &session_id, &turn_id).await?;
+        Self::from_stream_inner_with_ids(stream, factory, session_id, turn_id)
     }
 
     pub fn lazy(pipe_name: Option<String>) -> Self {
-        let factory = match pipe_name {
-            Some(name) => named_connection_factory(name),
-            None => real_connection_factory(),
-        };
+        Self::lazy_with_selector(pipe_name, BrowserSelector::default())
+    }
+
+    pub fn lazy_with_selector(pipe_name: Option<String>, selector: BrowserSelector) -> Self {
+        let factory = selected_connection_factory(pipe_name, selector);
         Self::from_lazy_inner(factory)
     }
 
     fn from_lazy_inner(factory: ConnectionFactory) -> Self {
+        let session_id = Uuid::new_v4().to_string();
+        let turn_id = Uuid::new_v4().to_string();
         Self {
             inner: Arc::new(ClientInner {
                 writer: Mutex::new(None),
                 pending: Mutex::new(HashMap::new()),
                 next_id: AtomicU64::new(1),
-                session_id: Uuid::new_v4().to_string(),
-                turn_id: Uuid::new_v4().to_string(),
+                session: tokio::sync::RwLock::new(SessionTurn {
+                    session_id,
+                    turn_id,
+                }),
                 tab_locks: Mutex::new(HashMap::new()),
                 attached_tabs: Mutex::new(HashMap::new()),
                 event_subs: Mutex::new(Vec::new()),
@@ -198,6 +238,8 @@ impl Client {
                 #[cfg(test)]
                 read_loop_exits: AtomicU64::new(0),
                 alive: AtomicBool::new(false),
+                closed: AtomicBool::new(false),
+                read_task: StdMutex::new(None),
                 reconnect_lock: Mutex::new(()),
                 reconnect_cooldown_until: Mutex::new(None),
                 connection_factory: factory,
@@ -206,14 +248,27 @@ impl Client {
     }
 
     fn from_stream_inner(stream: PipeStream, factory: ConnectionFactory) -> Result<Self> {
+        let session_id = Uuid::new_v4().to_string();
+        let turn_id = Uuid::new_v4().to_string();
+        Self::from_stream_inner_with_ids(stream, factory, session_id, turn_id)
+    }
+
+    fn from_stream_inner_with_ids(
+        stream: PipeStream,
+        factory: ConnectionFactory,
+        session_id: String,
+        turn_id: String,
+    ) -> Result<Self> {
         let (reader, writer) = split(stream);
         let client = Self {
             inner: Arc::new(ClientInner {
                 writer: Mutex::new(Some(writer)),
                 pending: Mutex::new(HashMap::new()),
                 next_id: AtomicU64::new(1),
-                session_id: Uuid::new_v4().to_string(),
-                turn_id: Uuid::new_v4().to_string(),
+                session: tokio::sync::RwLock::new(SessionTurn {
+                    session_id,
+                    turn_id,
+                }),
                 tab_locks: Mutex::new(HashMap::new()),
                 attached_tabs: Mutex::new(HashMap::new()),
                 event_subs: Mutex::new(Vec::new()),
@@ -222,6 +277,8 @@ impl Client {
                 #[cfg(test)]
                 read_loop_exits: AtomicU64::new(0),
                 alive: AtomicBool::new(true),
+                closed: AtomicBool::new(false),
+                read_task: StdMutex::new(None),
                 reconnect_lock: Mutex::new(()),
                 reconnect_cooldown_until: Mutex::new(None),
                 connection_factory: factory,
@@ -231,18 +288,83 @@ impl Client {
         Ok(client)
     }
 
-    pub fn from_stream(stream: PipeStream) -> Result<Self> {
-        Self::from_stream_inner(stream, real_connection_factory())
+    /// Stop reconnecting and close the active pipe read loop. Pending requests
+    /// fail as `Connection` errors instead of hanging until their timeout.
+    pub async fn shutdown(&self) {
+        if self.inner.closed.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        self.inner.alive.store(false, Ordering::Release);
+        self.inner.connection_epoch.fetch_add(1, Ordering::AcqRel);
+        if let Some(handle) = self
+            .inner
+            .read_task
+            .lock()
+            .expect("client read-task lock poisoned")
+            .take()
+        {
+            handle.abort();
+        }
+        self.inner.writer.lock().await.take();
+        self.inner.pending.lock().await.clear();
+        self.inner.event_subs.lock().await.clear();
+        self.inner.tab_locks.lock().await.clear();
+        self.inner.attached_tabs.lock().await.clear();
+        *self.inner.reconnect_cooldown_until.lock().await = None;
+    }
+
+    /// End the current browser turn without closing the pipe. The extension
+    /// closes unmarked agent-created tabs, releases unmarked claimed user tabs,
+    /// and preserves deliverable/handoff marks. A fresh turn id is used for
+    /// subsequent requests in this MCP process.
+    /// Returns `true` only when the extension acknowledged `turnEnded`.
+    pub async fn end_turn(&self) -> Result<bool> {
+        if self.inner.closed.load(Ordering::Acquire) || !self.is_alive() {
+            self.clear_tab_state().await;
+            return Ok(false);
+        }
+
+        let deadline = Instant::now() + TURN_END_TIMEOUT;
+        let attached_tabs: Vec<i64> = self
+            .inner
+            .attached_tabs
+            .lock()
+            .await
+            .keys()
+            .copied()
+            .collect();
+        for tab_id in attached_tabs {
+            if let Err(err) = self.detach_tab_until(tab_id, deadline).await {
+                // A tab may already be closed. turnEnded below remains the
+                // authoritative session cleanup operation.
+                tracing::debug!(tab_id, error = %err, "detach before turnEnded failed");
+            }
+        }
+
+        self.send_request_with_timeout("turnEnded", None, TURN_END_TIMEOUT)
+            .await?;
+        {
+            let mut session = self.inner.session.write().await;
+            session.turn_id = Uuid::new_v4().to_string();
+        }
+        self.clear_tab_state().await;
+        Ok(true)
+    }
+
+    /// Use an externally supplied stream. Its browser identity cannot be
+    /// rediscovered safely; use `connect`/`lazy` for identity-pinned reconnects.
+    pub fn from_stream<T: TransportIo + 'static>(stream: T) -> Result<Self> {
+        Self::from_stream_inner(Box::new(stream), supplied_stream_connection_factory())
     }
 
     /// Test-only constructor: inject a custom connection factory so reconnect
     /// logic can be exercised without a real ChatGPT desktop browser-extension pipe.
     #[cfg(all(test, not(windows)))]
-    pub(crate) fn from_stream_with_factory(
-        stream: PipeStream,
+    pub(crate) fn from_stream_with_factory<T: TransportIo + 'static>(
+        stream: T,
         factory: ConnectionFactory,
     ) -> Result<Self> {
-        Self::from_stream_inner(stream, factory)
+        Self::from_stream_inner(Box::new(stream), factory)
     }
 
     pub async fn send_request(&self, method: &str, params: Option<Value>) -> Result<Box<RawValue>> {
@@ -265,13 +387,18 @@ impl Client {
             .await
         {
             Ok(raw) => Ok(raw),
-            Err(err) if Self::is_connection_error(&err) => {
+            Err(err) if Self::is_connection_error(&err) && replay_safe(method) => {
                 // The pipe broke mid-request (or just after ensure_alive). Force a
                 // reconnect and retry exactly once on the fresh connection.
                 tracing::debug!(method, error = %err, "request failed, reconnecting + retrying once");
                 self.force_reconnect().await?;
                 self.send_request_once(method, params, request_timeout)
                     .await
+            }
+            Err(err) if Self::is_connection_error(&err) => {
+                Err(BridgeError::Connection(format!(
+                    "{method} may have reached the browser before the pipe failed; outcome unknown, so it was not replayed: {err}"
+                )))
             }
             Err(err) => Err(err),
         }
@@ -286,8 +413,8 @@ impl Client {
         request_timeout: Duration,
     ) -> Result<Box<RawValue>> {
         let id = self.inner.next_id.fetch_add(1, Ordering::SeqCst);
-        let params =
-            protocol::with_session_params(&self.inner.session_id, &self.inner.turn_id, params);
+        let session = self.inner.session.read().await.clone();
+        let params = protocol::with_session_params(&session.session_id, &session.turn_id, params);
         let req = Request::new(id, method, params);
         let (tx, rx) = oneshot::channel();
 
@@ -329,6 +456,10 @@ impl Client {
         self.inner.alive.load(Ordering::Acquire)
     }
 
+    pub async fn has_live_connection(&self) -> bool {
+        self.is_alive() && self.inner.writer.lock().await.is_some()
+    }
+
     /// Errors that mean the connection is broken and a reconnect may help.
     /// Protocol/Rpc/Cdp errors are server-side problems — reconnecting won't fix them.
     fn is_connection_error(err: &BridgeError) -> bool {
@@ -338,6 +469,9 @@ impl Client {
     /// Reconnect if the connection is dead. Double-checked locking: the second
     /// caller to arrive while the first is reconnecting sees `alive=true` and skips.
     async fn ensure_alive(&self) -> Result<()> {
+        if self.inner.closed.load(Ordering::Acquire) {
+            return Err(BridgeError::Connection("client is closed".into()));
+        }
         if self.is_alive() {
             return Ok(());
         }
@@ -360,6 +494,9 @@ impl Client {
 
     /// Run one reconnect cycle. Caller must hold `reconnect_lock`.
     async fn reconnect_locked(&self) -> Result<()> {
+        if self.inner.closed.load(Ordering::Acquire) {
+            return Err(BridgeError::Connection("client is closed".into()));
+        }
         {
             let cooldown = self.inner.reconnect_cooldown_until.lock().await;
             if let Some(until) = *cooldown {
@@ -381,12 +518,9 @@ impl Client {
             tracing::debug!(attempt, "attempting reconnect");
             match (self.inner.connection_factory)().await {
                 Ok(mut stream) => {
-                    match verify_pipe_stream(
-                        &mut stream,
-                        &self.inner.session_id,
-                        &self.inner.turn_id,
-                    )
-                    .await
+                    let session = self.inner.session.read().await.clone();
+                    match verify_pipe_stream(&mut stream, &session.session_id, &session.turn_id)
+                        .await
                     {
                         Ok(info) => {
                             tracing::debug!(
@@ -434,8 +568,8 @@ impl Client {
     }
 
     fn spawn_read_loop(&self, mut reader: ReadHalf<PipeStream>, epoch: u64) {
-        let inner = Arc::clone(&self.inner);
-        tokio::spawn(async move {
+        let inner = Arc::downgrade(&self.inner);
+        let handle = tokio::spawn(async move {
             loop {
                 let frame = match protocol::decode_frame(&mut reader).await {
                     Ok(frame) => frame,
@@ -443,6 +577,12 @@ impl Client {
                         tracing::debug!("read loop ended: {err}");
                         break;
                     }
+                };
+                // Keep no strong reference across the next pipe read. A dropped
+                // client would otherwise be kept alive forever by its own read
+                // task, which is especially costly for discovery probes.
+                let Some(inner) = Weak::upgrade(&inner) else {
+                    return;
                 };
                 let value: Value = match serde_json::from_slice(&frame) {
                     Ok(value) => value,
@@ -521,6 +661,9 @@ impl Client {
                     }
                 }
             }
+            let Some(inner) = Weak::upgrade(&inner) else {
+                return;
+            };
             // ── read loop exited: the connection is dead ──
             #[cfg(test)]
             inner.read_loop_exits.fetch_add(1, Ordering::SeqCst);
@@ -541,6 +684,15 @@ impl Client {
             // writing into a broken pipe.
             *inner.writer.lock().await = None;
         });
+        if let Some(previous) = self
+            .inner
+            .read_task
+            .lock()
+            .expect("client read-task lock poisoned")
+            .replace(handle)
+        {
+            previous.abort();
+        }
     }
 
     /// Subscribe to CDP events whose `method` starts with `method_prefix`
@@ -697,6 +849,59 @@ impl Client {
         }
     }
 
+    /// Execute one state-changing CDP command at most once.
+    ///
+    /// `execute_cdp_with_timeout` may recover an invalid debugger session and
+    /// retry the command. That is useful for observations, but unsafe for
+    /// pointer input: a retried click or drop can execute twice. This variant
+    /// still establishes the attachment when needed, then deliberately does
+    /// not retry the mutation. An invalidated session is reported as an
+    /// ambiguous outcome so callers cannot silently replay it.
+    pub async fn execute_cdp_once_with_timeout(
+        &self,
+        tab_id: i64,
+        method: &str,
+        params: Option<Value>,
+        request_timeout: Duration,
+    ) -> Result<Box<RawValue>> {
+        let tab_lock = self.tab_lock(tab_id).await;
+        let _guard = tab_lock.lock().await;
+
+        let deadline = Instant::now() + request_timeout;
+        let already_attached = self
+            .inner
+            .attached_tabs
+            .lock()
+            .await
+            .get(&tab_id)
+            .copied()
+            .unwrap_or(false);
+        if !already_attached {
+            self.detach_tab_until(tab_id, deadline).await.ok();
+            if let Err(err) = self.attach_tab_until(tab_id, deadline).await {
+                self.retire_current_tab_state(tab_id).await;
+                return Err(BridgeError::Protocol(format!(
+                    "attach failed for tab {tab_id}: {err}"
+                )));
+            }
+            self.inner.attached_tabs.lock().await.insert(tab_id, true);
+        }
+
+        match self
+            .execute_cdp_raw_until(tab_id, method, params, deadline)
+            .await
+        {
+            Ok(raw) => Ok(raw),
+            Err(err) if is_session_invalid_error(&err) => {
+                self.inner.attached_tabs.lock().await.remove(&tab_id);
+                Err(BridgeError::Connection(format!(
+                    "{method} may have reached the browser before its CDP session became invalid; outcome unknown, so it was not replayed: {err}"
+                )))
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     /// Invalidate the sticky attach cache for a tab.
     pub async fn invalidate_attachment(&self, tab_id: i64) {
         self.inner.attached_tabs.lock().await.remove(&tab_id);
@@ -830,49 +1035,53 @@ fn response_result(method: &str, resp: Response) -> Result<Box<RawValue>> {
 
     match resp.result {
         Some(result) => Ok(result),
-        None => serde_json::value::RawValue::from_string("null".to_string())
-            .map_err(|err| BridgeError::Protocol(format!("missing result for {method}: {err}"))),
-    }
-}
-
-async fn connect_discovered_client() -> Result<Client> {
-    let pipes = discovery::discover_codex_pipes().await?;
-    if pipes.is_empty() {
-        return Err(BridgeError::User(
-            "no codex-browser-use pipes found. Start the ChatGPT desktop app, a supported Chromium browser, and the ChatGPT browser extension".into(),
-        ));
-    }
-
-    let mut last_err = None;
-    for pipe in pipes {
-        let path = discovery::pipe_path(&pipe.name);
-        match dial_named_pipe(&path).await {
-            Ok(mut stream) => {
-                let session_id = Uuid::new_v4().to_string();
-                let turn_id = Uuid::new_v4().to_string();
-                match verify_pipe_stream(&mut stream, &session_id, &turn_id).await {
-                    Ok(info) => {
-                        tracing::debug!(
-                            pipe = %pipe.name,
-                            info = %truncate(info.get(), 120),
-                            "auto-discovered verified browser pipe"
-                        );
-                        return Client::from_stream_inner(stream, real_connection_factory());
-                    }
-                    Err(err) => {
-                        tracing::debug!(pipe = %pipe.name, "pipe health check failed: {err}");
-                        last_err = Some(err);
-                    }
-                }
-            }
-            Err(err) => last_err = Some(err),
+        // The extension serializes JavaScript `undefined` returns by omitting
+        // `result`. Accept this only for its known void native methods, not
+        // for discovery/data-bearing responses where omission is corruption.
+        None if matches!(
+            method,
+            "attach"
+                | "attachTarget"
+                | "detach"
+                | "detachTarget"
+                | "markTab"
+                | "nameSession"
+                | "turnEnded"
+                | "moveMouse"
+                | "allowDownload"
+                | "setBlobDownloadOrigin"
+                | "followSessionTab"
+        ) =>
+        {
+            RawValue::from_string("null".into())
+                .map_err(|err| BridgeError::Protocol(err.to_string()))
         }
+        None => Err(BridgeError::Protocol(format!(
+            "response for {method} contained neither result nor error"
+        ))),
     }
-
-    Err(last_err.unwrap_or_else(|| BridgeError::Discovery("all pipes failed".into())))
 }
 
-async fn verify_pipe_stream(
+/// Only replay requests whose repeated execution cannot compound browser-side
+/// effects. In particular, never replay tab creation/claiming, interaction,
+/// arbitrary CDP, management mutations, file input, or turn cleanup after an
+/// ambiguous connection failure.
+fn replay_safe(method: &str) -> bool {
+    matches!(
+        method,
+        "getInfo"
+            | "getTabs"
+            | "getUserTabs"
+            | "getUserHistory"
+            | "ping"
+            | "attach"
+            | "detach"
+            | "nameSession"
+            | "markTab"
+    )
+}
+
+pub(crate) async fn verify_pipe_stream(
     stream: &mut PipeStream,
     session_id: &str,
     turn_id: &str,
@@ -888,7 +1097,21 @@ async fn verify_pipe_stream(
         let resp: Response = serde_json::from_slice(&frame)
             .map_err(|err| BridgeError::Protocol(format!("invalid getInfo response: {err}")))?;
         if resp.id == Some(0) {
-            return response_result("getInfo", resp);
+            let raw = response_result("getInfo", resp)?;
+            let info: Value = serde_json::from_str(raw.get()).map_err(|err| {
+                BridgeError::Protocol(format!("invalid getInfo identity response: {err}"))
+            })?;
+            if info.get("type").and_then(Value::as_str) != Some("extension")
+                || info
+                    .get("family")
+                    .and_then(Value::as_str)
+                    .is_none_or(|family| family.trim().is_empty())
+            {
+                return Err(BridgeError::Protocol(
+                    "getInfo did not identify a browser extension with a browser family".into(),
+                ));
+            }
+            return Ok(raw);
         }
         if Instant::now() >= deadline {
             return Err(BridgeError::Timeout("getInfo".into()));
@@ -896,49 +1119,107 @@ async fn verify_pipe_stream(
     }
 }
 
-/// Dial a reachable pipe, starting from a rotating index. The caller verifies
-/// the stream before making it the active connection.
-async fn discover_and_dial_from(start: usize) -> Result<PipeStream> {
-    let pipes = discovery::discover_codex_pipes().await?;
-    if pipes.is_empty() {
-        return Err(BridgeError::User(
-            "no codex-browser-use pipes found. Start the ChatGPT desktop app, a supported Chromium browser, and the ChatGPT browser extension".into(),
-        ));
-    }
-    let mut last_err = None;
-    for offset in 0..pipes.len() {
-        let pipe = &pipes[(start + offset) % pipes.len()];
-        let path = discovery::pipe_path(&pipe.name);
-        match dial_named_pipe(&path).await {
-            Ok(stream) => {
-                tracing::debug!(pipe = %pipe.name, "reconnect dial succeeded");
-                return Ok(stream);
-            }
-            Err(err) => last_err = Some(err),
-        }
-    }
-    Err(last_err.unwrap_or_else(|| BridgeError::Discovery("all pipes failed".into())))
-}
-
-/// Production connection factory: discover + dial a reachable pipe. Reconnect
-/// attempts rotate their starting point so one dialable stale pipe does not
-/// starve later healthy candidates.
-fn real_connection_factory() -> ConnectionFactory {
-    let next_start = Arc::new(AtomicUsize::new(0));
-    Arc::new(move || {
-        let next_start = Arc::clone(&next_start);
-        Box::pin(async move {
-            let start = next_start.fetch_add(1, Ordering::SeqCst);
-            discover_and_dial_from(start).await
+fn supplied_stream_connection_factory() -> ConnectionFactory {
+    Arc::new(|| {
+        Box::pin(async {
+            Err(BridgeError::Connection("externally supplied transport closed; reconnect requires an explicit browser selector".into()))
         })
     })
 }
 
-fn named_connection_factory(pipe_name: String) -> ConnectionFactory {
+fn endpoint_connection_factory(pipe_name: String) -> ConnectionFactory {
     Arc::new(move || {
         let path = discovery::pipe_path(&pipe_name);
-        Box::pin(async move { dial_named_pipe(&path).await })
+        Box::pin(async move { dial_transport(&path).await })
     })
+}
+
+fn selected_connection_factory(
+    pipe_name: Option<String>,
+    selector: BrowserSelector,
+) -> ConnectionFactory {
+    if let Some(pipe_name) = pipe_name {
+        return endpoint_connection_factory(pipe_name);
+    }
+
+    let pinned_instance = Arc::new(Mutex::new(None::<String>));
+    Arc::new(move || {
+        let selector = selector.clone();
+        let pinned_instance = Arc::clone(&pinned_instance);
+        Box::pin(async move {
+            let mut pinned = pinned_instance.lock().await;
+            if let Some(instance_id) = pinned.as_deref() {
+                return dial_browser_instance(instance_id).await;
+            }
+
+            let inventory = registry::discover_browsers().await?;
+            let browser = registry::select_browser(&inventory.browsers, &selector)?;
+            let mut stream = dial_transport(&browser.transport.path).await?;
+            verify_selected_stream(&mut stream, Some(&browser.family), Some(&browser.id)).await?;
+            *pinned = Some(browser.id.clone());
+            tracing::info!(
+                browser_id = %browser.id,
+                family = %browser.family,
+                name = %browser.name,
+                pipe = %browser.transport.name,
+                "selected browser-extension instance"
+            );
+            Ok(stream)
+        })
+    })
+}
+
+async fn dial_browser_instance(instance_id: &str) -> Result<PipeStream> {
+    let inventory = registry::discover_browsers().await?;
+    let selector = BrowserSelector::new(None, Some(instance_id.to_string()));
+    let browser = registry::select_browser(&inventory.browsers, &selector)?;
+    let mut stream = dial_transport(&browser.transport.path).await?;
+    verify_selected_stream(&mut stream, Some(&browser.family), Some(instance_id)).await?;
+    Ok(stream)
+}
+
+async fn verify_selected_stream(
+    stream: &mut PipeStream,
+    expected_family: Option<&str>,
+    expected_instance_id: Option<&str>,
+) -> Result<()> {
+    let session_id = Uuid::new_v4().to_string();
+    let turn_id = Uuid::new_v4().to_string();
+    let raw = verify_pipe_stream(stream, &session_id, &turn_id).await?;
+    let info: Value = serde_json::from_str(raw.get()).map_err(|err| {
+        BridgeError::Protocol(format!("invalid getInfo identity response: {err}"))
+    })?;
+    if info.get("type").and_then(Value::as_str) != Some("extension") {
+        return Err(BridgeError::Protocol(
+            "selected pipe did not identify a browser extension".into(),
+        ));
+    }
+    if let Some(expected) = expected_family {
+        let actual = info
+            .get("family")
+            .and_then(Value::as_str)
+            .ok_or_else(|| BridgeError::Protocol("getInfo omitted browser family".into()))?;
+        if !actual.eq_ignore_ascii_case(expected) {
+            return Err(BridgeError::Protocol(format!(
+                "browser identity changed while connecting: expected family {expected:?}, got {actual:?}"
+            )));
+        }
+    }
+    if let Some(expected) = expected_instance_id {
+        let actual = info
+            .get("metadata")
+            .and_then(|metadata| metadata.get("extensionInstanceId"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                BridgeError::Protocol("getInfo omitted metadata.extensionInstanceId".into())
+            })?;
+        if actual != expected {
+            return Err(BridgeError::Protocol(format!(
+                "browser identity changed while connecting: expected instance {expected:?}, got {actual:?}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -1038,8 +1319,11 @@ mod reconnect_tests {
     }
 
     async fn no_request(server: &mut DuplexStream, reason: &str) {
-        if let Ok(request) = timeout(Duration::from_millis(50), next_request(server)).await {
-            panic!("{reason}: unexpected pipe request {request}");
+        if let Ok(Ok(frame)) = timeout(Duration::from_millis(50), decode_frame(server)).await {
+            panic!(
+                "{reason}: unexpected pipe request {}",
+                String::from_utf8_lossy(&frame)
+            );
         }
     }
 
@@ -1047,7 +1331,12 @@ mod reconnect_tests {
     async fn reply_ok(server: &mut DuplexStream) {
         let req = next_request(server).await;
         let id = req["id"].as_u64().unwrap();
-        encode_frame(server, &json!({"id": id, "result": {}}))
+        let result = if req["method"] == "getInfo" {
+            json!({"type": "extension", "family": "chrome"})
+        } else {
+            json!({})
+        };
+        encode_frame(server, &json!({"id": id, "result": result}))
             .await
             .unwrap();
     }
@@ -1111,13 +1400,6 @@ mod reconnect_tests {
         .await;
     }
 
-    async fn expect_read_loop_exits(client: &Client, expected: u64) {
-        wait_until(&format!("read loop exits >= {expected}"), || async {
-            client.read_loop_exit_count_for_test() >= expected
-        })
-        .await;
-    }
-
     #[tokio::test]
     async fn normal_roundtrip_tracks_pending() {
         let (client, mut server) = test_client(4096).await;
@@ -1131,6 +1413,110 @@ mod reconnect_tests {
         let result = handle.await.unwrap();
         assert!(result.is_ok());
         expect_pending_len(&client, 0).await;
+    }
+
+    #[tokio::test]
+    async fn verified_stream_session_ids_are_reused_for_requests() {
+        let (client_end, mut server) = duplex(4096);
+        let client = Client::from_stream_inner_with_ids(
+            Box::new(client_end),
+            supplied_stream_connection_factory(),
+            "verified-session".into(),
+            "verified-turn".into(),
+        )
+        .unwrap();
+        let handle = tokio::spawn({
+            let client = client.clone();
+            async move { client.send_request("getTabs", None).await }
+        });
+
+        let request = next_request(&mut server).await;
+        assert_eq!(request["params"]["session_id"], "verified-session");
+        assert_eq!(request["params"]["turn_id"], "verified-turn");
+        let id = request["id"].as_u64().unwrap();
+        encode_frame(&mut server, &json!({"id": id, "result": []}))
+            .await
+            .unwrap();
+        assert!(handle.await.unwrap().is_ok());
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_fails_pending_requests_and_does_not_reconnect() {
+        let (client, mut server) = test_client(4096).await;
+        let handle = tokio::spawn({
+            let client = client.clone();
+            async move {
+                client
+                    .send_request_with_timeout("getInfo", None, Duration::from_secs(5))
+                    .await
+            }
+        });
+        expect_pending_len(&client, 1).await;
+
+        let _in_flight = next_request(&mut server).await;
+        client.shutdown().await;
+
+        let err = handle.await.unwrap().unwrap_err();
+        assert!(matches!(err, BridgeError::Connection(_)), "got: {err}");
+        expect_pending_len(&client, 0).await;
+        let err = client.send_request("getInfo", None).await.unwrap_err();
+        assert!(matches!(err, BridgeError::Connection(_)), "got: {err}");
+        no_request(&mut server, "closed client must not reconnect or send").await;
+    }
+
+    #[tokio::test]
+    async fn dropping_last_client_aborts_its_read_loop() {
+        let (client, _server) = test_client(4096).await;
+        let weak = Arc::downgrade(&client.inner);
+
+        drop(client);
+        wait_until("last client inner dropped", || async {
+            weak.upgrade().is_none()
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn end_turn_detaches_then_rotates_turn_id() {
+        let (client, mut server) = test_client(4096).await;
+        client.mark_attached(7).await;
+
+        let task = tokio::spawn({
+            let client = client.clone();
+            async move { client.end_turn().await }
+        });
+        let detach = next_request(&mut server).await;
+        assert_eq!(detach["method"], "detach");
+        assert_eq!(detach["params"]["tabId"], 7);
+        encode_frame(&mut server, &json!({"id": detach["id"], "result": {}}))
+            .await
+            .unwrap();
+
+        let ended = next_request(&mut server).await;
+        assert_eq!(ended["method"], "turnEnded");
+        let session_id = ended["params"]["session_id"].as_str().unwrap().to_string();
+        let old_turn_id = ended["params"]["turn_id"].as_str().unwrap().to_string();
+        encode_frame(&mut server, &json!({"id": ended["id"], "result": {}}))
+            .await
+            .unwrap();
+        task.await.unwrap().unwrap();
+
+        let next = tokio::spawn({
+            let client = client.clone();
+            async move { client.send_request("getInfo", None).await }
+        });
+        let request = next_request(&mut server).await;
+        assert_eq!(request["params"]["session_id"], session_id);
+        assert_ne!(request["params"]["turn_id"], old_turn_id);
+        encode_frame(
+            &mut server,
+            &json!({"id": request["id"], "result": {"type":"extension","family":"chrome"}}),
+        )
+        .await
+        .unwrap();
+        assert!(next.await.unwrap().is_ok());
+        client.shutdown().await;
     }
 
     #[tokio::test]
@@ -1354,7 +1740,7 @@ mod reconnect_tests {
                     *new_server.lock().await = Some(s);
                     call_count.fetch_add(1, Ordering::SeqCst);
                     ready.notify_one();
-                    Ok(c)
+                    Ok(Box::new(c) as PipeStream)
                 })
             })
         };
@@ -1412,7 +1798,7 @@ mod reconnect_tests {
                     *new_server.lock().await = Some(s);
                     call_count.fetch_add(1, Ordering::SeqCst);
                     ready.notify_one();
-                    Ok(c)
+                    Ok(Box::new(c) as PipeStream)
                 })
             })
         };
@@ -1458,7 +1844,7 @@ mod reconnect_tests {
                     new_servers.lock().await.push(s);
                     call_count.fetch_add(1, Ordering::SeqCst);
                     ready.notify_waiters();
-                    Ok(c)
+                    Ok(Box::new(c) as PipeStream)
                 })
             })
         };
@@ -1492,7 +1878,7 @@ mod reconnect_tests {
     }
 
     #[tokio::test]
-    async fn stale_read_loop_exit_does_not_clear_new_connection() {
+    async fn replacing_read_loop_aborts_old_connection_without_clearing_new_one() {
         let (client_end1, server1) = duplex(4096);
 
         let new_server = Arc::new(Mutex::new(None::<DuplexStream>));
@@ -1511,7 +1897,7 @@ mod reconnect_tests {
                     *new_server.lock().await = Some(s);
                     call_count.fetch_add(1, Ordering::SeqCst);
                     ready.notify_one();
-                    Ok(c)
+                    Ok(Box::new(c) as PipeStream)
                 })
             })
         };
@@ -1529,7 +1915,12 @@ mod reconnect_tests {
         reconnect_task.await.unwrap().unwrap();
 
         drop(server1);
-        expect_read_loop_exits(&client, 1).await;
+        tokio::task::yield_now().await;
+        assert_eq!(
+            client.read_loop_exit_count_for_test(),
+            0,
+            "old read loop was aborted, not allowed to clean up the new epoch"
+        );
         assert!(
             client.is_alive(),
             "stale read loop must not mark new connection dead"

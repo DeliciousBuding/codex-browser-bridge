@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "officialBrowserPluginVersion": "26.1016.61520",
+  "packages": {
+    "browser": {
+      "version": "26.1016.61520",
+      "files": {
+        ".codex-plugin/plugin.json": "dc57e56fe6d9377479e2cfc8e3898908682a543ffb323b04fd1622a355f4005a",
+        "scripts/browser-client.mjs": "21de226fd4b51f20100a8aa86df0c383c2befc3031f818faabd54d2458fc8965",
+        "scripts/browser-service.mjs": "8507aa0bf0d106c7b5625aa69d379774addd87ee031d1f374a66e0995a408f11",
+        "scripts/extension-ids.json": "7e321e8c9d1ce0310ee144de51198fcb25c0c42c0004c15ad095493dd384630a",
+        "docs/api.json": "667ae407f87850ceae63a840287815a16e53da0440230da24e37bc6ce2fb7583"
+      }
+    },
+    "chrome": {
+      "version": "26.1016.61520",
+      "files": {
+        ".codex-plugin/plugin.json": "249fd81494e73350cfbc30b788c63c43e47076387e3ed56f6d3c21e792ae241e",
+        "scripts/browser-client.mjs": "21de226fd4b51f20100a8aa86df0c383c2befc3031f818faabd54d2458fc8965",
+        "scripts/browser-service.mjs": "8507aa0bf0d106c7b5625aa69d379774addd87ee031d1f374a66e0995a408f11",
+        "scripts/extension-ids.json": "7e321e8c9d1ce0310ee144de51198fcb25c0c42c0004c15ad095493dd384630a",
+        "docs/api.json": "667ae407f87850ceae63a840287815a16e53da0440230da24e37bc6ce2fb7583"
+      }
+    }
+  },
+  "counts": {
+    "interfaces": 22,
+    "methods": 148,
+    "specialCommands": 75,
+    "nativeCommandTypes": 55
+  },
+  "families": {
+    "names": ["brave", "chrome", "edge", "opera", "vivaldi"],
+    "extensionIds": [
+      "hehggadaopoacecdllhhajmbjkdcmajg",
+      "odlomjlbamekndcpllcnffbgeohgkmjh"
+    ],
+    "extensionHostName": "com.openai.codexextension"
+  }
+}

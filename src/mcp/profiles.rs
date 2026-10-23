@@ -38,13 +38,23 @@ impl ToolProfile {
     }
 }
 
-// Basic: essential tab + nav + dom + screenshot + interaction (34 tools)
+// Basic: essential browser selection, tab, navigation, DOM, and interaction.
 const BASIC_TOOLS: &[&str] = &[
+    "codex_list_browsers",
+    "codex_bind_browser",
+    "codex_clipboard",
+    "codex_webmcp",
+    "codex_content_export",
+    "codex_browser_history",
+    "codex_browser_management",
+    "codex_browser_viewport",
+    "codex_browser_visibility",
     "codex_list_tabs",
     "codex_create_tab",
     "codex_close_tab",
     "codex_user_tabs",
     "codex_claim_tab",
+    "codex_mark_tab",
     "codex_navigate",
     "codex_reload",
     "codex_navigate_back",
@@ -58,6 +68,7 @@ const BASIC_TOOLS: &[&str] = &[
     "codex_dom_click",
     "codex_find_element",
     "codex_click_element",
+    "codex_locator",
     "codex_screenshot",
     "codex_bring_to_front",
     "codex_screenshot_element",
@@ -76,13 +87,23 @@ const BASIC_TOOLS: &[&str] = &[
     "codex_doctor",
 ];
 
-// Network: Basic + cookies + CDP + file upload + dialog + storage + pdf + emulate (~51 tools)
+// Network: Basic plus cookies, CDP diagnostics, files, dialogs, storage, PDF, and emulation.
 const NETWORK_TOOLS: &[&str] = &[
+    "codex_list_browsers",
+    "codex_bind_browser",
+    "codex_clipboard",
+    "codex_webmcp",
+    "codex_content_export",
+    "codex_browser_history",
+    "codex_browser_management",
+    "codex_browser_viewport",
+    "codex_browser_visibility",
     "codex_list_tabs",
     "codex_create_tab",
     "codex_close_tab",
     "codex_user_tabs",
     "codex_claim_tab",
+    "codex_mark_tab",
     "codex_navigate",
     "codex_reload",
     "codex_navigate_back",
@@ -96,6 +117,7 @@ const NETWORK_TOOLS: &[&str] = &[
     "codex_dom_click",
     "codex_find_element",
     "codex_click_element",
+    "codex_locator",
     "codex_screenshot",
     "codex_bring_to_front",
     "codex_screenshot_element",
@@ -110,6 +132,7 @@ const NETWORK_TOOLS: &[&str] = &[
     "codex_get_url",
     "codex_get_title",
     "codex_cua_click",
+    "codex_cua_move",
     "codex_cua_type",
     "codex_cua_keypress",
     "codex_cua_scroll",

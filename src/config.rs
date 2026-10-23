@@ -17,6 +17,12 @@ pub struct Config {
     /// Tool profile name: "basic" | "network" | "full".
     #[serde(default)]
     pub profile: Option<String>,
+    /// Preferred Chromium browser family, for example "edge" or "chrome".
+    #[serde(default)]
+    pub browser_family: Option<String>,
+    /// Exact extensionInstanceId when multiple instances of a family are live.
+    #[serde(default)]
+    pub browser_instance: Option<String>,
     /// Base directory `codex_file_input` may upload from.
     #[serde(default)]
     pub upload_base: Option<String>,
@@ -66,6 +72,8 @@ mod tests {
         let cfg: Config = toml::from_str(
             r#"
             profile = "network"
+            browser_family = "edge"
+            browser_instance = "instance-id"
             upload_base = "C:/uploads"
             max_text_bytes = 2097152
             max_image_bytes = 4194304
@@ -73,6 +81,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cfg.profile.as_deref(), Some("network"));
+        assert_eq!(cfg.browser_family.as_deref(), Some("edge"));
+        assert_eq!(cfg.browser_instance.as_deref(), Some("instance-id"));
         assert_eq!(cfg.upload_base.as_deref(), Some("C:/uploads"));
         assert_eq!(cfg.max_text_bytes, Some(2_097_152));
         assert_eq!(cfg.max_image_bytes, Some(4_194_304));
@@ -82,6 +92,8 @@ mod tests {
     fn empty_file_yields_default() {
         let cfg: Config = toml::from_str("").unwrap();
         assert!(cfg.profile.is_none());
+        assert!(cfg.browser_family.is_none());
+        assert!(cfg.browser_instance.is_none());
         assert!(cfg.upload_base.is_none());
         assert!(cfg.max_text_bytes.is_none());
         assert!(cfg.max_image_bytes.is_none());
@@ -116,6 +128,8 @@ mod tests {
         }
 
         assert!(cfg.profile.is_none());
+        assert!(cfg.browser_family.is_none());
+        assert!(cfg.browser_instance.is_none());
         assert!(cfg.upload_base.is_none());
         assert!(cfg.max_text_bytes.is_none());
         assert!(cfg.max_image_bytes.is_none());

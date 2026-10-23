@@ -36,7 +36,8 @@ function proxyForUrl(urlStr, env = process.env) {
       .map((entry) => entry.trim().toLowerCase())
       .filter(Boolean);
     for (const entry of entries) {
-      if (entry === "*" || host === entry || host.endsWith(entry.replace(/^\./, ""))) {
+      const candidate = entry.replace(/^\./, "").replace(/:\d+$/, "");
+      if (entry === "*" || host === candidate || host.endsWith(`.${candidate}`)) {
         return null;
       }
     }
@@ -236,18 +237,28 @@ function embeddedChecksum(asset, root = packageRoot) {
   };
 }
 
-function resolveWindowsArch(platform, cpu) {
-  if (platform !== "win32") {
-    throw new Error("codex-browser-bridge only supports Windows (requires named pipes).");
+function runtimeGlibc() {
+  return process.report?.getReport().header.glibcVersionRuntime;
+}
+
+function resolveTarget(platform, cpu, glibcVersion) {
+  if (!["win32", "linux"].includes(platform)) {
+    throw new Error(`codex-browser-bridge does not ship binaries for ${platform}; supported platforms are Windows and Linux (glibc >= 2.39).`);
   }
-  switch (cpu) {
-    case "x64":
-      return "amd64";
-    case "arm64":
-      return "arm64";
-    default:
-      throw new Error(`codex-browser-bridge does not ship a Windows binary for ${cpu}.`);
+  if (!["x64", "arm64"].includes(cpu)) {
+    throw new Error(`codex-browser-bridge does not ship a ${platform} binary for ${cpu}.`);
   }
+  if (platform === "win32") {
+    return {
+      asset: cpu === "arm64" ? "codex-browser-bridge-arm64.exe" : "codex-browser-bridge.exe",
+      executable: "codex-browser-bridge.exe",
+    };
+  }
+  const version = typeof glibcVersion === "string" && glibcVersion.match(/^(\d+)\.(\d+)(?:\.\d+)?$/);
+  if (!version || Number(version[1]) < 2 || (Number(version[1]) === 2 && Number(version[2]) < 39)) {
+    throw new Error("codex-browser-bridge Linux binaries require glibc >= 2.39; musl/Alpine and older glibc are not supported. Build from source for another libc.");
+  }
+  return { asset: `codex-browser-bridge-linux-${cpu}-gnu`, executable: "codex-browser-bridge" };
 }
 
 function mcpConfigForTarget(target) {
@@ -269,7 +280,7 @@ function mcpConfigForTarget(target) {
   );
 }
 
-function logInstallHints(root, log, target) {
+function logInstallHints(root, log, target, platform = process.platform) {
   const skillDir = path.join(root, "skills", "codex-browser");
   const examplesDir = path.join(root, "examples");
   const escapedSkillDir = skillDir.replace(/"/g, '\\"');
@@ -286,8 +297,8 @@ function logInstallHints(root, log, target) {
     log(
       [
         `Skill bundle fallback: ${skillDir}`,
-        `  -> Claude Code (PowerShell): Copy-Item -Recurse -Force "${escapedSkillDir}" "$env:USERPROFILE\\.claude\\skills\\"`,
-        "  -> Claude Code (Git Bash/WSL): copy or symlink to ~/.claude/skills/",
+        ...(platform === "win32" ? [`  -> Claude Code (PowerShell): Copy-Item -Recurse -Force "${escapedSkillDir}" "$env:USERPROFILE\\.claude\\skills\\"`] : []),
+        "  -> Claude Code (Unix/Git Bash): copy or symlink to ~/.claude/skills/",
         "  -> Other skill-aware agents: copy or symlink into that agent's skills directory",
       ].join("\n")
     );
@@ -298,7 +309,7 @@ function logInstallHints(root, log, target) {
       lines.push("Ready-to-paste MCP config with the absolute installed binary path:");
       lines.push(mcpConfigForTarget(target));
     } else {
-      lines.push("  -> If a GUI client cannot spawn the server, run: where.exe codex-browser-bridge");
+      lines.push(`  -> If a GUI client cannot spawn the server, run: ${platform === "win32" ? "where.exe" : "command -v"} codex-browser-bridge`);
     }
     log(lines.join("\n"));
   }
@@ -314,12 +325,11 @@ async function install(options = {}) {
   const fetchBuffer = options.requestBuffer || requestBuffer;
   const log = options.log || console.log;
 
-  const arch = resolveWindowsArch(platform, cpu);
+  const glibcVersion = options.glibcVersion ?? (platform === "linux" ? runtimeGlibc() : undefined);
+  const { asset, executable } = resolveTarget(platform, cpu, glibcVersion);
   const devDownloads = env.CODEX_BRIDGE_ALLOW_DEV_DOWNLOADS === "1";
   const repo = devDownloads && env.CODEX_BRIDGE_REPO ? env.CODEX_BRIDGE_REPO : defaultRepo;
   const tag = devDownloads && env.CODEX_BRIDGE_TAG ? env.CODEX_BRIDGE_TAG : `v${version}`;
-  const exeName = "codex-browser-bridge.exe";
-  const asset = arch === "arm64" ? "codex-browser-bridge-arm64.exe" : "codex-browser-bridge.exe";
 
   const base = `https://github.com/${repo}/releases/download/${tag}`;
 
@@ -334,7 +344,7 @@ async function install(options = {}) {
   }
 
   // Download binary
-  log(`Downloading codex-browser-bridge ${tag} (${arch})...`);
+  log(`Downloading codex-browser-bridge ${tag} (${platform}/${cpu})...`);
   const binary = await fetchBuffer(`${base}/${asset}`);
 
   // Verify checksum
@@ -343,10 +353,11 @@ async function install(options = {}) {
 
   // Install
   fs.mkdirSync(outDir, { recursive: true });
-  const target = path.join(outDir, exeName);
+  const target = path.join(outDir, executable);
   fs.writeFileSync(target, binary);
+  if (platform === "linux") fs.chmodSync(target, 0o755);
   log(`Installed: ${target}`);
-  logInstallHints(root, log, target);
+  logInstallHints(root, log, target, platform);
   return { target, asset, tag, repo };
 }
 
@@ -372,6 +383,7 @@ module.exports = {
   parseChecksumLine,
   proxyForUrl,
   requestBuffer,
-  resolveWindowsArch,
+  resolveTarget,
+  runtimeGlibc,
   sha256,
 };

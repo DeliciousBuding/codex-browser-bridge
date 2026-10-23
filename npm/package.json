@@ -57,6 +57,6 @@
   "engines": {
     "node": ">=18"
   },
-  "os": ["win32"],
+  "os": ["win32", "linux"],
   "cpu": ["x64", "arm64"]
 }

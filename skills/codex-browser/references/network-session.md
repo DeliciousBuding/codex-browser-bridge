@@ -29,9 +29,12 @@ calls, arbitrary Runtime JavaScript, and destructive methods remain blocked.
 | Tool | Purpose |
 |------|---------|
 | `codex_name_session` | Give the current browser session a diagnostic name |
-| `codex_finalize` | Close bridge-owned tabs and release resources |
+| `codex_finalize` | Send official `turnEnded`; preserve marked handoff/deliverable tabs |
 | `codex_get_info` | Read bridge and extension metadata |
 | `codex_doctor` | Check pipe connectivity, installation, and browser metadata |
 
 `codex_doctor` is the only schema marked `anthropic/alwaysLoad`; use it when
 connectivity is unknown. Call `codex_finalize` when done with bridge-owned tabs.
+The extension closes unmarked agent-created tabs and releases unmarked claimed
+user tabs; a disconnected transport does not prove cleanup succeeded. After a
+successful finalization, the same MCP process can start a fresh turn.
