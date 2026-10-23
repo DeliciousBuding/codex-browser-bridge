@@ -217,6 +217,7 @@ dependencies = [
  "base64",
  "clap",
  "criterion",
+ "libc",
  "predicates",
  "serde",
  "serde_json",

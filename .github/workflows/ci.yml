@@ -63,7 +63,11 @@ jobs:
         run: cargo build --locked --release --target aarch64-pc-windows-msvc
 
   npm:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -94,21 +98,31 @@ jobs:
           npm run check:package
 
   test-lib:
-    # The reconnect tests in client.rs use tokio duplex mocks under
-    # cfg(not(windows)) — run them on Linux where PipeStream = DuplexStream.
-    # The shipped binary stays Windows-only; this job only exercises
-    # platform-agnostic logic (reconnect state machine, frame round-trip).
-    runs-on: ubuntu-latest
+    # Native GNU builds keep Unix socket tests and both shipped Linux targets
+    # covered. Ubuntu 24.04 sets the binary glibc compatibility floor to 2.39.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
         with:
+          targets: ${{ matrix.target }}
           components: clippy
-      - name: Test non-Windows harness
+      - name: Test Linux
         timeout-minutes: 10
         shell: bash
         run: cargo test --locked
-      - name: Clippy non-Windows harness
+      - name: Clippy Linux
         shell: bash
         run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Build Linux release
+        shell: bash
+        run: cargo build --locked --release --target "${{ matrix.target }}"

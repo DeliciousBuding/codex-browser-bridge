@@ -1,8 +1,5 @@
 use codex_browser_bridge::{
-    browser::{
-        build_click_script, build_fill_script, decode_tabs, decode_user_tabs, json_escaped,
-        parse_tab_id,
-    },
+    browser::{build_fill_script, decode_tabs, decode_user_tabs, json_escaped, parse_tab_id},
     browser_test_support::{is_tab_gone_error, is_transient_load_error},
     error::BridgeError,
     security::{validate_file_path, validate_url},
@@ -125,12 +122,9 @@ c"]"#,
 }
 
 #[test]
-fn click_and_fill_scripts_embed_escaped_selector_and_value() {
-    let click = build_click_script(r#"button[data-x="yes"]"#);
+fn fill_script_embeds_escaped_selector_and_value() {
     let fill = build_fill_script("#name", "A\nB\\C");
 
-    assert!(click.contains(r#"document.querySelector("button[data-x=\"yes\"]")"#));
-    assert!(click.contains("el.click()"));
     assert!(fill.contains(r##"document.querySelector("#name")"##));
     assert!(fill.contains("\"A\\nB\\\\C\""));
     assert!(fill.contains("dispatchEvent(new Event('input',{bubbles:true}))"));

@@ -1,12 +1,33 @@
 # ROADMAP
 
-## Status: v1.11.4 shipped (2026-10-22)
+## Current source: unreleased (2026-10-24)
+
+The goal is complete browser capability access for non-Codex agents. Current
+source registers 64 tools (`basic` 45 / `network` 63 / `full` 64). A tool count
+does not establish method or semantic parity; maintain the detailed status in
+[docs/official-parity.md](docs/official-parity.md).
+
+Source includes exact browser-instance binding and pinned reconnect, official
+history/management/viewport/visibility capabilities, handoff/deliverable marks,
+full-page capture, backend-DOM-ID accessibility actions, strict locator operations,
+official CUA button/modifier/path fields, a shared non-replayed pointer dispatcher,
+session-virtual clipboard, WebMCP, page-asset bundles, and local content exports.
+Turn finalization uses official `turnEnded`;
+rebinding cannot silently abandon an owned turn. Shell `tools`/`call`/`batch`
+reuse the MCP implementation and add bounded output, not extra browser parity.
+
+Linux Unix-socket transport and GNU x64/arm64 native CI/release packaging are in
+source (glibc >= 2.39 for release binaries). The current source passed all native
+gates on Ubuntu 24.04/glibc 2.39 x64 and an arm64 release compile under QEMU.
+Windows Edge passed an 18-check synthetic-tab live smoke, not the full surface.
+No Linux extension live run or published release is implied. macOS runtime
+support is unverified.
+
+## Latest published: v1.11.4 (2026-10-22)
 
 52 MCP tools, dual-era MCP protocol support (`2024-11-05` … `2026-07-28`), tool behavior annotations, CDP event architecture, structured network monitoring, `--mode doctor` CLI, JPEG/WebP screenshots, a verified ChatGPT desktop app + browser-extension compatibility baseline, and one-command Claude Code plugin distribution. Codex / ChatGPT desktop use their native browser integration and do not install the bridge as a plugin. See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 **Upstream branding:** OpenAI documents the browser surface as the ChatGPT browser extension. The `codex-browser-use` pipe name and protocol are unchanged, so no bridge-side migration was needed.
-
-**Architecture health (SUPER):** S 5, U 5, P 5, E 3 (Windows-only), R 5 = **23/25**. Remaining gap is platform reach (macOS/Linux transport), not architecture.
 
 ### Completed releases
 
@@ -26,7 +47,9 @@
 
 ## Next — Distribution & protocol depth
 
-The tool layer is saturated. The honest gaps are runtime robustness, supply chain, performance baselines, and test coverage — not more tools.
+Prioritize the remaining method/semantic gaps in the parity matrix and verify
+them against the actual extension service. Runtime robustness, distribution and
+performance checks support that goal; none replaces functional parity.
 
 ### P0 — Runtime robustness & supply chain
 
@@ -57,13 +80,17 @@ The tool layer is saturated. The honest gaps are runtime robustness, supply chai
 
 ---
 
-## v2.0.0 — Cross-platform
+## Platform verification and distribution
 
-- [ ] Unix domain socket transport (macOS/Linux). The ChatGPT desktop app on Darwin uses a different IPC mechanism than Windows named pipes — needs research on the actual socket naming.
-- [ ] Non-Windows CI matrix (ubuntu-latest, macos-latest).
-- [ ] npm `os` field expanded to `darwin`, `linux`.
-- [ ] WSL: auto-select the Windows named pipe from a WSL guest.
-- Effort: L
+- [x] Linux Unix transport, identity/permission checks, and transport diagnostics in source.
+- [x] Linux GNU x64/arm64 native CI/release jobs and npm platform selection in source.
+- [ ] Complete full-surface Windows and Linux extension live tests. Windows x64 currently has an 18-check synthetic-tab Edge smoke; Linux x64 has native Rust/Node gates and no-browser doctor only; arm64 has compile-only evidence.
+- [ ] Run release preflight and publish a new version when release preparation is requested.
+- [ ] Research and test an actual macOS extension endpoint before claiming macOS support.
+
+WSL Linux processes use Linux sockets in their own environment. A Windows binary
+launched through WSL interop uses Windows pipes; these are separate transports,
+not automatic cross-OS discovery.
 
 ---
 

@@ -4,9 +4,23 @@ use tokio::process::Command;
 #[cfg(windows)]
 use tokio::time::{timeout, Duration};
 
-use crate::error::{BridgeError, Result};
+#[cfg(not(unix))]
+use crate::error::BridgeError;
+use crate::error::Result;
 
 const CODEX_PIPE_PREFIX: &str = "codex-browser-use";
+#[cfg(unix)]
+pub const UNIX_SOCKET_DIRECTORY: &str = "/tmp/codex-browser-use";
+
+pub const fn transport_kind() -> &'static str {
+    if cfg!(windows) {
+        "windows_named_pipe"
+    } else if cfg!(unix) {
+        "unix_socket"
+    } else {
+        "unsupported"
+    }
+}
 #[cfg(windows)]
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 #[cfg(windows)]
@@ -23,11 +37,51 @@ pub async fn discover_codex_pipes() -> Result<Vec<PipeInfo>> {
     discover_codex_pipes_with_timeout(DISCOVERY_TIMEOUT).await
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
+pub async fn discover_codex_pipes() -> Result<Vec<PipeInfo>> {
+    discover_unix_sockets_in(std::path::Path::new(UNIX_SOCKET_DIRECTORY))
+}
+
+#[cfg(not(any(windows, unix)))]
 pub async fn discover_codex_pipes() -> Result<Vec<PipeInfo>> {
     Err(BridgeError::User(
-        "codex-browser-bridge pipe discovery only supports Windows named pipes".into(),
+        "browser bridge requires Windows named pipes or Unix sockets".into(),
     ))
+}
+
+#[cfg(unix)]
+fn discover_unix_sockets_in(directory: &std::path::Path) -> Result<Vec<PipeInfo>> {
+    if let Err(err) = std::fs::symlink_metadata(directory) {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            return Ok(Vec::new());
+        }
+        return Err(err.into());
+    }
+    crate::pipe::validate_socket_directory(directory)?;
+    let mut sockets = Vec::new();
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("sock") {
+            continue;
+        }
+        let Some(uuid) = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        if crate::pipe::validate_unix_socket(&path).is_err() {
+            continue;
+        }
+        sockets.push(PipeInfo {
+            name: path.to_string_lossy().into_owned(),
+            uuid: uuid.to_string(),
+        });
+    }
+    sockets.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(sockets)
 }
 
 #[cfg(windows)]
@@ -85,7 +139,31 @@ pub fn extract_uuid(name: &str) -> Option<String> {
 }
 
 pub fn pipe_path(name: &str) -> String {
-    format!(r"\\.\pipe\{name}")
+    transport_path(name)
+}
+
+/// Resolve a discovered transport name or explicit endpoint override.
+pub fn transport_path(name: &str) -> String {
+    #[cfg(windows)]
+    {
+        if name.starts_with(r"\\.\pipe\") {
+            name.into()
+        } else {
+            format!(r"\\.\pipe\{name}")
+        }
+    }
+    #[cfg(unix)]
+    {
+        if std::path::Path::new(name).is_absolute() {
+            name.into()
+        } else {
+            format!("{UNIX_SOCKET_DIRECTORY}/{name}")
+        }
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        name.into()
+    }
 }
 
 #[cfg(test)]
@@ -128,6 +206,7 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn pipe_path_prefixes_windows_pipe_namespace() {
         assert_eq!(
@@ -151,13 +230,62 @@ mod tests {
         assert!(err.to_string().contains("pipe enumeration timed out"));
     }
 
-    #[cfg(not(windows))]
-    #[tokio::test]
-    async fn discovery_reports_windows_only_on_other_platforms() {
-        let err = discover_codex_pipes().await.unwrap_err();
+    #[cfg(unix)]
+    #[test]
+    fn socket_path_keeps_absolute_overrides() {
+        assert_eq!(
+            pipe_path("instance.sock"),
+            "/tmp/codex-browser-use/instance.sock"
+        );
+        assert_eq!(
+            pipe_path("/tmp/custom/instance.sock"),
+            "/tmp/custom/instance.sock"
+        );
+    }
 
-        assert!(err
-            .to_string()
-            .contains("only supports Windows named pipes"));
+    #[cfg(unix)]
+    #[test]
+    fn unix_discovery_only_returns_private_real_sockets() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        use std::os::unix::net::UnixListener;
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let valid = root.path().join("valid.sock");
+        let _valid_listener = UnixListener::bind(&valid).unwrap();
+        std::fs::set_permissions(&valid, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let shared = root.path().join("shared.sock");
+        let _shared_listener = UnixListener::bind(&shared).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o666)).unwrap();
+        std::fs::write(root.path().join("file.sock"), b"not a socket").unwrap();
+        symlink(&valid, root.path().join("link.sock")).unwrap();
+        let _other_listener = UnixListener::bind(root.path().join("other.extension")).unwrap();
+
+        let sockets = discover_unix_sockets_in(root.path()).unwrap();
+        assert_eq!(sockets.len(), 1);
+        assert_eq!(sockets[0].name, valid.to_str().unwrap());
+        assert_eq!(sockets[0].uuid, "valid");
+        assert!(discover_unix_sockets_in(&root.path().join("missing"))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_discovery_rejects_unsafe_directories_but_accepts_official_sticky_mode() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let directory = root.path().join("sockets");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(discover_unix_sockets_in(&directory).is_err());
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o1777)).unwrap();
+        assert!(discover_unix_sockets_in(&directory).unwrap().is_empty());
+        let alias = root.path().join("alias");
+        symlink(&directory, &alias).unwrap();
+        assert!(discover_unix_sockets_in(&alias).is_err());
+        let nested = directory.join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        assert!(discover_unix_sockets_in(&alias.join("nested")).is_err());
     }
 }

@@ -4,6 +4,61 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Current source registers 64 MCP tools (`basic` 45 / `network` 63 / `full` 64).
+  `codex_locator` adds strict CSS/role/text/label/placeholder/test-id reads and
+  actions; iframe and chained-locator semantics remain partial. `codex_cua_move`
+  adds pointer movement and coordinate/backend-node clicks support double-click.
+- CUA pointer parameters now follow the official surface: button 1..5,
+  `keypress`/`keys` modifiers, `scrollX`/`scrollY`, and drag `path[]`. One
+  non-replayed CDP dispatcher serves CUA and locator actions and attempts a
+  release after partial press/move failures. CSS `codex_click` and
+  `codex_hover` now use the locator hit test plus that pointer path instead of
+  JavaScript `click()` or synthetic hover events. Scroll uses the official
+  `Input.synthesizeScrollGesture` path. Current extension builds apply but do
+  not acknowledge `mouseMoved`, so movement waits in a bounded no-ack window;
+  drag latency therefore scales with the supplied path length.
+- Shell `tools [NAME]`, `call NAME [JSON]`, and same-session JSONL `batch` commands
+  reuse MCP profiles and handlers. Output defaults to 16384 bytes per result and
+  summarizes images; `--finalize` attempts turn cleanup even after failure.
+- Linux `/tmp/codex-browser-use/*.sock` discovery and validated Unix transport,
+  with socket owner/mode, directory and peer-UID checks. Doctor adds transport
+  kind/path while retaining legacy `pipe_*` fields.
+- Native Linux GNU x64/arm64 CI/release jobs and npm package selection in source
+  (glibc >= 2.39 for release binaries); existing Windows asset names remain stable.
+  These additions are unreleased; configured jobs and compilation alone do not
+  establish passing CI, live Linux compatibility, or macOS runtime support.
+- Browser-instance discovery and exact binding. `codex_list_browsers` reports
+  stable extension instance IDs, browser family, profile metadata,
+  capabilities, and pipe transport; `codex_bind_browser` pins one instance.
+- Fail-closed multi-instance selection and instance-pinned reconnect. The
+  bridge no longer silently switches between two live Edge/Chrome profiles.
+- Official capability alignment for browser history, Chromium management,
+  viewport override, visibility, tab handoff/deliverable marks, and full-page
+  screenshots.
+- An official surface drift baseline and `scripts/check-official-drift.js` for
+  tracking changes to the bundled Codex Browser plugin API, command catalog,
+  `browser`/`chrome` package manifests, and Chrome/Edge extension-family catalog.
+- `docs/official-parity.md` records which official capabilities are bridged,
+  partial, conditional, app-private, or out of scope.
+
+### Fixed
+
+- Interactive CLI `try` commands now preserve raw JSON argument strings.
+- Doctor output now includes browser family, extension instance ID, extension
+  ID, and profile name for every connected pipe.
+- Browser rebinding closes the old transport and requires prior finalization or
+  explicit `end_previous_turn=true` when tabs are owned, avoiding abandoned turns.
+- `codex_finalize` sends official `turnEnded` and preserves marked
+  handoff/deliverable tabs; a disconnected pipe is not successful turn cleanup.
+- Accessibility lookup returns backend DOM `node_id`, separate AX IDs and an
+  `actionable` flag; AX-only nodes are not passed to DOM actions.
+- Connection verification and subsequent requests now use the same session and
+  turn IDs.
+- Doctor separates stale transport-name notes from health warnings and explains
+  ambiguous same-family instances.
+
 ## [1.11.4] - 2026-10-22
 
 ### Changed

@@ -23,21 +23,29 @@ Read only the reference needed for the current task:
 - Tabs and navigation: [references/tabs-navigation.md](references/tabs-navigation.md)
 - DOM, screenshots, and input: [references/dom-input-capture.md](references/dom-input-capture.md)
 - Network, CDP, and session control: [references/network-session.md](references/network-session.md)
+- Shell CLI commands: [references/cli.md](references/cli.md)
+- Official capability parity and browser identity: [references/official-parity.md](references/official-parity.md)
 - Error recovery and security: [references/recovery-safety.md](references/recovery-safety.md)
 
-One MCP server process connects to one extension pipe. It does not merge tabs
-from multiple browser profiles.
+One MCP server session controls one browser-extension instance. Use
+`codex_list_browsers` whenever the target is ambiguous, then
+`codex_bind_browser` with the exact `browser_id`. Never choose between two Edge
+or Chrome instances by pipe name.
 
 ## Minimal Workflow
 
-1. Use `codex_create_tab` for a new page, or `codex_user_tabs` followed by
+1. If several browser instances are live, call `codex_list_browsers` and bind
+   the exact requested one with `codex_bind_browser`.
+2. Use `codex_create_tab` for a new page, or `codex_user_tabs` followed by
    `codex_claim_tab` for an existing logged-in tab.
-2. Use `codex_nav_and_wait` rather than separate navigate and wait calls.
-3. Prefer `codex_find_element` plus `codex_click_element`, or
+3. Use `codex_nav_and_wait` rather than separate navigate and wait calls.
+4. Prefer `codex_find_element` plus `codex_click_element`, or
    `codex_dom_snapshot` plus `codex_dom_click`, over fragile CSS selectors.
-4. Use `codex_form_fill` for multi-field forms and
+5. Use `codex_form_fill` for multi-field forms and
    `codex_screenshot` with `format: "jpeg"` when image tokens matter.
-5. Call `codex_finalize` after closing work in bridge-owned tabs.
+6. Use `codex_mark_tab` for requested deliverables or later-turn handoff.
+7. Call `codex_finalize` after closing work in bridge-owned tabs. It sends the
+   official `turnEnded`; marked handoff/deliverable tabs are preserved.
 
 ## Operating Rules
 
@@ -47,15 +55,35 @@ from multiple browser profiles.
 - Navigation accepts only `http://` and `https://`.
 - Use `codex_bring_to_front` before screenshots or CDP on background tabs.
 - Use `codex_execute_cdp` only when no dedicated tool covers the task.
+- `codex_dom_snapshot` and `codex_find_element` return backend DOM IDs for
+  actions. AX-only nodes are marked `actionable=false` and cannot be clicked.
+- `codex_locator` covers strict selector/role/text/label/placeholder/test-id
+  operations; iframe and chained-locator behavior is not fully compatible.
+- CUA pointer tools accept official button 1..5, modifier names and drag
+  `path[]`; `click_count=2` is a double-click. Current extensions do not
+  acknowledge `mouseMoved`, so drag latency follows path length. CSS
+  `codex_click`/`codex_hover` reuse the locator hit test and trusted pointer.
+- Rebinding with owned tabs requires prior `codex_finalize` or explicit
+  `end_previous_turn=true` on `codex_bind_browser`; never leave an old turn
+  running implicitly.
 - Ask before turning on raw cookie values or accessing sensitive account pages.
 
 ## Profiles
 
 The plugin default is `full`: modern clients defer schemas through tool search.
-For clients without tool search, set `CODEX_BRIDGE_PROFILE=basic` to expose
-34 core tools, or `network` for 51 tools. `full` exposes all 52.
+Current source counts are `basic` 45, `network` 63, and `full` 64. Clients
+without tool search can set `CODEX_BRIDGE_PROFILE=basic` or `network` when a
+smaller surface is intentional.
+
+The current source also exposes `codex_clipboard`, `codex_webmcp`, and
+`codex_content_export`; read their MCP schemas before use. They are
+bridge-native contracts with explicit bounds, not claims that every official
+app-side policy or artifact service is inherited.
 
 ## Compatibility
 
 Chrome and Edge are tested. Brave, Opera, and Vivaldi use the same
-Chromium/CDP pipeline but are not live-tested by this project.
+Chromium/CDP pipeline but are not live-tested by this project. Linux GNU x64
+and arm64 Unix transport is in current source and requires glibc >= 2.39 in
+published binaries; no release or live verification exists yet. A compiling
+macOS target is not a runtime support claim.
