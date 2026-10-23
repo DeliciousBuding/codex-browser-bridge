@@ -146,6 +146,8 @@ async function run() {
       "skills/codex-browser/references/dom-input-capture.md",
       "skills/codex-browser/references/network-session.md",
       "skills/codex-browser/references/recovery-safety.md",
+      "skills/codex-browser/references/cli.md",
+      "skills/codex-browser/references/official-parity.md",
     ]);
     assert.deepStrictEqual(requiredFilesForEnv({ CODEX_BRIDGE_REQUIRE_CHECKSUMS: "1" }), [
       "package.json",
@@ -163,6 +165,8 @@ async function run() {
       "skills/codex-browser/references/dom-input-capture.md",
       "skills/codex-browser/references/network-session.md",
       "skills/codex-browser/references/recovery-safety.md",
+      "skills/codex-browser/references/cli.md",
+      "skills/codex-browser/references/official-parity.md",
       "checksums.json",
     ]);
     assert.deepStrictEqual(
@@ -399,8 +403,13 @@ async function run() {
     });
     assert.strictEqual(proxyForUrl("https://github.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: "*" }), null);
     assert.strictEqual(proxyForUrl("https://api.github.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: ".github.com" }), null);
+    assert.strictEqual(proxyForUrl("https://github.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: "github.com:443" }), null);
     assert.deepStrictEqual(
       proxyForUrl("https://objects.githubusercontent.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: ".github.com" }),
+      { host: "127.0.0.1", port: 7897 }
+    );
+    assert.deepStrictEqual(
+      proxyForUrl("https://notgithub.com/x", { HTTPS_PROXY: "http://127.0.0.1:7897", NO_PROXY: ".github.com" }),
       { host: "127.0.0.1", port: 7897 }
     );
     // TLS-terminating proxies are out of scope for the installer.

@@ -36,7 +36,8 @@ function proxyForUrl(urlStr, env = process.env) {
       .map((entry) => entry.trim().toLowerCase())
       .filter(Boolean);
     for (const entry of entries) {
-      if (entry === "*" || host === entry || host.endsWith(entry.replace(/^\./, ""))) {
+      const candidate = entry.replace(/^\./, "").replace(/:\d+$/, "");
+      if (entry === "*" || host === candidate || host.endsWith(`.${candidate}`)) {
         return null;
       }
     }

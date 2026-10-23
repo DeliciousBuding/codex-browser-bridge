@@ -22,6 +22,8 @@ function requiredFilesForEnv(env = process.env) {
     "skills/codex-browser/references/dom-input-capture.md",
     "skills/codex-browser/references/network-session.md",
     "skills/codex-browser/references/recovery-safety.md",
+    "skills/codex-browser/references/cli.md",
+    "skills/codex-browser/references/official-parity.md",
   ];
 
   if (env.CODEX_BRIDGE_REQUIRE_CHECKSUMS === "1") {
