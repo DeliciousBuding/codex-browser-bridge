@@ -267,6 +267,37 @@ async fn sequential_uppercase_uses_a_real_shift_chord() {
 }
 
 #[tokio::test]
+async fn sequential_punctuation_uses_layout_independent_insert_text_once() {
+    let (client, mut peer) = setup();
+    client.mark_attached(7).await;
+    let task = tokio::spawn(async move {
+        locator::run(
+            &client,
+            "7",
+            json!({"selector":"input","action":"type","value":"-+!_","timeout_ms":2000}),
+        )
+        .await
+    });
+    foreground(&mut peer).await;
+    let request = next(&mut peer).await;
+    locator_reply(&mut peer, &request, json!({"ok":true,"focused":true})).await;
+    for character in ["-", "+", "!", "_"] {
+        let request = next(&mut peer).await;
+        assert_eq!(request["params"]["method"], "Input.insertText");
+        assert_eq!(request["params"]["commandParams"]["text"], character);
+        reply(&mut peer, &request, json!({})).await;
+    }
+    assert_eq!(
+        timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()["characters"],
+        4
+    );
+}
+
+#[tokio::test]
 async fn invalid_composition_fails_before_transport() {
     let (client, mut peer) = setup();
     let result = locator::run(

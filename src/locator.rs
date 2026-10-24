@@ -467,7 +467,11 @@ async fn run_until(
                     "sequential text; partial input was not replayed".into(),
                 ));
             }
-            if ch.is_ascii() && !ch.is_ascii_control() {
+            // Punctuation virtual-key mappings depend on the remote keyboard
+            // layout (Windows can ACK '-' without inserting it). Alphanumeric
+            // keys and space retain physical event semantics; other text uses
+            // CDP insertion once so its characters are layout-independent.
+            if ch.is_ascii_alphanumeric() || ch == ' ' {
                 // Let the shared dispatcher finish its bounded release cleanup;
                 // canceling it at the locator deadline could strand a held key.
                 let keys = if ch.is_ascii_uppercase() {
