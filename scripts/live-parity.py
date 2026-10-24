@@ -205,6 +205,33 @@ def main():
         assert locator("value", selector="#name")["value"] == "Grace"
         checks.append("trusted-control-a")
         locator("wait", selector="#hidden-status", state="hidden", timeout_ms=1000)
+
+        # Observation tools must actually observe. The extension delivers CDP
+        # notifications inside an `onCDPEvent` envelope tagged with source.tabId;
+        # a regression there shows up as zero logs/requests with isError=false,
+        # so assert on content rather than on the call succeeding.
+        bridge.tool("codex_evaluate", {
+            "tab_id": tab_id,
+            "expression": "window.__parityTimers=["
+                          "setInterval(()=>console.log('parity-log-tick'),100),"
+                          "setInterval(()=>fetch('/locator.html?parity='+Date.now()).catch(()=>{}),150)"
+                          "];true",
+        })
+        logs = bridge.value("codex_console_logs", {"tab_id": tab_id, "duration_ms": 1200})
+        assert logs["log_count"] >= 3, f"console_logs captured {logs['log_count']} logs"
+        assert logs["raw_event_count"] >= logs["log_count"]
+        texts = [arg.get("value") for entry in logs["logs"] for arg in entry.get("args", [])]
+        assert "parity-log-tick" in texts, "console_logs missed the marker log"
+        network = bridge.value("codex_network_monitor", {"tab_id": tab_id, "duration_ms": 1200})
+        ticks = [r for r in network["requests"] if "parity=" in r.get("url", "")]
+        assert len(ticks) >= 3, f"network_monitor paired {len(ticks)} parity requests"
+        assert all(r.get("request_id") for r in ticks)
+        bridge.tool("codex_evaluate", {
+            "tab_id": tab_id,
+            "expression": "window.__parityTimers.forEach(clearInterval);delete window.__parityTimers;true",
+        })
+        checks += ["console-logs-nonempty", "network-monitor-paired"]
+
         locator("wait", selector="#never-present", state="detached", timeout_ms=1000)
         failed_wait = bridge.tool("codex_locator", {"tab_id": tab_id, "action": "wait",
                           "selector": "button", "nth": 999, "timeout_ms": 100}, True)

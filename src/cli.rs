@@ -11,9 +11,69 @@ use clap::Subcommand;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{self, Write};
+use std::path::Path;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 
 const MAX_COMMAND_BYTES: usize = 1024 * 1024;
+const SESSION_FILE_VERSION: u32 = 1;
+
+/// Tools that create or claim a tab. A tab is bound to the process session that
+/// created it, so a one-shot `call` without cleanup leaves it unowned.
+const TAB_OWNING_TOOLS: &[&str] = &["codex_create_tab", "codex_claim_tab"];
+#[derive(Debug, Deserialize, serde::Serialize)]
+struct SessionFile {
+    version: u32,
+    session_id: String,
+    turn_id: String,
+}
+
+/// Read persisted session identifiers. A missing or malformed file is treated as
+/// "no session": the shell starts a fresh one instead of failing the command.
+pub fn load_session(path: &Path) -> Option<(String, String)> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let parsed: SessionFile = serde_json::from_str(&text).ok()?;
+    if parsed.version != SESSION_FILE_VERSION
+        || parsed.session_id.is_empty()
+        || parsed.turn_id.is_empty()
+    {
+        return None;
+    }
+    Some((parsed.session_id, parsed.turn_id))
+}
+
+/// Persist the active session so the next process can continue the same browser
+/// turn. Written through a temporary file and renamed to avoid a partial file.
+pub fn save_session(path: &Path, session_id: &str, turn_id: &str) -> anyhow::Result<()> {
+    let payload = serde_json::to_vec(&SessionFile {
+        version: SESSION_FILE_VERSION,
+        session_id: session_id.to_string(),
+        turn_id: turn_id.to_string(),
+    })?;
+    // A unique sibling avoids two bridge processes sharing one temporary file.
+    // Rename replaces the destination on both Windows and Unix without exposing
+    // a partially written payload.
+    let temporary = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(&temporary, payload)?;
+    if let Err(err) = std::fs::rename(&temporary, path) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(err.into());
+    }
+    Ok(())
+}
+
+pub fn clear_session(path: &Path) -> anyhow::Result<()> {
+    // The session ended; a stale file would attach the next call to a closed turn.
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err)
+            .with_context(|| format!("could not remove browser session file {}", path.display())),
+    }
+}
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -24,16 +84,9 @@ pub enum Command {
         name: String,
         #[arg(default_value = "{}")]
         arguments: String,
-        /// End the browser turn even on failure; preserves marked handoff/deliverable tabs.
-        #[arg(long)]
-        finalize: bool,
     },
     /// Read {"name":"codex_...","arguments":{}} JSONL from stdin in one session; stop on error.
-    Batch {
-        /// End the browser turn at EOF or on failure. No session is persisted between processes.
-        #[arg(long)]
-        finalize: bool,
-    },
+    Batch,
 }
 
 pub fn parse_output_budget(value: &str) -> Result<usize, String> {
@@ -59,24 +112,59 @@ fn empty_arguments() -> Value {
 }
 
 /// Run commands through the MCP server's existing profile, handlers and Content limits.
-/// Exiting does not implicitly endTurn; --finalize explicitly opts into that cleanup.
-pub async fn run_command(server: &Server, command: Command, budget: usize) -> anyhow::Result<()> {
+/// The caller decides whether this command uses the default one-shot cleanup.
+pub async fn run_command(
+    server: &Server,
+    command: Command,
+    budget: usize,
+    session_file: Option<&Path>,
+    finalize: bool,
+) -> anyhow::Result<()> {
     let mut reader = BufReader::new(tokio::io::stdin());
     let mut writer = io::stdout();
-    run_command_with_io(server, command, budget, &mut reader, &mut writer).await
+    run_command_with_io(
+        server,
+        command,
+        budget,
+        session_file,
+        finalize,
+        &mut reader,
+        &mut writer,
+    )
+    .await
 }
 
 async fn run_command_with_io<R: AsyncBufRead + Unpin, W: Write>(
     server: &Server,
     command: Command,
     budget: usize,
+    session_file: Option<&Path>,
+    finalize: bool,
     reader: &mut R,
     writer: &mut W,
 ) -> anyhow::Result<()> {
-    let finalize = matches!(
-        command,
-        Command::Call { finalize: true, .. } | Command::Batch { finalize: true }
-    );
+    // Ending the turn through the tool itself replaces the implicit lifecycle
+    // cleanup, and the persisted session must not outlive that turn.
+    let explicit_turn_end =
+        matches!(&command, Command::Call { name, .. } if name == "codex_finalize");
+    // `tools` never opens a turn, so it must not dial or send `turnEnded`.
+    let touches_browser = !matches!(&command, Command::Tools { .. });
+    let finalize = finalize && !explicit_turn_end;
+    if let Command::Call { name, .. } = &command {
+        if TAB_OWNING_TOOLS.contains(&name.as_str()) {
+            if finalize {
+                bail!(
+                    "{name} creates or claims a browser tab, and this one-shot call would close it again immediately. Use `batch` (one session, several steps), `--session-file <path>` (continue in a later command), or `--keep-turn` to deliberately leave the tab open."
+                );
+            }
+            if session_file.is_none() {
+                tracing::warn!(
+                    tool = %name,
+                    "the created tab stays owned by a closed session; prefer batch or --session-file"
+                );
+            }
+        }
+    }
     let result = match command {
         Command::Tools { name } => {
             let tools = server.tool_list();
@@ -98,9 +186,15 @@ async fn run_command_with_io<R: AsyncBufRead + Unpin, W: Write>(
             }
             Err(err) => Err(anyhow::anyhow!("invalid arguments JSON: {err}")),
         },
-        Command::Batch { .. } => run_batch(server, reader, writer, budget).await,
+        Command::Batch => run_batch(server, reader, writer, budget).await,
     };
-    if finalize {
+    // Cleanup only applies to a turn this process actually opened. A rejected
+    // request or an empty batch never dialed, and dialing now would turn a
+    // validation error into a connection error.
+    let opened_turn =
+        finalize && touches_browser && server.client_snapshot().has_live_connection().await;
+    let mut turn_ended = false;
+    if opened_turn {
         // This goes through the same current server, including any bind_browser changes.
         // Do not short-circuit on an earlier failure: cleanup must still be attempted.
         let cleanup = call_tool(
@@ -125,8 +219,47 @@ async fn run_command_with_io<R: AsyncBufRead + Unpin, W: Write>(
                 )),
             };
         }
+        turn_ended = true;
     }
-    result
+    if explicit_turn_end && result.is_ok() {
+        turn_ended = true;
+    }
+    let persisted = if touches_browser {
+        persist_session(server, session_file, turn_ended).await
+    } else {
+        Ok(())
+    };
+    match (result, persisted) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(original), Ok(())) => Err(original),
+        (Ok(()), Err(session)) => Err(session),
+        (Err(original), Err(session)) => {
+            Err(anyhow::anyhow!("{original:#}; additionally, {session:#}"))
+        }
+    }
+}
+
+/// Save the active session for the next process, or drop it once the turn ended.
+async fn persist_session(
+    server: &Server,
+    session_file: Option<&Path>,
+    turn_ended: bool,
+) -> anyhow::Result<()> {
+    let Some(path) = session_file else {
+        return Ok(());
+    };
+    if turn_ended {
+        return clear_session(path);
+    }
+    // A command rejected before dialing must not create a session file for a
+    // turn that never existed. An existing file is left untouched in that case.
+    if !server.client_snapshot().has_live_connection().await {
+        return Ok(());
+    }
+    let (session_id, turn_id) = server.client_snapshot().session_ids().await;
+    save_session(path, &session_id, &turn_id)
+        .with_context(|| format!("could not persist browser session file {}", path.display()))?;
+    Ok(())
 }
 
 async fn call_tool(server: &Server, call: ToolCall) -> anyhow::Result<Value> {
@@ -439,7 +572,7 @@ pub fn split_args(s: &str) -> Vec<String> {
 mod tests {
     use super::parse_try_command;
     use super::split_args;
-    use super::{encode_result, run_command_with_io, Command};
+    use super::{encode_result, run_command_with_io, save_session, Command};
 
     #[test]
     fn split_args_keeps_quoted_segments() {
@@ -524,8 +657,10 @@ mod tests {
             Duration::from_secs(2),
             run_command_with_io(
                 &server,
-                Command::Batch { finalize: true },
+                Command::Batch,
                 16384,
+                None,
+                true,
                 &mut reader,
                 &mut output,
             ),
@@ -598,12 +733,17 @@ mod tests {
         let input = b"{\"name\":\"codex_name_session\",\"arguments\":{\"name\":\"first\"}}\n{\"name\":\"codex_name_session\",\"arguments\":{\"name\":\"second\"}}";
         let mut reader = tokio::io::BufReader::new(&input[..]);
         let mut output = Vec::new();
+        let dir = tempfile::tempdir().unwrap();
+        let session_file = dir.path().join("session.json");
+        save_session(&session_file, "session-before", "turn-before").unwrap();
         timeout(
             Duration::from_secs(2),
             run_command_with_io(
                 &server,
-                Command::Batch { finalize: true },
+                Command::Batch,
                 16384,
+                Some(&session_file),
+                true,
                 &mut reader,
                 &mut output,
             ),
@@ -623,5 +763,54 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0]["content"][0]["text"], "Session named: first");
         assert_eq!(results[1]["content"][0]["text"], "Session named: second");
+        assert!(!session_file.exists());
+    }
+}
+
+#[cfg(test)]
+mod session_file_tests {
+    use super::*;
+
+    #[test]
+    fn session_file_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        assert!(load_session(&path).is_none());
+
+        save_session(&path, "session-1", "turn-1").unwrap();
+        assert_eq!(
+            load_session(&path),
+            Some(("session-1".to_string(), "turn-1".to_string()))
+        );
+
+        save_session(&path, "session-2", "turn-2").unwrap();
+        assert_eq!(
+            load_session(&path),
+            Some(("session-2".to_string(), "turn-2".to_string()))
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().contains(".tmp-"))
+            .collect();
+        assert!(leftovers.is_empty(), "temporary files left: {leftovers:?}");
+
+        clear_session(&path).unwrap();
+        assert!(load_session(&path).is_none());
+    }
+
+    #[test]
+    fn malformed_or_foreign_session_file_is_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+
+        std::fs::write(&path, b"not json").unwrap();
+        assert!(load_session(&path).is_none());
+
+        std::fs::write(&path, br#"{"version":99,"session_id":"s","turn_id":"t"}"#).unwrap();
+        assert!(load_session(&path).is_none());
+
+        std::fs::write(&path, br#"{"version":1,"session_id":"","turn_id":"t"}"#).unwrap();
+        assert!(load_session(&path).is_none());
     }
 }

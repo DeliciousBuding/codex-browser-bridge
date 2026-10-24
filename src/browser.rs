@@ -122,12 +122,28 @@ pub async fn mark_tab(client: &Client, tab_id: &str, status: &str) -> Result<()>
         .map(|_| ())
 }
 
+/// Management methods that destroy browser state. They stay available, but only
+/// behind an explicit confirmation so an agent cannot infer them from an
+/// "organize my tabs" request.
+const DESTRUCTIVE_MANAGEMENT_METHODS: &[&str] = &["remove", "delete", "clear", "close", "discard"];
+
+pub fn management_method_is_destructive(method: &str) -> bool {
+    let normalized = method.trim().to_ascii_lowercase();
+    DESTRUCTIVE_MANAGEMENT_METHODS.contains(&normalized.as_str())
+}
+
 pub async fn browser_management(
     client: &Client,
     namespace: &str,
     method: &str,
     args: Vec<Value>,
+    confirm_destructive: bool,
 ) -> Result<Value> {
+    if management_method_is_destructive(method) && !confirm_destructive {
+        return Err(BridgeError::User(format!(
+            "browser management method {namespace}.{method} removes or discards browser state; pass confirm=true only after the user explicitly asked for this change"
+        )));
+    }
     let raw = client
         .send_request(
             "executeUnhandledCommand",
@@ -228,10 +244,30 @@ pub async fn close_tab(client: &Client, tab_id: &str) -> Result<()> {
 pub async fn navigate(client: &Client, tab_id: &str, url: &str) -> Result<()> {
     let url = validate_url(url)?;
     let id = parse_tab_id("navigate", tab_id)?;
-    client
+    let raw = client
         .execute_cdp(id, "Page.navigate", Some(json!({ "url": url })))
-        .await
-        .map(|_| ())
+        .await?;
+    ensure_navigation_accepted(&raw, &url)
+}
+
+/// `Page.navigate` reports transport success even when the navigation itself
+/// fails; the failure is carried in `errorText` while `loaderId` stays empty.
+/// Surface it instead of returning a success the caller cannot trust.
+fn ensure_navigation_accepted(raw: &RawValue, url: &str) -> Result<()> {
+    #[derive(Deserialize, Default)]
+    struct NavigationResult {
+        #[serde(rename = "errorText", default)]
+        error_text: Option<String>,
+    }
+
+    let parsed = serde_json::from_str::<NavigationResult>(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("decode Page.navigate result: {err}")))?;
+    match parsed.error_text.filter(|text| !text.is_empty()) {
+        Some(error_text) => Err(BridgeError::Protocol(format!(
+            "navigation to {url} failed: {error_text}"
+        ))),
+        None => Ok(()),
+    }
 }
 
 pub async fn navigate_back(client: &Client, tab_id: &str) -> Result<()> {
@@ -302,6 +338,14 @@ pub async fn wait_for_load(client: &Client, tab_id: &str, timeout_ms: u64) -> Re
                 if let Some(state) = runtime_value_string(&raw)? {
                     last = state;
                     if last == "complete" {
+                        // A browser error page also reports readyState=complete;
+                        // distinguish a real load from a failed navigation.
+                        let url = get_url(client, tab_id).await?;
+                        if url.starts_with("chrome-error://") {
+                            return Err(BridgeError::Protocol(format!(
+                                "tab {tab_id} loaded a browser error page ({url}); the navigation did not succeed"
+                            )));
+                        }
                         return Ok(last);
                     }
                 }
@@ -535,11 +579,32 @@ pub async fn hover(client: &Client, tab_id: &str, selector: &str) -> Result<()> 
     let id = parse_tab_id("hover", tab_id)?;
     let (x, y) = pointer_target(client, tab_id, selector).await?;
     crate::pointer::move_to(client, id, x, y, &[]).await?;
-    // Pointer movement is dispatched without waiting for an extension ack.
-    // Give the renderer a short turn to process mouseover before a subsequent
-    // locator read observes hover-driven DOM changes.
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    Ok(())
+    wait_for_hover_at(client, id, x, y).await
+}
+
+async fn wait_for_hover_at(client: &Client, tab_id: i64, x: f64, y: f64) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_millis(1_500);
+    let expression = format!(
+        "(()=>{{const e=document.elementFromPoint({x},{y});return !!e&&e.matches(':hover')}})()"
+    );
+    loop {
+        let raw = client
+            .execute_cdp(
+                tab_id,
+                "Runtime.evaluate",
+                Some(json!({ "expression": expression, "returnByValue": true })),
+            )
+            .await?;
+        if runtime_value_string(&raw)?.as_deref() == Some("true") {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(BridgeError::Protocol(format!(
+                "pointer move was not observed as hover at ({x}, {y})"
+            )));
+        }
+        sleep_until(deadline, Duration::from_millis(25)).await;
+    }
 }
 
 /// Render the page to PDF via `Page.printToPDF`. Returns base64 byte count.
@@ -873,11 +938,12 @@ pub async fn network_monitor(client: &Client, tab_id: &str, duration_ms: u64) ->
     let id = parse_tab_id("network_monitor", tab_id)?;
     let duration_ms = bounded_duration_ms("duration_ms", duration_ms, 5_000, MAX_CAPTURE_MS)?;
     let (sub_id, mut rx, stats) = client
-        .subscribe_events_with_budget(
+        .subscribe_events_with_budget_for_tab(
             "Network.",
             &["Network.requestWillBeSent", "Network.responseReceived"],
             512,
             MAX_CAPTURE_EVENT_BYTES,
+            id,
         )
         .await;
     if let Err(err) = client.execute_cdp(id, "Network.enable", None).await {
@@ -888,8 +954,9 @@ pub async fn network_monitor(client: &Client, tab_id: &str, duration_ms: u64) ->
     client.execute_cdp(id, "Network.disable", None).await.ok();
     client.unsubscribe_events(sub_id).await;
 
-    let captured =
-        drain_events_with_byte_budget(&mut rx, MAX_CAPTURE_EVENT_BYTES, is_pairable_network_event);
+    let captured = drain_events_with_byte_budget(&mut rx, MAX_CAPTURE_EVENT_BYTES, |event| {
+        is_pairable_network_event(event)
+    });
     let stats = stats.snapshot();
     let truncated = stats.truncated || captured.truncated;
     let limit_reason = stats.limit_reason.or(captured.limit_reason);
@@ -1034,11 +1101,12 @@ pub async fn console_logs(client: &Client, tab_id: &str, duration_ms: u64) -> Re
     let id = parse_tab_id("console_logs", tab_id)?;
     let duration_ms = bounded_duration_ms("duration_ms", duration_ms, 5_000, MAX_CAPTURE_MS)?;
     let (sub_id, mut rx, stats) = client
-        .subscribe_events_with_budget(
+        .subscribe_events_with_budget_for_tab(
             "Runtime.consoleAPICalled",
             &[],
             512,
             MAX_CAPTURE_EVENT_BYTES,
+            id,
         )
         .await;
     if let Err(err) = client.execute_cdp(id, "Runtime.enable", None).await {
@@ -1155,14 +1223,21 @@ pub async fn cua_type(client: &Client, tab_id: &str, text: &str) -> Result<()> {
     if text.is_empty() {
         return Ok(());
     }
+    crate::pointer::ensure_foreground(client, id, Instant::now() + Duration::from_secs(3)).await?;
     client
-        .execute_cdp(id, "Input.insertText", Some(json!({ "text": text })))
+        .execute_cdp_once_with_timeout(
+            id,
+            "Input.insertText",
+            Some(json!({ "text": text })),
+            Duration::from_secs(10),
+        )
         .await
         .map(|_| ())
 }
 
 pub async fn cua_keypress(client: &Client, tab_id: &str, keys: &[String]) -> Result<()> {
     let id = parse_tab_id("cua_keypress", tab_id)?;
+    crate::pointer::ensure_foreground(client, id, Instant::now() + Duration::from_secs(3)).await?;
     crate::input::keypress(client, id, keys).await
 }
 
@@ -1893,7 +1968,7 @@ fn history_entry_id(raw: &RawValue, direction: HistoryDirection) -> Result<i64> 
     }
 }
 
-fn runtime_value_string(raw: &RawValue) -> Result<Option<String>> {
+pub(crate) fn runtime_value_string(raw: &RawValue) -> Result<Option<String>> {
     #[derive(Deserialize)]
     struct EvalResult {
         result: Option<EvalValue>,
@@ -2384,6 +2459,55 @@ mod tests {
             "Runtime.getProperties",
         ] {
             assert!(validate_generic_cdp_method(method).is_ok(), "{method}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod navigation_and_management_tests {
+    use super::*;
+
+    #[test]
+    fn navigation_error_text_is_reported() {
+        let raw = RawValue::from_string(
+            r#"{"frameId":"FRAME","loaderId":"","errorText":"net::ERR_CONNECTION_REFUSED"}"#.into(),
+        )
+        .unwrap();
+        let err = ensure_navigation_accepted(&raw, "http://127.0.0.1:1").unwrap_err();
+        assert!(err.to_string().contains("ERR_CONNECTION_REFUSED"), "{err}");
+    }
+
+    #[test]
+    fn navigation_with_loader_id_is_accepted() {
+        let raw = RawValue::from_string(r#"{"frameId":"FRAME","loaderId":"ABC"}"#.into()).unwrap();
+        assert!(ensure_navigation_accepted(&raw, "https://example.com").is_ok());
+    }
+
+    #[test]
+    fn navigation_without_result_body_is_accepted() {
+        let raw = RawValue::from_string("{}".into()).unwrap();
+        assert!(ensure_navigation_accepted(&raw, "https://example.com").is_ok());
+    }
+
+    #[test]
+    fn malformed_navigation_result_is_rejected() {
+        let raw = RawValue::from_string("\"not-a-navigation-result\"".into()).unwrap();
+        let err = ensure_navigation_accepted(&raw, "https://example.com").unwrap_err();
+        assert!(
+            err.to_string().contains("decode Page.navigate result"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn destructive_management_methods_are_identified() {
+        for method in ["remove", "delete", "clear", "close", "discard", " Remove "] {
+            assert!(management_method_is_destructive(method), "{method}");
+        }
+        for method in [
+            "query", "get", "create", "update", "move", "group", "search",
+        ] {
+            assert!(!management_method_is_destructive(method), "{method}");
         }
     }
 }

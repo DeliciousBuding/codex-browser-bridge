@@ -57,6 +57,10 @@ struct EventSubscription {
     id: u64,
     method_prefix: String,
     allowed_methods: Option<Vec<String>>,
+    /// When set, only events the extension attributes to this tab are delivered.
+    /// Events without a `source.tabId` stay deliverable so bridge-native
+    /// transports that don't tag events keep working.
+    tab_id: Option<i64>,
     max_buffered_bytes: Option<usize>,
     stats: Option<EventSubscriptionStats>,
     sender: mpsc::Sender<Value>,
@@ -65,8 +69,23 @@ struct EventSubscription {
 struct EventDispatchTarget {
     sender: mpsc::Sender<Value>,
     allowed_methods: Option<Vec<String>>,
+    tab_id: Option<i64>,
     max_buffered_bytes: Option<usize>,
     stats: Option<EventSubscriptionStats>,
+}
+
+/// Tab the extension attributed an event frame to, when it says so.
+fn event_tab_id(event: &Value) -> Option<i64> {
+    event.pointer("/source/tabId").and_then(Value::as_i64)
+}
+
+/// A subscription with no tab scope accepts every event; a scoped one accepts
+/// its own tab plus unscoped events from transports that don't annotate them.
+fn event_in_scope(scope: Option<i64>, event: &Value) -> bool {
+    match (scope, event_tab_id(event)) {
+        (Some(scope), Some(actual)) => scope == actual,
+        _ => true,
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -219,8 +238,26 @@ impl Client {
     }
 
     fn from_lazy_inner(factory: ConnectionFactory) -> Self {
-        let session_id = Uuid::new_v4().to_string();
-        let turn_id = Uuid::new_v4().to_string();
+        Self::from_lazy_inner_with_ids(factory, None)
+    }
+
+    /// Build a lazy client that reuses externally supplied session identifiers.
+    ///
+    /// Shell invocations are separate processes; callers that want a dependent
+    /// sequence (`createTab` then `navigate`) must reuse one browser session.
+    /// Passing `None` keeps the default of a fresh session per process.
+    pub fn lazy_with_selector_and_ids(
+        pipe_name: Option<String>,
+        selector: BrowserSelector,
+        ids: Option<(String, String)>,
+    ) -> Self {
+        let factory = selected_connection_factory(pipe_name, selector);
+        Self::from_lazy_inner_with_ids(factory, ids)
+    }
+
+    fn from_lazy_inner_with_ids(factory: ConnectionFactory, ids: Option<(String, String)>) -> Self {
+        let (session_id, turn_id) =
+            ids.unwrap_or_else(|| (Uuid::new_v4().to_string(), Uuid::new_v4().to_string()));
         Self {
             inner: Arc::new(ClientInner {
                 writer: Mutex::new(None),
@@ -359,7 +396,7 @@ impl Client {
 
     /// Test-only constructor: inject a custom connection factory so reconnect
     /// logic can be exercised without a real ChatGPT desktop browser-extension pipe.
-    #[cfg(all(test, not(windows)))]
+    #[cfg(test)]
     pub(crate) fn from_stream_with_factory<T: TransportIo + 'static>(
         stream: T,
         factory: ConnectionFactory,
@@ -458,6 +495,22 @@ impl Client {
 
     pub async fn has_live_connection(&self) -> bool {
         self.is_alive() && self.inner.writer.lock().await.is_some()
+    }
+
+    /// Current session and turn identifiers, used by the shell to persist one
+    /// browser session across separate processes.
+    pub async fn session_ids(&self) -> (String, String) {
+        let session = self.inner.session.read().await.clone();
+        (session.session_id, session.turn_id)
+    }
+
+    /// Dial if this client has not connected yet.
+    ///
+    /// A separate shell process can resume a session through `--session-file`
+    /// without having issued a request. Turn cleanup must still reach the
+    /// extension, so callers that end a turn may force the connection first.
+    pub async fn connect_if_needed(&self) -> Result<()> {
+        self.ensure_alive().await
     }
 
     /// Errors that mean the connection is broken and a reconnect may help.
@@ -593,14 +646,34 @@ impl Client {
                 // (e.g. Network.requestWillBeSent vs Network.responseReceived).
                 if value.get("id").is_none() {
                     if let Some(method) = value.get("method").and_then(|m| m.as_str()) {
+                        // The extension wraps debugger notifications as
+                        // `onCDPEvent` with `{method, params, source}` nested
+                        // under `params`. Unwrap that envelope before routing so
+                        // subscribers see the same shape as direct CDP frames.
+                        let event = if method == "onCDPEvent" {
+                            let Some(event) = value.get("params").cloned() else {
+                                continue;
+                            };
+                            event
+                        } else {
+                            value.clone()
+                        };
+                        let Some(event_method) = event.get("method").and_then(|m| m.as_str())
+                        else {
+                            continue;
+                        };
+                        let event_bytes = serde_json::to_vec(&event)
+                            .map(|encoded| encoded.len())
+                            .unwrap_or(frame.len());
                         let matched: Vec<EventDispatchTarget> = {
                             let mut subs = inner.event_subs.lock().await;
                             subs.retain(|s| !s.sender.is_closed());
                             subs.iter()
-                                .filter(|s| method.starts_with(s.method_prefix.as_str()))
+                                .filter(|s| event_method.starts_with(s.method_prefix.as_str()))
                                 .map(|s| EventDispatchTarget {
                                     sender: s.sender.clone(),
                                     allowed_methods: s.allowed_methods.clone(),
+                                    tab_id: s.tab_id,
                                     max_buffered_bytes: s.max_buffered_bytes,
                                     stats: s.stats.clone(),
                                 })
@@ -608,26 +681,32 @@ impl Client {
                         };
                         let mut closed_sender = false;
                         for sub in matched {
+                            // Tab scope is decided before any bookkeeping so a
+                            // noisy neighbour tab can't consume this
+                            // subscription's byte budget.
+                            if !event_in_scope(sub.tab_id, &event) {
+                                continue;
+                            }
                             if let Some(stats) = &sub.stats {
                                 stats.record_observed();
                             }
                             if let Some(allowed) = &sub.allowed_methods {
-                                if !allowed.iter().any(|allowed| allowed == method) {
+                                if !allowed.iter().any(|allowed| allowed == event_method) {
                                     continue;
                                 }
                             }
                             if let (Some(stats), Some(max_bytes)) =
                                 (&sub.stats, sub.max_buffered_bytes)
                             {
-                                if !stats.can_accept(frame.len(), max_bytes) {
+                                if !stats.can_accept(event_bytes, max_bytes) {
                                     continue;
                                 }
                             }
                             // try_send: never block the read loop on a slow consumer
-                            match sub.sender.try_send(value.clone()) {
+                            match sub.sender.try_send(event.clone()) {
                                 Ok(()) => {
                                     if let Some(stats) = &sub.stats {
-                                        stats.record_accepted(frame.len());
+                                        stats.record_accepted(event_bytes);
                                     }
                                 }
                                 Err(mpsc::error::TrySendError::Closed(_)) => {
@@ -706,7 +785,7 @@ impl Client {
         buffer: usize,
     ) -> (u64, mpsc::Receiver<Value>) {
         let (id, rx, _) = self
-            .subscribe_events_inner(method_prefix, buffer, None, None, None)
+            .subscribe_events_inner(method_prefix, buffer, None, None, None, None)
             .await;
         (id, rx)
     }
@@ -717,6 +796,46 @@ impl Client {
         allowed_methods: &[&str],
         buffer: usize,
         max_buffered_bytes: usize,
+    ) -> (u64, mpsc::Receiver<Value>, EventSubscriptionStats) {
+        self.subscribe_events_with_budget_scoped(
+            method_prefix,
+            allowed_methods,
+            buffer,
+            max_buffered_bytes,
+            None,
+        )
+        .await
+    }
+
+    /// Same as [`Self::subscribe_events_with_budget`], but when the transport
+    /// tags events with `source.tabId` only that tab's events are observed or
+    /// buffered. Untagged events are still delivered, since not every transport
+    /// annotates them.
+    pub async fn subscribe_events_with_budget_for_tab(
+        &self,
+        method_prefix: &str,
+        allowed_methods: &[&str],
+        buffer: usize,
+        max_buffered_bytes: usize,
+        tab_id: i64,
+    ) -> (u64, mpsc::Receiver<Value>, EventSubscriptionStats) {
+        self.subscribe_events_with_budget_scoped(
+            method_prefix,
+            allowed_methods,
+            buffer,
+            max_buffered_bytes,
+            Some(tab_id),
+        )
+        .await
+    }
+
+    async fn subscribe_events_with_budget_scoped(
+        &self,
+        method_prefix: &str,
+        allowed_methods: &[&str],
+        buffer: usize,
+        max_buffered_bytes: usize,
+        tab_id: Option<i64>,
     ) -> (u64, mpsc::Receiver<Value>, EventSubscriptionStats) {
         let stats = EventSubscriptionStats::new();
         let allowed_methods = if allowed_methods.is_empty() {
@@ -734,6 +853,7 @@ impl Client {
                 method_prefix,
                 buffer,
                 allowed_methods,
+                tab_id,
                 Some(max_buffered_bytes),
                 Some(stats.clone()),
             )
@@ -746,6 +866,7 @@ impl Client {
         method_prefix: &str,
         buffer: usize,
         allowed_methods: Option<Vec<String>>,
+        tab_id: Option<i64>,
         max_buffered_bytes: Option<usize>,
         stats: Option<EventSubscriptionStats>,
     ) -> (u64, mpsc::Receiver<Value>, Option<EventSubscriptionStats>) {
@@ -755,6 +876,7 @@ impl Client {
             id,
             method_prefix: method_prefix.to_string(),
             allowed_methods,
+            tab_id,
             max_buffered_bytes,
             stats: stats.clone(),
             sender: tx,
@@ -811,7 +933,22 @@ impl Client {
                 Err(err) if is_session_invalid_error(&err) => {
                     self.inner.attached_tabs.lock().await.remove(&tab_id);
                 }
-                Err(err) => return Err(err),
+                Err(err) => {
+                    // A silent sticky attempt usually means the extension dropped
+                    // the debugger (background throttling, renderer restart) and
+                    // will keep rejecting every later command for this tab. Drop
+                    // the cached attachment so the next call performs a full
+                    // re-attach. The command is deliberately not replayed.
+                    //
+                    // Only a full sticky-window silence counts as evidence. A
+                    // caller-supplied timeout shorter than that window (input
+                    // cleanup, for example) is a deliberate short deadline, not a
+                    // dead debugger, so the attachment stays valid.
+                    if sticky_failure_invalidates(&err, request_timeout) {
+                        self.inner.attached_tabs.lock().await.remove(&tab_id);
+                    }
+                    return Err(err);
+                }
             }
         }
 
@@ -898,6 +1035,10 @@ impl Client {
                     "{method} may have reached the browser before its CDP session became invalid; outcome unknown, so it was not replayed: {err}"
                 )))
             }
+            // A timeout here is expected for input commands the extension applies
+            // without acknowledging (for example `mouseMoved`); it does not mean
+            // the debugger is gone, so the attachment stays valid. A real
+            // detached session is matched above.
             Err(err) => Err(err),
         }
     }
@@ -1255,6 +1396,11 @@ fn is_session_invalid_error(err: &BridgeError) -> bool {
     [
         "target closed",
         "not attached",
+        // The extension reports a dropped debugger as "Debugger unattached",
+        // which does not contain "not attached".
+        "unattached",
+        "debugger detached",
+        "debugger is not attached",
         "no session",
         "session not found",
         "no target",
@@ -1264,6 +1410,14 @@ fn is_session_invalid_error(err: &BridgeError) -> bool {
     ]
     .iter()
     .any(|needle| msg.contains(needle))
+}
+
+/// Whether a sticky-attach failure is evidence that the cached attachment is
+/// stale. Only a silence longer than the sticky window, or a broken connection,
+/// qualifies; a deliberately short caller timeout does not.
+fn sticky_failure_invalidates(err: &BridgeError, request_timeout: Duration) -> bool {
+    request_timeout >= STICKY_FAST_TIMEOUT
+        && (matches!(err, BridgeError::Timeout(_)) || Client::is_connection_error(err))
 }
 
 /// Check if a CDP response contains a protocol-level error.
@@ -1293,7 +1447,7 @@ fn check_cdp_error(method: &str, raw: &RawValue) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(test, not(windows)))]
+#[cfg(test)]
 mod reconnect_tests {
     use super::*;
     use crate::error::BridgeError;
@@ -1620,6 +1774,103 @@ mod reconnect_tests {
         .unwrap();
 
         expect_event_sub_len(&client, 0).await;
+    }
+
+    #[tokio::test]
+    async fn extension_event_envelope_is_unwrapped_for_subscribers() {
+        let (client, mut server) = test_client(4096).await;
+        let (_sub_id, mut rx) = client.subscribe_events("Runtime.", 8).await;
+
+        encode_frame(
+            &mut server,
+            &json!({
+                "method": "onCDPEvent",
+                "params": {
+                    "method": "Runtime.consoleAPICalled",
+                    "params": {"type": "log"},
+                    "source": {"tabId": 7}
+                }
+            }),
+        )
+        .await
+        .unwrap();
+
+        let event = timeout(TEST_STATE_TIMEOUT, rx.recv())
+            .await
+            .expect("event timeout")
+            .expect("event channel closed");
+        assert_eq!(event["method"], "Runtime.consoleAPICalled");
+        assert_eq!(event["params"]["type"], "log");
+        assert_eq!(event["source"]["tabId"], 7);
+    }
+
+    #[tokio::test]
+    async fn tab_scoped_subscription_ignores_other_tabs_before_observing() {
+        let (client, mut server) = test_client(8192).await;
+        let (_sub_id, mut rx, stats) = client
+            .subscribe_events_with_budget_for_tab(
+                "Network.",
+                &["Network.requestWillBeSent"],
+                8,
+                200,
+                7,
+            )
+            .await;
+
+        // A neighbour tab must not reach the receiver...
+        encode_frame(
+            &mut server,
+            &json!({
+                "method": "onCDPEvent",
+                "params": {
+                    "method": "Network.requestWillBeSent",
+                    "params": {"requestId": "other"},
+                    "source": {"tabId": 8}
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        // ...and it must not eat the byte budget either: each event below is
+        // ~90 bytes, so a 200-byte budget fits exactly these two and nothing
+        // more. A neighbour that reached accounting would truncate us.
+        encode_frame(
+            &mut server,
+            &json!({
+                "method": "onCDPEvent",
+                "params": {
+                    "method": "Network.requestWillBeSent",
+                    "params": {"requestId": "mine"},
+                    "source": {"tabId": 7}
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        // Untagged events stay compatible with transports that don't say which
+        // tab they came from.
+        encode_frame(
+            &mut server,
+            &json!({"method":"Network.requestWillBeSent","params":{"requestId":"untagged"}}),
+        )
+        .await
+        .unwrap();
+
+        let first = timeout(TEST_STATE_TIMEOUT, rx.recv())
+            .await
+            .expect("event timeout")
+            .expect("event channel closed");
+        let second = timeout(TEST_STATE_TIMEOUT, rx.recv())
+            .await
+            .expect("event timeout")
+            .expect("event channel closed");
+        assert_eq!(first["params"]["requestId"], "mine");
+        assert_eq!(second["params"]["requestId"], "untagged");
+
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.observed_count, 2, "neighbour tab was observed");
+        assert_eq!(snapshot.accepted_count, 2);
+        assert!(!snapshot.truncated);
     }
 
     #[tokio::test]
@@ -2080,5 +2331,89 @@ mod cdp_error_tests {
         assert!(!msg.contains('\n'), "raw newline leaked: {msg:?}");
         assert!(!msg.contains('\r'));
         assert!(msg.contains("\\n"));
+    }
+}
+
+#[cfg(test)]
+mod attach_recovery_tests {
+    use super::*;
+    use crate::protocol::decode_frame;
+
+    #[test]
+    fn session_invalid_error_matches_extension_detached_text() {
+        for message in [
+            "Debugger unattached",
+            "debugger is not attached",
+            "Target closed",
+        ] {
+            let err = BridgeError::Rpc {
+                method: "executeCdp".into(),
+                message: message.into(),
+            };
+            assert!(is_session_invalid_error(&err), "{message}");
+        }
+        let benign = BridgeError::Rpc {
+            method: "executeCdp".into(),
+            message: "No dialog is showing".into(),
+        };
+        assert!(!is_session_invalid_error(&benign));
+    }
+
+    #[test]
+    fn sticky_window_timeout_invalidates_the_attachment() {
+        let err = BridgeError::Timeout("Runtime.evaluate".into());
+        assert!(sticky_failure_invalidates(&err, Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn short_caller_timeout_keeps_the_attachment() {
+        // Input cleanup uses sub-second deadlines; a timeout there is expected
+        // and says nothing about the debugger's health.
+        let err = BridgeError::Timeout("Input.dispatchKeyEvent".into());
+        assert!(!sticky_failure_invalidates(
+            &err,
+            Duration::from_millis(250)
+        ));
+    }
+
+    #[test]
+    fn protocol_errors_never_invalidate_the_attachment() {
+        let err = BridgeError::Rpc {
+            method: "executeCdp".into(),
+            message: "No dialog is showing".into(),
+        };
+        assert!(!sticky_failure_invalidates(&err, Duration::from_secs(60)));
+    }
+
+    #[tokio::test]
+    async fn short_timeout_keeps_the_cached_attachment() {
+        let (client_end, mut server) = tokio::io::duplex(4096);
+        let client = Client::from_stream(client_end).unwrap();
+        client.mark_attached(9).await;
+
+        let request = tokio::spawn({
+            let client = client.clone();
+            async move {
+                client
+                    .execute_cdp_with_timeout(
+                        9,
+                        "Input.dispatchKeyEvent",
+                        None,
+                        Duration::from_millis(60),
+                    )
+                    .await
+            }
+        });
+
+        let frame = timeout(Duration::from_secs(2), decode_frame(&mut server))
+            .await
+            .expect("request timeout")
+            .unwrap();
+        let request_frame: Value = serde_json::from_slice(&frame).unwrap();
+        assert_eq!(request_frame["method"], "executeCdp");
+
+        let err = request.await.unwrap().unwrap_err();
+        assert!(matches!(err, BridgeError::Timeout(_)), "{err:?}");
+        assert!(client.inner.attached_tabs.lock().await.contains_key(&9));
     }
 }

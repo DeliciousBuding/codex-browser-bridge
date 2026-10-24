@@ -2,6 +2,7 @@ use anyhow::Context;
 use clap::{Parser, ValueEnum};
 use codex_browser_bridge::registry::BrowserSelector;
 use codex_browser_bridge::{cli, client, config, discovery, doctor, logging, mcp};
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Mode {
@@ -44,6 +45,30 @@ struct Args {
     #[arg(long, global = true, default_value = "16384", value_parser = cli::parse_output_budget)]
     max_output_bytes: usize,
 
+    /// Reuse one browser session across separate `call` or `batch` commands.
+    ///
+    /// Each process otherwise starts a fresh session, so a tab created by one
+    /// `call` cannot be used by the next. Commands write the active identifiers
+    /// here and read them on the next invocation; `--finalize` deletes the file.
+    /// MCP stdio owns its turn for the process lifetime and does not use this.
+    #[arg(long, global = true)]
+    session_file: Option<std::path::PathBuf>,
+
+    /// End the browser turn after a `call` or `batch`, even on failure.
+    ///
+    /// This is the default for one-shot commands and preserves marked
+    /// handoff/deliverable tabs. With `--session-file`, cleanup is off by
+    /// default; pass this flag to end the turn and delete the session file.
+    #[arg(long, global = true, conflicts_with = "keep_turn")]
+    finalize: bool,
+
+    /// Leave the browser turn open after the command exits.
+    ///
+    /// A tab created by a one-shot process stays owned by a session that no
+    /// longer exists, so prefer `batch` or `--session-file` for multi-step work.
+    #[arg(long = "keep-turn", global = true)]
+    keep_turn: bool,
+
     #[command(subcommand)]
     command: Option<cli::Command>,
 }
@@ -62,17 +87,28 @@ async fn main() -> anyhow::Result<()> {
     if args.command.is_some() && !matches!(args.mode, Mode::Mcp) {
         anyhow::bail!("commands cannot be combined with --mode; omit --mode for tools/call/batch");
     }
-    let config = config::Config::load();
-    let selector = BrowserSelector::new(
-        args.browser_family
-            .clone()
-            .or(config.browser_family.clone())
-            .or_else(|| std::env::var("CODEX_BRIDGE_BROWSER_FAMILY").ok()),
-        args.browser_instance
-            .clone()
-            .or(config.browser_instance.clone())
-            .or_else(|| std::env::var("CODEX_BRIDGE_BROWSER_INSTANCE").ok()),
+    let owns_turn = matches!(
+        args.command.as_ref(),
+        Some(cli::Command::Call { .. }) | Some(cli::Command::Batch)
     );
+    if (args.session_file.is_some() || args.finalize || args.keep_turn) && !owns_turn {
+        anyhow::bail!(
+            "--session-file, --finalize, and --keep-turn require a call or batch command"
+        );
+    }
+    let config = config::Config::load();
+    // Documented precedence is CLI flags > environment > config file > default.
+    let browser_family = args
+        .browser_family
+        .clone()
+        .or_else(|| env_string("CODEX_BRIDGE_BROWSER_FAMILY"))
+        .or_else(|| config.browser_family.clone());
+    let browser_instance = args
+        .browser_instance
+        .clone()
+        .or_else(|| env_string("CODEX_BRIDGE_BROWSER_INSTANCE"))
+        .or_else(|| config.browser_instance.clone());
+    let selector = BrowserSelector::new(browser_family, browser_instance);
     selector.validate()?;
     if args.pipe.is_some() && !selector.is_empty() {
         anyhow::bail!("--pipe cannot be combined with a browser family or instance selector");
@@ -89,26 +125,45 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&pipes)?);
         }
         Mode::Mcp => {
-            let client = client::Client::lazy_with_selector(args.pipe.clone(), selector);
-            // Precedence: CLI flags > config file > env > default.
-            if let Some(base) = args.upload_base.clone().or(config.upload_base) {
+            let session_ids = args.session_file.as_deref().and_then(cli::load_session);
+            let client = client::Client::lazy_with_selector_and_ids(
+                args.pipe.clone(),
+                selector,
+                session_ids,
+            );
+            if let Some(base) = args
+                .upload_base
+                .clone()
+                .or_else(|| env_string("CODEX_BRIDGE_UPLOAD_BASE"))
+                .or_else(|| config.upload_base.clone())
+            {
                 std::env::set_var("CODEX_BRIDGE_UPLOAD_BASE", base);
             }
-            if let Some(max_text_bytes) = args.max_text_bytes.or(config.max_text_bytes) {
+            if let Some(max_text_bytes) = args
+                .max_text_bytes
+                .or_else(|| env_usize("CODEX_BRIDGE_MAX_TEXT_BYTES"))
+                .or(config.max_text_bytes)
+            {
                 std::env::set_var("CODEX_BRIDGE_MAX_TEXT_BYTES", max_text_bytes.to_string());
             }
-            if let Some(max_image_bytes) = args.max_image_bytes.or(config.max_image_bytes) {
+            if let Some(max_image_bytes) = args
+                .max_image_bytes
+                .or_else(|| env_usize("CODEX_BRIDGE_MAX_IMAGE_BYTES"))
+                .or(config.max_image_bytes)
+            {
                 std::env::set_var("CODEX_BRIDGE_MAX_IMAGE_BYTES", max_image_bytes.to_string());
             }
-            let profile = args.profile.or_else(|| match config.profile.as_deref() {
-                Some("basic") => Some(Profile::Basic),
-                Some("network") => Some(Profile::Network),
-                Some("full") => Some(Profile::Full),
-                Some(other) => {
-                    tracing::warn!(profile = other, "unknown profile in config file, ignoring");
-                    None
+            let profile = args.profile.or_else(profile_from_env).or_else(|| {
+                match config.profile.as_deref() {
+                    Some("basic") => Some(Profile::Basic),
+                    Some("network") => Some(Profile::Network),
+                    Some("full") => Some(Profile::Full),
+                    Some(other) => {
+                        tracing::warn!(profile = other, "unknown profile in config file, ignoring");
+                        None
+                    }
+                    None => None,
                 }
-                None => None,
             });
             let server = match profile {
                 Some(Profile::Basic) => mcp::Server::new_with_profile(
@@ -126,16 +181,46 @@ async fn main() -> anyhow::Result<()> {
                 None => mcp::Server::new(client),
             };
             if let Some(command) = args.command {
-                cli::run_command(&server, command, args.max_output_bytes).await?;
+                let finalize = !args.keep_turn && (args.finalize || args.session_file.is_none());
+                run_until_interrupted(
+                    &server,
+                    cli::run_command(
+                        &server,
+                        command,
+                        args.max_output_bytes,
+                        args.session_file.as_deref(),
+                        finalize,
+                    ),
+                    finalize,
+                    args.session_file.as_deref(),
+                )
+                .await?;
             } else {
-                server.run_stdio().await?;
+                let result = tokio::select! {
+                    result = server.run_stdio() => result,
+                    _ = shutdown_signal() => {
+                        let _ = server.shutdown_turn().await;
+                        anyhow::bail!("interrupted; attempted browser turn cleanup")
+                    }
+                };
+                // EOF and stdio errors both release the turn this process owned.
+                server.shutdown_turn().await;
+                result?;
             }
         }
         Mode::Cli => {
             let client = client::Client::connect_with_selector(args.pipe.as_deref(), selector)
                 .await
                 .context("failed to connect to the ChatGPT browser-extension pipe")?;
-            cli::run_cli(client).await?;
+            let result = tokio::select! {
+                result = cli::run_cli(client.clone()) => result,
+                _ = shutdown_signal() => {
+                    let _ = mcp::shutdown_client(&client).await;
+                    anyhow::bail!("interrupted; attempted browser turn cleanup")
+                }
+            };
+            mcp::shutdown_client(&client).await;
+            result?;
         }
         Mode::Doctor => {
             let result = doctor::run_diagnostics().await;
@@ -144,6 +229,90 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn env_string(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|value| !value.is_empty())
+}
+
+fn env_usize(name: &str) -> Option<usize> {
+    env_string(name).and_then(|value| value.parse().ok())
+}
+
+fn profile_from_env() -> Option<Profile> {
+    let value = env_string("CODEX_BRIDGE_PROFILE")?;
+    match value.to_ascii_lowercase().as_str() {
+        "basic" => Some(Profile::Basic),
+        "network" => Some(Profile::Network),
+        "full" => Some(Profile::Full),
+        other => {
+            tracing::warn!(profile = other, "unknown CODEX_BRIDGE_PROFILE, ignoring");
+            None
+        }
+    }
+}
+
+/// Run a command until it finishes or the process is asked to stop.
+///
+/// An interrupted shell command may own its browser turn. Cleanup follows the
+/// same finalize policy as a normal exit; session-file and --keep-turn preserve
+/// the turn and its session file.
+async fn run_until_interrupted<F>(
+    server: &mcp::Server,
+    future: F,
+    cleanup_on_interrupt: bool,
+    session_file: Option<&Path>,
+) -> anyhow::Result<()>
+where
+    F: std::future::Future<Output = anyhow::Result<()>>,
+{
+    tokio::select! {
+        result = future => result,
+        _ = shutdown_signal() => {
+            if cleanup_on_interrupt {
+                let ended = server.shutdown_turn().await;
+                if ended {
+                    if let Some(path) = session_file {
+                        if let Err(err) = cli::clear_session(path) {
+                            anyhow::bail!(
+                                "interrupted; browser turn cleanup completed, but the session file could not be removed: {err:#}"
+                            );
+                        }
+                    }
+                    anyhow::bail!("interrupted; browser turn cleanup completed")
+                } else {
+                    anyhow::bail!("interrupted; browser turn cleanup was not confirmed")
+                }
+            } else {
+                tracing::warn!(
+                    "interrupted; leaving the browser turn open because --keep-turn or --session-file is active"
+                );
+                anyhow::bail!("interrupted; browser turn left open")
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut terminate = match signal(SignalKind::terminate()) {
+        Ok(stream) => stream,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not install SIGTERM handler");
+            let _ = tokio::signal::ctrl_c().await;
+            return;
+        }
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 fn normalized_args<I>(args: I) -> Vec<String>

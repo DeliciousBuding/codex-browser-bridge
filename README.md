@@ -107,12 +107,13 @@ The bridge does not install a second browser extension or copy your browser
 profile. One MCP server session controls one browser-extension instance at a
 time; tabs from multiple browser profiles are not merged into a single list.
 
-Linux source discovers `/tmp/codex-browser-use/*.sock`, checks private socket
-ownership/permissions and peer UID, and accepts the official shared sticky
-directory mode `1777` with socket mode `0600`. Doctor reports transport kind and
-path while retaining legacy `pipe_*` fields for existing consumers. A Linux/WSL
-process requires a socket in that environment; it does not discover a Windows
-pipe across the OS boundary automatically.
+Linux source discovers `CODEX_BRIDGE_SOCKET_DIR` when set, otherwise
+`$XDG_RUNTIME_DIR/codex-browser-use`, then `/tmp/codex-browser-use`. It checks
+private socket ownership/permissions and peer UID, and accepts the official
+shared sticky directory mode `1777` with socket mode `0600`. Doctor reports
+transport kind and path while retaining legacy `pipe_*` fields for existing
+consumers. A Linux/WSL process requires a socket in that environment; it does
+not discover a Windows pipe across the OS boundary automatically.
 
 ### Browser identity and selection
 
@@ -252,8 +253,8 @@ multi-client MCP config templates are under `examples/`.
 Configuration precedence is:
 
 1. CLI flags
-2. config file
-3. environment variables
+2. environment variables
+3. config file
 4. built-in defaults
 
 The default config file is `.codex-browser-bridge.toml` in the current working directory. Set `CODEX_BRIDGE_CONFIG` to use an explicit path; when it is set, the bridge does not fall back to the working-directory config:
@@ -301,6 +302,11 @@ JavaScript, CDP, or screenshot payloads by accident:
 - The same limits can be set in `.codex-browser-bridge.toml` as
   `max_text_bytes` and `max_image_bytes`, or via CLI flags
   `--max-text-bytes` and `--max-image-bytes`.
+- `CODEX_BRIDGE_SOCKET_DIR` overrides Unix socket discovery. Without it,
+  `$XDG_RUNTIME_DIR/codex-browser-use` is tried before `/tmp/codex-browser-use`.
+- `CODEX_BRIDGE_NO_AUTO_FOREGROUND=1` disables the automatic hidden-tab
+  activation before synthesized input. The default is to activate the tab;
+  disabling it can restore the old silent-input risk.
 
 `codex://tabs` is available as an MCP resource for clients that support resources. It returns tabs owned by the current bridge session, not every Chrome tab. The prompt templates `login` and `extract-table` are also exposed for clients that support MCP prompts.
 
@@ -312,7 +318,7 @@ JavaScript, CDP, or screenshot payloads by accident:
 | `codex_list_browsers` | List live extension instances with `browser_id`, family, profile, version, capabilities, and pipe transport |
 | `codex_bind_browser` | Bind this session to one exact `browser_id`; family-only binding requires one live match |
 | `codex_browser_history` | Read browser history with queries, date bounds, and a result limit |
-| `codex_browser_management` | Use the official windows/tabs/tabGroups/bookmarks management capability and audit trail |
+| `codex_browser_management` | Use the official windows/tabs/tabGroups/bookmarks management capability and audit trail; remove/delete/clear/close/discard require `confirm=true` |
 | `codex_browser_viewport` | Set or reset the official browser viewport override |
 | `codex_browser_visibility` | Query or set browser visibility when the extension advertises that capability |
 
@@ -434,25 +440,29 @@ codex-browser-bridge --mode mcp --max-text-bytes 1048576 --max-image-bytes 31457
 
 The source also provides shell-friendly commands through the same schemas,
 profiles, handlers, and safety checks. `tools` lists names without connecting;
-`tools NAME` returns one schema. A `call` starts its own session; use `batch`
-for dependent calls in one session:
+`tools NAME` returns one schema.
 
 ```bash
 codex-browser-bridge tools codex_locator
 codex-browser-bridge call codex_list_browsers '{}'
-codex-browser-bridge --max-output-bytes 4096 batch --finalize <<'JSONL'
-{"name":"codex_create_tab","arguments":{}}
+codex-browser-bridge --max-output-bytes 4096 batch <<'JSONL'
+{"name":"codex_user_tabs","arguments":{}}
 JSONL
 ```
 
-Batch accepts one `{name, arguments}` JSON object per stdin line and stops on
-the first error. `--finalize` attempts official turn cleanup even after failure;
-mark deliverables before ending the turn. Separate processes do not share tabs
-or session IDs. CLI JSON results default to 16384 bytes each and summarize
-images without base64; this byte limit is separate from MCP content limits.
-For a dependent create/navigate workflow, parse the returned tab ID and feed the
-next line to the same batch process, or use a persistent MCP session. The CLI is
-an optional entrypoint, not a separate capability implementation.
+A `call` is one process and one browser turn. It ends that turn on exit, even
+after a failure, so an unmarked tab can never be left owned by a process that no
+longer exists; `deliverable` and `handoff` marks survive. `batch` reads one
+`{name, arguments}` object per stdin line, keeps one turn, and stops on the
+first error. Use `--session-file <path>` when several separate commands must
+share one turn, or `--keep-turn` to deliberately leave the turn open.
+`--session-file` is valid only with `call`/`batch`; MCP stdio and the interactive
+CLI reject it. Ctrl-C and SIGTERM attempt cleanup only when the command is configured to finalize;
+`--keep-turn` and an unfinalized `--session-file` intentionally leave the turn
+open. CLI JSON results default to 16384 bytes
+each and summarize images without base64; this byte limit is separate from MCP
+content limits. The CLI is an optional entrypoint, not a separate capability
+implementation.
 
 ## Architecture
 

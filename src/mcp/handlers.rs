@@ -319,8 +319,15 @@ impl super::Server {
                     .and_then(Value::as_array)
                     .cloned()
                     .unwrap_or_default();
-                browser::browser_management(&self.client_snapshot(), namespace, method, call_args)
-                    .await?
+                let confirm = optional_bool(&args, "confirm")?.unwrap_or(false);
+                browser::browser_management(
+                    &self.client_snapshot(),
+                    namespace,
+                    method,
+                    call_args,
+                    confirm,
+                )
+                .await?
             }
             other => anyhow::bail!("Invalid action '{other}': must be 'call' or 'audit'"),
         };
@@ -598,6 +605,9 @@ impl super::Server {
 
     async fn handle_finalize(&self) -> anyhow::Result<Vec<Content>> {
         let client = self.client_snapshot();
+        // A resumed shell session may not have dialed yet; the turn it owns is
+        // still live in the extension, so connect before ending it.
+        client.connect_if_needed().await?;
         if !client.end_turn().await? {
             return Ok(vec![Content::text(
                 "No live browser turn to end; remote tab cleanup was not confirmed.".to_string(),

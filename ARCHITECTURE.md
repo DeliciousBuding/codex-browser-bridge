@@ -20,10 +20,11 @@ MCP client ──stdio JSON-RPC──▶ bridge ──local transport──▶ C
 
 v1.12.0 publishes Windows x64/arm64 and Linux GNU x64/arm64 binaries
 (glibc >= 2.39 for the Linux release builds). Linux discovery uses
-`/tmp/codex-browser-use/*.sock`, with native Rust/Node gates on Ubuntu 24.04 x64
-and arm64. Unix runtime support has not been verified against a live Linux
-extension service, and a compiling macOS target does not establish macOS
-support.
+`CODEX_BRIDGE_SOCKET_DIR` when set, otherwise
+`$XDG_RUNTIME_DIR/codex-browser-use`, then `/tmp/codex-browser-use`; native
+Rust/Node gates run on Ubuntu 24.04 x64 and arm64. Unix runtime support has not
+been verified against a live Linux extension service, and a compiling macOS
+target does not establish macOS support.
 
 The repository is both the Claude plugin source and the generic MCP server
 source. A Claude plugin marketplace distributes the manifest, progressive
@@ -39,7 +40,7 @@ and are not plugin targets for this bridge.
 | `client.rs` | The pipe `Client`: requests, `execute_cdp`, reconnect, event subscriptions |
 | `pipe.rs` | Platform transport and dialing; Windows named pipe or validated Unix stream; `dial_named_pipe` remains a compatibility entrypoint |
 | `protocol.rs` | Length-prefixed frame encode/decode, `Request`/`Response`, session-param merge |
-| `discovery.rs` | Enumerate Windows pipes or Linux `/tmp/codex-browser-use/*.sock` endpoints |
+| `discovery.rs` | Enumerate Windows pipes or Linux `CODEX_BRIDGE_SOCKET_DIR`, XDG runtime, or `/tmp` socket endpoints |
 | `registry.rs` | Probe live extension instances, expose stable `extensionInstanceId` identity, and fail closed on ambiguous browser selection |
 | `browser.rs` | Browser tool implementations over `Client` (navigate, DOM, screenshot, management, history, network_monitor, …) |
 | `input.rs` | Bounded failure-safe keyboard chords; shared modifier parsing |
@@ -122,16 +123,31 @@ state-changing CDP is not replayed. Current extension builds do not acknowledge
 the number of supplied path points.
 
 Shell `tools`, `call`, and `batch` reuse the same MCP registry and handlers.
-Batch owns one session and stops on error; independent calls never share a
-session. Optional `--finalize` attempts cleanup on success or failure. CLI output
-has a separate byte budget and summarizes images instead of emitting base64.
-This entrypoint does not change the parity boundary.
+A turn belongs to the process that opened it, so a one-shot `call` ends its turn
+on exit and `batch` ends its turn at EOF, both including the failure path.
+Cleanup preserves `deliverable`/`handoff` marks. Ctrl-C and SIGTERM follow the
+same finalize policy; `--keep-turn` and an unfinalized session file deliberately
+leave the turn open. `--session-file` persists only the session and turn
+identifiers so separate `call`/`batch` processes can continue one turn; it is
+not browser state. `--keep-turn` is the explicit opt-out and can leave a tab
+owned by a closed session, so multi-step work should use `batch` or a persistent
+MCP session. CLI output has a separate byte budget and summarizes images instead
+of emitting base64. This entrypoint does not change the parity boundary.
 
 ### CDP event subscription
 Frames carrying a `method` and no `id` are server-pushed events. `read_loop`
 routes the whole frame to subscribers matched by method prefix
 (`network_monitor`, `console_logs`). Subscribers get the entire frame so they
 can dispatch on the exact method themselves.
+
+The extension does not send bare CDP frames: it wraps them as
+`{method: "onCDPEvent", params: {method, params, source: {tabId}}}`. The read
+loop unwraps that envelope once, so subscribers see the same shape for both
+transports. Capture tools subscribe with `subscribe_events_with_budget_for_tab`,
+which drops events tagged with a different `source.tabId` *before* any
+bookkeeping — otherwise a busy neighbour tab could exhaust the byte budget and
+turn a real capture into a silently empty result. Untagged events stay
+deliverable so transports that don't annotate them keep working.
 
 ### Tool profiles
 64 tools, filtered by profile — `basic` (45) / `network` (63) / `full` (64) —
@@ -172,7 +188,7 @@ DOM/input, network/session, official parity, and recovery are read one at a
 time.
 
 ### Config precedence
-CLI flags > config file (`.codex-browser-bridge.toml`) > env > built-in
+CLI flags > env > config file (`.codex-browser-bridge.toml`) > built-in
 default. A missing default config file is silent; a malformed one warns and is
 ignored. If `CODEX_BRIDGE_CONFIG` is set, that path is authoritative and the
 bridge does not fall back to a working-directory config.

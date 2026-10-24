@@ -2,6 +2,60 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Pointer and keyboard input now activate a background tab before dispatching.
+  Chrome acknowledges synthesized input for an occluded tab without delivering
+  it, so a click could report success while the page state never changed. Set
+  `CODEX_BRIDGE_NO_AUTO_FOREGROUND=1` to keep the previous behaviour.
+- A dropped extension debugger no longer leaves CDP unusable for the rest of the
+  process. The extension reports `Debugger unattached`, which did not match the
+  session-invalid patterns, so the cached attachment was never cleared. A
+  sticky-window timeout now also invalidates the cache; short caller deadlines
+  used by input cleanup deliberately do not.
+- `codex_navigate` reports a failed navigation instead of returning success.
+  `Page.navigate` carries `net::ERR_*` in `errorText` without raising an error,
+  and a browser error page also reports `readyState=complete`; both are now
+  surfaced by `codex_navigate`, `codex_nav_and_wait` and `codex_wait_for_load`.
+  Malformed navigation results are protocol errors, and a failed URL probe is
+  no longer accepted as a completed load.
+- Keyboard events and `Input.insertText` use the non-replayed CDP path. A
+  `Debugger unattached` response can no longer duplicate a keydown or inserted
+  text while recovering the attachment.
+- `codex_hover` confirms that the target is observed in the `:hover` state
+  before reporting success; a dispatched-but-undelivered pointer move now fails.
+- `codex_console_logs` and `codex_network_monitor` capture real events again.
+  The extension delivers CDP notifications inside an `onCDPEvent` envelope,
+  which the read loop now unwraps; both tools previously returned
+  `log_count: 0` / an empty request list while reporting success. Captures are
+  also scoped to the requested tab before byte accounting, so a noisy
+  neighbouring tab can no longer produce an empty result.
+
+### Changed
+
+- `call` and `batch` end the browser turn on exit by default, including the
+  failure path, so a tab can no longer be left owned by a process that exited.
+  `--keep-turn` opts out, and `--session-file` keeps one turn across separate
+  `call`/`batch` commands. Ctrl-C and SIGTERM follow the same finalize policy;
+  `--keep-turn` and an unfinalized session file leave the turn open.
+- `--session-file` is rejected outside `call`/`batch`, and `--finalize` conflicts
+  with `--keep-turn`. A command rejected before dialing no longer creates a
+  phantom session file or deletes an existing one, and session-file write or
+  removal failures now make the command fail instead of logging a warning.
+- The mock-transport client tests (read loop, reconnect, event routing) now run
+  on Windows as well as Linux. They were gated behind `not(windows)`, which left
+  the primary platform's event dispatch untested.
+- `codex_browser_management` requires `confirm=true` for methods that remove or
+  discard browser state (`remove`, `delete`, `clear`, `close`, `discard`).
+- `CODEX_BRIDGE_SOCKET_DIR` is now an explicit override on Unix and
+  `$XDG_RUNTIME_DIR/codex-browser-use` is tried before `/tmp`; returned socket
+  paths identify the directory that produced them.
+- Configuration precedence now matches the documented order: CLI flags >
+  environment > config file > default. Previously the config file overrode the
+  environment for profile, browser selector, upload base and content limits.
+
 ## [1.12.0] - 2026-10-24
 
 ### Added

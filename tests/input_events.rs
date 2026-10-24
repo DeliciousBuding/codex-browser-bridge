@@ -243,6 +243,58 @@ async fn failed_keydown_releases_possibly_delivered_key_and_modifier() {
 }
 
 #[tokio::test]
+async fn session_invalid_keydown_is_not_replayed() {
+    let (client, mut peer) = setup();
+    client.mark_attached(7).await;
+    let task = tokio::spawn(async move { input::keypress(&client, 7, &keys(&["Enter"])).await });
+
+    let (request, down) = event(&mut peer).await;
+    assert_eq!(down["type"], "keyDown");
+    protocol::encode_frame(
+        &mut peer,
+        &json!({
+            "id": request["id"],
+            "error": {"code": -1, "message": "Debugger unattached"}
+        }),
+    )
+    .await
+    .unwrap();
+
+    // The failed keydown invalidates the cached attachment. Cleanup must
+    // re-attach and send the keyup, but must never send a second keydown.
+    for method in ["detach", "attach"] {
+        let request = next(&mut peer).await;
+        assert_eq!(request["method"], method);
+        reply(&mut peer, &request, json!({})).await;
+    }
+    let (request, up) = event(&mut peer).await;
+    assert_eq!(up["type"], "keyUp");
+    reply(&mut peer, &request, json!({})).await;
+
+    let error = timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("outcome unknown")
+            || error.to_string().contains("Debugger unattached"),
+        "{error}"
+    );
+    if let Ok(Ok(frame)) = timeout(
+        Duration::from_millis(200),
+        protocol::decode_frame(&mut peer),
+    )
+    .await
+    {
+        panic!(
+            "keydown was replayed after an invalid session: {}",
+            String::from_utf8_lossy(&frame)
+        );
+    }
+}
+
+#[tokio::test]
 async fn failed_keyup_is_retried_and_cleanup_continues_past_release_error() {
     let (client, mut peer) = setup();
     client.mark_attached(7).await;

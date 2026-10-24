@@ -8,6 +8,8 @@ npm/bin/codex-browser-bridge
 /codex-browser-bridge
 
 # Test artifacts
+__pycache__/
+.worktrees/
 test_*.txt
 cover.out
 coverage.out
