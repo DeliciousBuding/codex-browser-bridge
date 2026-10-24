@@ -12,6 +12,9 @@ are distribution facts, not parity. Source contracts and remaining differences:
 
 - Exact browser binding, no-replay input/navigation/dialog mutations, bounded
   turn/session cleanup and truthful failures.
+- Instance-bound CLI v2 continuation, OS single-owner locks, strict selector
+  configuration, exact tab-claim snapshots and serialized rebind/finalize.
+  Completed delivery and verification: [#40](https://github.com/DeliciousBuding/codex-browser-bridge/issues/40).
 - Opt-in tab/document observation with frame/loader state, dialog/chooser IDs,
   bounded persistent event/log cursors, explicit gaps and action-before-wait.
 - Shared declarative locator composition, trusted checked-state transitions,

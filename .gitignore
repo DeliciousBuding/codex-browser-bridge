@@ -19,6 +19,7 @@ npm/pack.json
 npm/*.tgz
 npm/checksums.json
 npm/skills/
+npm/docs/
 
 # Local private files
 .local/

@@ -36,8 +36,11 @@
 `codex-browser-use` 本地传输，识别每个实时浏览器扩展实例，使用相同的
 JSON-RPC 协议，暴露 66 个 MCP 工具用于浏览器自动化。
 
-本文描述 v1.13.0：66 个 MCP 工具（basic 46 / network 65 / full 66），
+本文描述 v2.0.0：66 个 MCP 工具（basic 46 / network 65 / full 66），
 提供 Windows 与 Linux GNU 包。
+
+从 1.x 升级时，先读[升级说明](docs/upgrade-v2.md)。旧续接文件和只传数字 ID
+的 claim 调用需要调整；工具名称和数量不变。
 
 项目目标是让非 Codex agent 获得完整浏览器能力。具体方法与语义覆盖见
 [能力对齐表](docs/official-parity.md)；工具数量或新增 CLI 入口都不代表已完整对齐。
