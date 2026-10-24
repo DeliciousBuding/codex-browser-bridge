@@ -9,6 +9,12 @@ fn bridge() -> Command {
         .env_remove("CODEX_BRIDGE_BROWSER_FAMILY")
         .env_remove("CODEX_BRIDGE_BROWSER_INSTANCE")
         .env("CODEX_BRIDGE_CONFIG", "nonexistent-cli-test-config.toml")
+        // Keep the suite hermetic: a developer machine may have a live extension,
+        // and these tests must never create or close real browser tabs.
+        .env(
+            "CODEX_BRIDGE_SOCKET_DIR",
+            "/nonexistent-codex-browser-bridge-test-sockets",
+        )
         .timeout(Duration::from_secs(5));
     command
 }

@@ -171,7 +171,12 @@ async fn run_command_with_io<R: AsyncBufRead + Unpin, W: Write>(
         },
         Command::Batch => run_batch(server, reader, writer, budget).await,
     };
-    if finalize && touches_browser {
+    // Cleanup only applies to a turn this process actually opened. A rejected
+    // request or an empty batch never dialed, and dialing now would turn a
+    // validation error into a connection error.
+    let opened_turn =
+        finalize && touches_browser && server.client_snapshot().has_live_connection().await;
+    if opened_turn {
         // This goes through the same current server, including any bind_browser changes.
         // Do not short-circuit on an earlier failure: cleanup must still be attempted.
         let cleanup = call_tool(
