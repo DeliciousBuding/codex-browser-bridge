@@ -19,10 +19,29 @@ async fn reply(peer: &mut DuplexStream, request: &Value, result: Value) {
         .unwrap();
 }
 
+/// Answer the pre-input visibility probe (if present) and return the next
+/// pointer command. Pointer helpers activate a hidden tab before dispatch, so
+/// tests that only care about the dispatched event report a visible tab.
+async fn next_cdp(peer: &mut DuplexStream) -> Value {
+    loop {
+        let request = next(peer).await;
+        assert_eq!(request["method"], "executeCdp");
+        assert_eq!(request["params"]["target"]["tabId"], 7);
+        if request["params"]["method"] == "Runtime.evaluate" {
+            reply(
+                peer,
+                &request,
+                json!({"result": {"type": "string", "value": "visible"}}),
+            )
+            .await;
+            continue;
+        }
+        return request;
+    }
+}
+
 async fn next_mouse(peer: &mut DuplexStream) -> (Value, Value) {
-    let request = next(peer).await;
-    assert_eq!(request["method"], "executeCdp");
-    assert_eq!(request["params"]["target"]["tabId"], 7);
+    let request = next_cdp(peer).await;
     assert_eq!(request["params"]["method"], "Input.dispatchMouseEvent");
     let command = request["params"]["commandParams"].clone();
     (request, command)
@@ -92,11 +111,11 @@ async fn move_and_scroll_carry_official_modifier_mask() {
     let task = tokio::spawn(async move {
         pointer::scroll(&worker, 7, 8.0, 9.0, -20.0, 30.0, &["Meta".into()]).await
     });
-    let request = next(&mut peer).await;
+    let request = next_cdp(&mut peer).await;
     assert_eq!(request["params"]["method"], "Input.dispatchMouseEvent");
     assert_eq!(request["params"]["commandParams"]["type"], "mouseMoved");
     reply(&mut peer, &request, json!({})).await;
-    let request = next(&mut peer).await;
+    let request = next_cdp(&mut peer).await;
     assert_eq!(request["params"]["method"], "Input.synthesizeScrollGesture");
     assert_eq!(request["params"]["commandParams"]["xDistance"], 20.0);
     assert_eq!(request["params"]["commandParams"]["yDistance"], -30.0);

@@ -177,6 +177,49 @@ fn help_keeps_legacy_mode_and_documents_session_cleanup() {
         .get_output()
         .clone();
     let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("--session-file"));
+    assert!(help.contains("--keep-turn"));
     assert!(help.contains("--finalize"));
-    assert!(help.contains("No session is persisted"));
+}
+
+#[test]
+fn one_shot_tab_creation_requires_cleanup_or_a_session_file() {
+    // No browser connection is attempted: the guard runs before any dial.
+    let output = bridge()
+        .args(["call", "codex_create_tab"])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--session-file"), "{stderr}");
+    assert!(stderr.contains("--keep-turn"), "{stderr}");
+}
+
+#[test]
+fn tab_creation_with_a_session_file_reaches_the_transport_layer() {
+    // Point discovery at an empty directory so the command fails while dialing
+    // instead of touching a real browser that may be running on this machine.
+    let dir = tempfile::tempdir().unwrap();
+    let session = dir.path().join("session.json");
+    let sockets = dir.path().join("absent-sockets");
+    let output = bridge()
+        .env("CODEX_BRIDGE_SOCKET_DIR", &sockets)
+        .args([
+            "--session-file",
+            session.to_str().unwrap(),
+            "call",
+            "codex_create_tab",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The one-shot guard no longer applies, so the failure comes from discovery.
+    assert!(!stderr.contains("--finalize"), "{stderr}");
+    assert!(stderr.contains("tool call failed"), "{stderr}");
+    assert!(stdout.contains("browser-extension"), "{stdout}");
 }

@@ -381,13 +381,13 @@ codex-browser-bridge --max-output-bytes 4096 batch --finalize <<'JSONL'
 JSONL
 ```
 
-`batch` 从 stdin 每行读取一个 `{name, arguments}` JSON，共用一个 session，遇错即停。
-`--finalize` 会在成功或失败后尝试官方 turn cleanup；需要保留的标签应提前标记。
-每次独立 `call` 都是新 session，不会继承前一进程的标签或 session ID。
+每次 `call` 都是一个进程、一个浏览器 turn。进程退出时（包括失败）会结束该 turn，
+因此不会留下属于已消失进程的未标记标签；`deliverable` 与 `handoff` 标记的标签会保留。
+`batch` 从 stdin 每行读取一个 `{name, arguments}` JSON，共用一个 turn，遇错即停。
+需要在多个独立命令之间共享同一 turn 时用 `--session-file <path>`；
+`--keep-turn` 则显式保留 turn、不清理。Ctrl-C 与 SIGTERM 也会尝试同样的清理。
 CLI 默认每条 JSON 结果上限 16384 bytes，图片只返回摘要、不输出 base64；
-该上限独立于 MCP content 限额。需要连续创建/导航时，应解析返回的 tab ID，
-再把下一条命令写入同一个 batch 进程，或使用持续连接的 MCP session。
-CLI 是可选入口，不是独立的能力实现或 parity 验收标准。
+该上限独立于 MCP content 限额。CLI 是可选入口，不是独立的能力实现或 parity 验收标准。
 
 ## 架构
 

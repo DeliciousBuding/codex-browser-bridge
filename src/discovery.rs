@@ -9,8 +9,41 @@ use crate::error::BridgeError;
 use crate::error::Result;
 
 const CODEX_PIPE_PREFIX: &str = "codex-browser-use";
+pub const DEFAULT_UNIX_SOCKET_DIRECTORY: &str = "/tmp/codex-browser-use";
 #[cfg(unix)]
-pub const UNIX_SOCKET_DIRECTORY: &str = "/tmp/codex-browser-use";
+pub const UNIX_SOCKET_DIRECTORY: &str = DEFAULT_UNIX_SOCKET_DIRECTORY;
+
+/// Directories polled for extension sockets, highest priority first.
+///
+/// `CODEX_BRIDGE_SOCKET_DIR` is an explicit override: when set, only that
+/// directory is polled, which keeps sandboxes and tests isolated from a real
+/// browser on the same machine. Otherwise `$XDG_RUNTIME_DIR/codex-browser-use`
+/// is tried first and the historical `/tmp` location stays as a fallback.
+#[cfg(unix)]
+pub fn unix_socket_directories() -> Vec<std::path::PathBuf> {
+    unix_socket_directories_with(|name| std::env::var_os(name))
+}
+
+#[cfg(unix)]
+fn unix_socket_directories_with(
+    read: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    if let Some(value) = read("CODEX_BRIDGE_SOCKET_DIR") {
+        if !value.is_empty() {
+            return vec![PathBuf::from(value)];
+        }
+    }
+    let mut directories = Vec::new();
+    if let Some(value) = read("XDG_RUNTIME_DIR") {
+        if !value.is_empty() {
+            directories.push(PathBuf::from(value).join("codex-browser-use"));
+        }
+    }
+    directories.push(PathBuf::from(DEFAULT_UNIX_SOCKET_DIRECTORY));
+    directories.dedup();
+    directories
+}
 
 pub const fn transport_kind() -> &'static str {
     if cfg!(windows) {
@@ -39,7 +72,20 @@ pub async fn discover_codex_pipes() -> Result<Vec<PipeInfo>> {
 
 #[cfg(unix)]
 pub async fn discover_codex_pipes() -> Result<Vec<PipeInfo>> {
-    discover_unix_sockets_in(std::path::Path::new(UNIX_SOCKET_DIRECTORY))
+    let mut sockets = Vec::new();
+    for (index, directory) in unix_socket_directories().iter().enumerate() {
+        match discover_unix_sockets_in(directory) {
+            Ok(mut found) => sockets.append(&mut found),
+            // The highest-priority directory is authoritative: an unsafe or
+            // unreadable endpoint there must not be silently skipped. Lower
+            // priority directories are best-effort fallbacks.
+            Err(err) if index == 0 => return Err(err),
+            Err(_) => {}
+        }
+    }
+    sockets.sort_by(|left, right| left.name.cmp(&right.name));
+    sockets.dedup_by(|left, right| left.name == right.name);
+    Ok(sockets)
 }
 
 #[cfg(not(any(windows, unix)))]
@@ -157,7 +203,11 @@ pub fn transport_path(name: &str) -> String {
         if std::path::Path::new(name).is_absolute() {
             name.into()
         } else {
-            format!("{UNIX_SOCKET_DIRECTORY}/{name}")
+            let directory = unix_socket_directories()
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_UNIX_SOCKET_DIRECTORY));
+            format!("{}/{name}", directory.display())
         }
     }
     #[cfg(not(any(windows, unix)))]
@@ -233,13 +283,46 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn socket_path_keeps_absolute_overrides() {
+        let primary = unix_socket_directories()
+            .into_iter()
+            .next()
+            .expect("at least the default socket directory");
         assert_eq!(
             pipe_path("instance.sock"),
-            "/tmp/codex-browser-use/instance.sock"
+            primary.join("instance.sock").to_str().unwrap()
         );
         assert_eq!(
             pipe_path("/tmp/custom/instance.sock"),
             "/tmp/custom/instance.sock"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_socket_directory_replaces_the_fallback_list() {
+        let directories = unix_socket_directories_with(|name| match name {
+            "CODEX_BRIDGE_SOCKET_DIR" => Some("/run/codex-test".into()),
+            _ => None,
+        });
+        assert_eq!(
+            directories,
+            vec![std::path::PathBuf::from("/run/codex-test")]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_directory_precedes_the_default_socket_directory() {
+        let directories = unix_socket_directories_with(|name| match name {
+            "XDG_RUNTIME_DIR" => Some("/run/user/7".into()),
+            _ => None,
+        });
+        assert_eq!(
+            directories,
+            vec![
+                std::path::PathBuf::from("/run/user/7/codex-browser-use"),
+                std::path::PathBuf::from(DEFAULT_UNIX_SOCKET_DIRECTORY),
+            ]
         );
     }
 

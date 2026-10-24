@@ -219,8 +219,26 @@ impl Client {
     }
 
     fn from_lazy_inner(factory: ConnectionFactory) -> Self {
-        let session_id = Uuid::new_v4().to_string();
-        let turn_id = Uuid::new_v4().to_string();
+        Self::from_lazy_inner_with_ids(factory, None)
+    }
+
+    /// Build a lazy client that reuses externally supplied session identifiers.
+    ///
+    /// Shell invocations are separate processes; callers that want a dependent
+    /// sequence (`createTab` then `navigate`) must reuse one browser session.
+    /// Passing `None` keeps the default of a fresh session per process.
+    pub fn lazy_with_selector_and_ids(
+        pipe_name: Option<String>,
+        selector: BrowserSelector,
+        ids: Option<(String, String)>,
+    ) -> Self {
+        let factory = selected_connection_factory(pipe_name, selector);
+        Self::from_lazy_inner_with_ids(factory, ids)
+    }
+
+    fn from_lazy_inner_with_ids(factory: ConnectionFactory, ids: Option<(String, String)>) -> Self {
+        let (session_id, turn_id) =
+            ids.unwrap_or_else(|| (Uuid::new_v4().to_string(), Uuid::new_v4().to_string()));
         Self {
             inner: Arc::new(ClientInner {
                 writer: Mutex::new(None),
@@ -458,6 +476,22 @@ impl Client {
 
     pub async fn has_live_connection(&self) -> bool {
         self.is_alive() && self.inner.writer.lock().await.is_some()
+    }
+
+    /// Current session and turn identifiers, used by the shell to persist one
+    /// browser session across separate processes.
+    pub async fn session_ids(&self) -> (String, String) {
+        let session = self.inner.session.read().await.clone();
+        (session.session_id, session.turn_id)
+    }
+
+    /// Dial if this client has not connected yet.
+    ///
+    /// A separate shell process can resume a session through `--session-file`
+    /// without having issued a request. Turn cleanup must still reach the
+    /// extension, so callers that end a turn may force the connection first.
+    pub async fn connect_if_needed(&self) -> Result<()> {
+        self.ensure_alive().await
     }
 
     /// Errors that mean the connection is broken and a reconnect may help.
@@ -811,7 +845,22 @@ impl Client {
                 Err(err) if is_session_invalid_error(&err) => {
                     self.inner.attached_tabs.lock().await.remove(&tab_id);
                 }
-                Err(err) => return Err(err),
+                Err(err) => {
+                    // A silent sticky attempt usually means the extension dropped
+                    // the debugger (background throttling, renderer restart) and
+                    // will keep rejecting every later command for this tab. Drop
+                    // the cached attachment so the next call performs a full
+                    // re-attach. The command is deliberately not replayed.
+                    //
+                    // Only a full sticky-window silence counts as evidence. A
+                    // caller-supplied timeout shorter than that window (input
+                    // cleanup, for example) is a deliberate short deadline, not a
+                    // dead debugger, so the attachment stays valid.
+                    if sticky_failure_invalidates(&err, request_timeout) {
+                        self.inner.attached_tabs.lock().await.remove(&tab_id);
+                    }
+                    return Err(err);
+                }
             }
         }
 
@@ -898,6 +947,10 @@ impl Client {
                     "{method} may have reached the browser before its CDP session became invalid; outcome unknown, so it was not replayed: {err}"
                 )))
             }
+            // A timeout here is expected for input commands the extension applies
+            // without acknowledging (for example `mouseMoved`); it does not mean
+            // the debugger is gone, so the attachment stays valid. A real
+            // detached session is matched above.
             Err(err) => Err(err),
         }
     }
@@ -1255,6 +1308,11 @@ fn is_session_invalid_error(err: &BridgeError) -> bool {
     [
         "target closed",
         "not attached",
+        // The extension reports a dropped debugger as "Debugger unattached",
+        // which does not contain "not attached".
+        "unattached",
+        "debugger detached",
+        "debugger is not attached",
         "no session",
         "session not found",
         "no target",
@@ -1264,6 +1322,14 @@ fn is_session_invalid_error(err: &BridgeError) -> bool {
     ]
     .iter()
     .any(|needle| msg.contains(needle))
+}
+
+/// Whether a sticky-attach failure is evidence that the cached attachment is
+/// stale. Only a silence longer than the sticky window, or a broken connection,
+/// qualifies; a deliberately short caller timeout does not.
+fn sticky_failure_invalidates(err: &BridgeError, request_timeout: Duration) -> bool {
+    request_timeout >= STICKY_FAST_TIMEOUT
+        && (matches!(err, BridgeError::Timeout(_)) || Client::is_connection_error(err))
 }
 
 /// Check if a CDP response contains a protocol-level error.
@@ -2080,5 +2146,89 @@ mod cdp_error_tests {
         assert!(!msg.contains('\n'), "raw newline leaked: {msg:?}");
         assert!(!msg.contains('\r'));
         assert!(msg.contains("\\n"));
+    }
+}
+
+#[cfg(test)]
+mod attach_recovery_tests {
+    use super::*;
+    use crate::protocol::decode_frame;
+
+    #[test]
+    fn session_invalid_error_matches_extension_detached_text() {
+        for message in [
+            "Debugger unattached",
+            "debugger is not attached",
+            "Target closed",
+        ] {
+            let err = BridgeError::Rpc {
+                method: "executeCdp".into(),
+                message: message.into(),
+            };
+            assert!(is_session_invalid_error(&err), "{message}");
+        }
+        let benign = BridgeError::Rpc {
+            method: "executeCdp".into(),
+            message: "No dialog is showing".into(),
+        };
+        assert!(!is_session_invalid_error(&benign));
+    }
+
+    #[test]
+    fn sticky_window_timeout_invalidates_the_attachment() {
+        let err = BridgeError::Timeout("Runtime.evaluate".into());
+        assert!(sticky_failure_invalidates(&err, Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn short_caller_timeout_keeps_the_attachment() {
+        // Input cleanup uses sub-second deadlines; a timeout there is expected
+        // and says nothing about the debugger's health.
+        let err = BridgeError::Timeout("Input.dispatchKeyEvent".into());
+        assert!(!sticky_failure_invalidates(
+            &err,
+            Duration::from_millis(250)
+        ));
+    }
+
+    #[test]
+    fn protocol_errors_never_invalidate_the_attachment() {
+        let err = BridgeError::Rpc {
+            method: "executeCdp".into(),
+            message: "No dialog is showing".into(),
+        };
+        assert!(!sticky_failure_invalidates(&err, Duration::from_secs(60)));
+    }
+
+    #[tokio::test]
+    async fn short_timeout_keeps_the_cached_attachment() {
+        let (client_end, mut server) = tokio::io::duplex(4096);
+        let client = Client::from_stream(client_end).unwrap();
+        client.mark_attached(9).await;
+
+        let request = tokio::spawn({
+            let client = client.clone();
+            async move {
+                client
+                    .execute_cdp_with_timeout(
+                        9,
+                        "Input.dispatchKeyEvent",
+                        None,
+                        Duration::from_millis(60),
+                    )
+                    .await
+            }
+        });
+
+        let frame = timeout(Duration::from_secs(2), decode_frame(&mut server))
+            .await
+            .expect("request timeout")
+            .unwrap();
+        let request_frame: Value = serde_json::from_slice(&frame).unwrap();
+        assert_eq!(request_frame["method"], "executeCdp");
+
+        let err = request.await.unwrap().unwrap_err();
+        assert!(matches!(err, BridgeError::Timeout(_)), "{err:?}");
+        assert!(client.inner.attached_tabs.lock().await.contains_key(&9));
     }
 }

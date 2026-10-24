@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- Pointer and keyboard input now activate a background tab before dispatching.
+  Chrome acknowledges synthesized input for an occluded tab without delivering
+  it, so a click could report success while the page state never changed. Set
+  `CODEX_BRIDGE_NO_AUTO_FOREGROUND=1` to keep the previous behaviour.
+- A dropped extension debugger no longer leaves CDP unusable for the rest of the
+  process. The extension reports `Debugger unattached`, which did not match the
+  session-invalid patterns, so the cached attachment was never cleared. A
+  sticky-window timeout now also invalidates the cache; short caller deadlines
+  used by input cleanup deliberately do not.
+- `codex_navigate` reports a failed navigation instead of returning success.
+  `Page.navigate` carries `net::ERR_*` in `errorText` without raising an error,
+  and a browser error page also reports `readyState=complete`; both are now
+  surfaced by `codex_navigate`, `codex_nav_and_wait` and `codex_wait_for_load`.
+
+### Changed
+
+- `call` and `batch` end the browser turn on exit by default, including the
+  failure path, so a tab can no longer be left owned by a process that exited.
+  `--keep-turn` opts out, and `--session-file` keeps one turn across separate
+  commands. Ctrl-C and SIGTERM attempt the same cleanup once.
+- `codex_browser_management` requires `confirm=true` for methods that remove or
+  discard browser state (`remove`, `delete`, `clear`, `close`, `discard`).
+- `CODEX_BRIDGE_SOCKET_DIR` is now an explicit override on Unix and
+  `$XDG_RUNTIME_DIR/codex-browser-use` is tried before `/tmp`; discovery reports
+  which directories it polled.
+- Configuration precedence now matches the documented order: CLI flags >
+  environment > config file > default. Previously the config file overrode the
+  environment for profile, browser selector, upload base and content limits.
+
 ## [1.12.0] - 2026-10-24
 
 ### Added

@@ -434,25 +434,26 @@ codex-browser-bridge --mode mcp --max-text-bytes 1048576 --max-image-bytes 31457
 
 The source also provides shell-friendly commands through the same schemas,
 profiles, handlers, and safety checks. `tools` lists names without connecting;
-`tools NAME` returns one schema. A `call` starts its own session; use `batch`
-for dependent calls in one session:
+`tools NAME` returns one schema.
 
 ```bash
 codex-browser-bridge tools codex_locator
 codex-browser-bridge call codex_list_browsers '{}'
-codex-browser-bridge --max-output-bytes 4096 batch --finalize <<'JSONL'
-{"name":"codex_create_tab","arguments":{}}
+codex-browser-bridge --max-output-bytes 4096 batch <<'JSONL'
+{"name":"codex_user_tabs","arguments":{}}
 JSONL
 ```
 
-Batch accepts one `{name, arguments}` JSON object per stdin line and stops on
-the first error. `--finalize` attempts official turn cleanup even after failure;
-mark deliverables before ending the turn. Separate processes do not share tabs
-or session IDs. CLI JSON results default to 16384 bytes each and summarize
-images without base64; this byte limit is separate from MCP content limits.
-For a dependent create/navigate workflow, parse the returned tab ID and feed the
-next line to the same batch process, or use a persistent MCP session. The CLI is
-an optional entrypoint, not a separate capability implementation.
+A `call` is one process and one browser turn. It ends that turn on exit, even
+after a failure, so an unmarked tab can never be left owned by a process that no
+longer exists; `deliverable` and `handoff` marks survive. `batch` reads one
+`{name, arguments}` object per stdin line, keeps one turn, and stops on the
+first error. Use `--session-file <path>` when several separate commands must
+share one turn, or `--keep-turn` to deliberately leave the turn open. Ctrl-C and
+SIGTERM attempt the same cleanup once. CLI JSON results default to 16384 bytes
+each and summarize images without base64; this byte limit is separate from MCP
+content limits. The CLI is an optional entrypoint, not a separate capability
+implementation.
 
 ## Architecture
 

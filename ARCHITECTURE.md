@@ -122,10 +122,15 @@ state-changing CDP is not replayed. Current extension builds do not acknowledge
 the number of supplied path points.
 
 Shell `tools`, `call`, and `batch` reuse the same MCP registry and handlers.
-Batch owns one session and stops on error; independent calls never share a
-session. Optional `--finalize` attempts cleanup on success or failure. CLI output
-has a separate byte budget and summarizes images instead of emitting base64.
-This entrypoint does not change the parity boundary.
+A turn belongs to the process that opened it, so a one-shot `call` ends its turn
+on exit and `batch` ends its turn at EOF, both including the failure path.
+Cleanup preserves `deliverable`/`handoff` marks and runs once on Ctrl-C or
+SIGTERM. `--session-file` persists only the session and turn identifiers so
+separate processes can continue one turn; it is not browser state. `--keep-turn`
+is the explicit opt-out and can leave a tab owned by a closed session, so
+multi-step work should use `batch` or a persistent MCP session. CLI output has a
+separate byte budget and summarizes images instead of emitting base64. This
+entrypoint does not change the parity boundary.
 
 ### CDP event subscription
 Frames carrying a `method` and no `id` are server-pushed events. `read_loop`

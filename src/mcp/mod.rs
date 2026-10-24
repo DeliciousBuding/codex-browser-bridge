@@ -19,6 +19,24 @@ pub mod schema;
 pub mod types;
 
 const MAX_MCP_LINE_BYTES: usize = 1024 * 1024;
+/// Upper bound for the shutdown `turnEnded` round-trip. The process is already
+/// exiting, so a slow or dead pipe must not stall it.
+const SHUTDOWN_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// End the browser turn for `client` if it still has a live connection.
+///
+/// Shared by the MCP server (stdio EOF) and the shell (interactive exit and
+/// signal handling). Errors are logged, never surfaced: this runs on the way out.
+pub async fn shutdown_client(client: &Client) {
+    if !client.has_live_connection().await {
+        return;
+    }
+    match tokio::time::timeout(SHUTDOWN_TURN_TIMEOUT, client.end_turn()).await {
+        Ok(Ok(ended)) => tracing::debug!(ended, "ended browser turn on shutdown"),
+        Ok(Err(err)) => tracing::debug!(error = %err, "turn cleanup on shutdown failed"),
+        Err(_) => tracing::debug!("turn cleanup on shutdown timed out"),
+    }
+}
 
 #[derive(Clone)]
 pub struct Server {
@@ -69,7 +87,7 @@ impl Server {
         }
     }
 
-    pub async fn run_stdio(self) -> anyhow::Result<()> {
+    pub async fn run_stdio(&self) -> anyhow::Result<()> {
         let stdin = tokio::io::stdin();
         let mut stdout = tokio::io::stdout();
         let mut reader = BufReader::new(stdin);
@@ -110,6 +128,16 @@ impl Server {
         }
 
         Ok(())
+    }
+
+    /// Best-effort turn cleanup when the owning process is ending.
+    ///
+    /// A browser turn belongs to the process that opened it. When the MCP client
+    /// disconnects or the shell is interrupted, leaving unmarked agent tabs owned
+    /// by a dead session makes them impossible to attach or close later. This
+    /// never fails the caller and never blocks for long.
+    pub async fn shutdown_turn(&self) {
+        shutdown_client(&self.client_snapshot()).await;
     }
 
     pub async fn handle_jsonrpc_line(&self, line: &str) -> Option<String> {

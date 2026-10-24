@@ -20,6 +20,8 @@ const CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 const CLEANUP_EVENT_TIMEOUT: Duration = Duration::from_millis(250);
 const MAX_PATH_POINTS: usize = 1_000;
 const MAX_COORDINATE: f64 = 10_000_000.0;
+/// Time allowed for the renderer to commit one frame after activation.
+const FOREGROUND_SETTLE: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Copy)]
 struct ButtonSpec {
@@ -72,6 +74,55 @@ fn coordinate(name: &str, value: f64) -> Result<f64> {
         )));
     }
     Ok(value)
+}
+
+fn auto_foreground_disabled() -> bool {
+    matches!(
+        std::env::var("CODEX_BRIDGE_NO_AUTO_FOREGROUND").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
+
+/// Bring the tab to the foreground before synthesized input.
+///
+/// Chrome acknowledges `Input.dispatchMouseEvent` for a background or occluded
+/// tab but may never deliver the event to the renderer, and the extension mutes
+/// inactive tabs. Without this check a click can report success while the page
+/// state is unchanged. Set `CODEX_BRIDGE_NO_AUTO_FOREGROUND=1` to keep the
+/// previous behaviour and accept that risk.
+pub(crate) async fn ensure_foreground(client: &Client, tab: i64, deadline: Instant) -> Result<()> {
+    if auto_foreground_disabled() {
+        return Ok(());
+    }
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(BridgeError::Timeout("pointer operation deadline".into()));
+    }
+    let raw = client
+        .execute_cdp_with_timeout(
+            tab,
+            "Runtime.evaluate",
+            Some(json!({
+                "expression": "document.visibilityState",
+                "returnByValue": true
+            })),
+            remaining,
+        )
+        .await?;
+    let state = crate::browser::runtime_value_string(&raw)?.unwrap_or_default();
+    if state == "visible" {
+        return Ok(());
+    }
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(BridgeError::Timeout("pointer operation deadline".into()));
+    }
+    client
+        .execute_cdp_once_with_timeout(tab, "Page.bringToFront", None, remaining)
+        .await?;
+    tokio::time::sleep(FOREGROUND_SETTLE).await;
+    tracing::debug!(tab, state = %state, "activated background tab before input");
+    Ok(())
 }
 
 async fn dispatch_until(client: &Client, tab: i64, params: Value, deadline: Instant) -> Result<()> {
@@ -218,6 +269,7 @@ pub async fn click(
     }
     let button = button(button_number)?;
     let modifiers = crate::input::modifier_mask(modifiers)?;
+    ensure_foreground(client, tab, Instant::now() + OP_TIMEOUT).await?;
     let deadline = Instant::now() + OP_TIMEOUT;
     for count in 1..=click_count {
         let click = ClickSpec {
@@ -245,6 +297,8 @@ pub async fn move_to(
     let x = coordinate("x", x)?;
     let y = coordinate("y", y)?;
     let modifiers = crate::input::modifier_mask(modifiers)?;
+    ensure_foreground(client, tab, Instant::now() + OP_TIMEOUT).await?;
+    let deadline = Instant::now() + OP_TIMEOUT;
     dispatch_move_until(
         client,
         tab,
@@ -256,7 +310,7 @@ pub async fn move_to(
             "buttons": 0,
             "modifiers": modifiers
         }),
-        Instant::now() + OP_TIMEOUT,
+        deadline,
     )
     .await
 }
@@ -277,6 +331,8 @@ pub async fn scroll(
     let scroll_x = coordinate("scrollX magnitude", scroll_x.abs())? * scroll_x.signum();
     let scroll_y = coordinate("scrollY magnitude", scroll_y.abs())? * scroll_y.signum();
     let modifiers = crate::input::modifier_mask(modifiers)?;
+    ensure_foreground(client, tab, Instant::now() + OP_TIMEOUT).await?;
+    let deadline = Instant::now() + OP_TIMEOUT;
     if modifiers != 0 {
         dispatch_move_until(
             client,
@@ -289,7 +345,7 @@ pub async fn scroll(
                 "buttons": 0,
                 "modifiers": modifiers
             }),
-            Instant::now() + OP_TIMEOUT,
+            deadline,
         )
         .await?;
     }
@@ -306,7 +362,7 @@ pub async fn scroll(
             "preventFling": true,
             "speed": 8000
         }),
-        Instant::now() + OP_TIMEOUT,
+        deadline,
     )
     .await
 }
@@ -339,6 +395,7 @@ pub async fn drag(
     let (start_x, start_y) = path[0];
     let (end_x, end_y) = *path.last().expect("validated nonempty drag path");
     let (mut release_x, mut release_y) = (start_x, start_y);
+    ensure_foreground(client, tab, Instant::now() + OP_TIMEOUT).await?;
 
     // Mark the press as potentially delivered before awaiting it. If the pipe
     // breaks after the browser receives mousePressed, cleanup must still release
@@ -411,5 +468,85 @@ pub async fn drag(
             )
             .await
         }
+    }
+}
+
+#[cfg(test)]
+mod foreground_tests {
+    use super::*;
+    use crate::client::Client;
+    use crate::protocol::{decode_frame, encode_frame};
+    use tokio::time::timeout;
+
+    async fn connected() -> (Client, tokio::io::DuplexStream) {
+        let (client_end, server) = tokio::io::duplex(8192);
+        let client = Client::from_stream(client_end).unwrap();
+        client.mark_attached(7).await;
+        (client, server)
+    }
+
+    #[tokio::test]
+    async fn hidden_tab_is_activated_before_input() {
+        let (client, mut server) = connected().await;
+        let responder = tokio::spawn(async move {
+            let frame = timeout(Duration::from_secs(2), decode_frame(&mut server))
+                .await
+                .expect("probe timeout")
+                .unwrap();
+            let probe: Value = serde_json::from_slice(&frame).unwrap();
+            assert_eq!(probe["method"], "executeCdp");
+            assert_eq!(probe["params"]["method"], "Runtime.evaluate");
+            encode_frame(
+                &mut server,
+                &json!({"id": probe["id"], "result": {"result": {"type": "string", "value": "hidden"}}}),
+            )
+            .await
+            .unwrap();
+
+            let frame = timeout(Duration::from_secs(2), decode_frame(&mut server))
+                .await
+                .expect("activation timeout")
+                .unwrap();
+            let activate: Value = serde_json::from_slice(&frame).unwrap();
+            assert_eq!(activate["params"]["method"], "Page.bringToFront");
+            encode_frame(&mut server, &json!({"id": activate["id"], "result": {}}))
+                .await
+                .unwrap();
+        });
+
+        ensure_foreground(&client, 7, Instant::now() + Duration::from_secs(2))
+            .await
+            .unwrap();
+        responder.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn visible_tab_is_not_activated() {
+        let (client, mut server) = connected().await;
+        let responder = tokio::spawn(async move {
+            let frame = timeout(Duration::from_secs(2), decode_frame(&mut server))
+                .await
+                .expect("probe timeout")
+                .unwrap();
+            let probe: Value = serde_json::from_slice(&frame).unwrap();
+            assert_eq!(probe["params"]["method"], "Runtime.evaluate");
+            encode_frame(
+                &mut server,
+                &json!({"id": probe["id"], "result": {"result": {"type": "string", "value": "visible"}}}),
+            )
+            .await
+            .unwrap();
+            // No further request may arrive: a visible tab needs no activation.
+            assert!(
+                timeout(Duration::from_millis(100), decode_frame(&mut server))
+                    .await
+                    .is_err()
+            );
+        });
+
+        ensure_foreground(&client, 7, Instant::now() + Duration::from_secs(2))
+            .await
+            .unwrap();
+        responder.await.unwrap();
     }
 }
