@@ -256,6 +256,11 @@ async fn main() -> anyhow::Result<()> {
         Mode::Doctor => {
             let mut result = serde_json::to_value(doctor::run_diagnostics().await)?;
             result["browserSelection"] = serde_json::to_value(&browser_selection)?;
+            result["transportMode"] = serde_json::json!(if args.pipe.is_some() {
+                "explicit_endpoint"
+            } else {
+                "discovered_instance"
+            });
             println!("{}", serde_json::to_string_pretty(&result)?);
         }
     }

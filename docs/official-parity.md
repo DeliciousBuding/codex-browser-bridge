@@ -79,7 +79,11 @@ turn identity. It must not report remote cleanup as confirmed on a dead pipe.
 Rebinding validates the replacement before ending the prior turn and refuses
 to discard an owned live turn without the explicit cleanup option.
 
-Implicit selection also requires a complete discovery inventory. A disconnected
+Implicit selection also requires a complete discovery inventory. A confirmed
+native `getInfo` no-route response is a stale app-session endpoint, not an unknown
+browser; explicitly identified app-private MCP Apps routes are excluded from the
+extension inventory. Timeouts, generic permission denials and unidentified endpoints still block
+implicit selection. A disconnected
 unresolved turn is retained until its original instance can be checked; binding
 and finalization exclude in-flight MCP tool/resource operations. CLI v2 continuation
 persists the exact instance under an OS lock. Legacy/corrupt files are rejected,

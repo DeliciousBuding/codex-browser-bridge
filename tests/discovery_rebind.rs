@@ -13,6 +13,8 @@ fn inventory(unprobed: usize, failed: usize) -> BrowserInventory {
         probed_pipe_count: 1 + failed,
         unprobed_pipe_count: unprobed,
         failed_pipe_count: failed,
+        stale_pipe_count: 0,
+        excluded_pipe_count: 0,
         browsers: vec![BrowserDescriptor {
             id: "exact-id".into(),
             family: "edge".into(),
@@ -54,6 +56,11 @@ fn incomplete_inventory_cannot_prove_unique_family_or_default() {
         );
     }
     assert!(select_browser_from_inventory(&inventory(0, 0), &BrowserSelector::default()).is_ok());
+    let mut stale = inventory(0, 0);
+    stale.pipe_count += 2;
+    stale.probed_pipe_count += 2;
+    stale.stale_pipe_count = 2;
+    assert!(select_browser_from_inventory(&stale, &BrowserSelector::default()).is_ok());
 }
 
 #[test]

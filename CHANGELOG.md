@@ -21,6 +21,8 @@ All notable changes to this project will be documented in this file.
 - Incomplete discovery cannot prove an implicit unique browser. Rebind/finalize
   exclude in-flight tools and unresolved old turns remain recoverable; rebinding
   the same instance preserves its turn.
+- Explicit native no-route responses are counted as stale endpoints, not unknown
+  browser instances; timeout/permission failures still block implicit selection.
 
 ## [1.13.0] - 2026-10-24
 
