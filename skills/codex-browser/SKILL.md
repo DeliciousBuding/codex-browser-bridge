@@ -85,5 +85,6 @@ app-side policy or artifact service is inherited.
 Chrome and Edge are tested. Brave, Opera, and Vivaldi use the same
 Chromium/CDP pipeline but are not live-tested by this project. Linux GNU x64
 and arm64 Unix transport ships in v1.12.0 and requires glibc >= 2.39 for
-published binaries; live extension verification is still pending. A compiling
+published binaries. Linux arm64 Chrome passed the synthetic parity and
+observation smoke; upload permission denial was verified, not successful upload. A compiling
 macOS target is not a runtime support claim.

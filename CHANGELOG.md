@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-10-24
+
 ### Added
 
 - `codex_observe`: bounded tab/document event journal, cursor gaps, frame/loader

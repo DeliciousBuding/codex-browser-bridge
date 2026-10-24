@@ -36,7 +36,8 @@
 `codex-browser-use` 本地传输，识别每个实时浏览器扩展实例，使用相同的
 JSON-RPC 协议，暴露 66 个 MCP 工具用于浏览器自动化。
 
-本文描述 v1.13.0 release candidate：66 个 MCP 工具；tag 发布流程和 npm 验收通过后才算已发布。
+本文描述 v1.13.0：66 个 MCP 工具（basic 46 / network 65 / full 66），
+提供 Windows 与 Linux GNU 包。
 
 项目目标是让非 Codex agent 获得完整浏览器能力。具体方法与语义覆盖见
 [能力对齐表](docs/official-parity.md)；工具数量或新增 CLI 入口都不代表已完整对齐。
@@ -97,6 +98,10 @@ npm i -g @delicious233/codex-browser-bridge
 | Windows arm64 | 已发布二进制；本次发布未实测 |
 | Linux GNU x64 | Ubuntu 24.04 / glibc 2.39 上通过全量原生 Rust/Node 门禁、release 构建和无浏览器 doctor；未做扩展 live 验证 |
 | Linux GNU arm64 | 原生 Rust tests/clippy/release 和合成 Chrome 扩展 parity 冒烟通过；不等于完整能力面 |
+
+2026-10-24 的 Windows Edge 与 Linux arm64 Chrome 均通过 20 项 parity 和
+9 项观察/locator/文件结果测试。chooser 捕获、权限拒绝与清理已验证；本次
+扩展未开放本地文件访问权限，没有成功上传的验收记录。
 | macOS | Unix 代码可编译不代表运行时支持；无发布二进制或实测记录 |
 
 Bridge 不会安装第二套浏览器扩展，也不会复制浏览器配置。一个 MCP session
