@@ -382,3 +382,36 @@ fn rename_no_replace(_: &Path, _: &Path) -> std::io::Result<()> {
 fn user(message: &str) -> BridgeError {
     BridgeError::User(message.into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn elapsed_budget_prevents_file_and_bundle_publication_and_removes_stage() {
+        for bundle in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let budget = FileBudget::new(FileLimits {
+                max_files: 1,
+                max_file_bytes: 3,
+                max_total_bytes: 3,
+                max_duration: MAX_DURATION,
+            })
+            .unwrap();
+            let mut transaction = StagedFiles::new(directory.path(), budget).unwrap();
+            transaction.write("content", b"abc").unwrap();
+            // Expire an already-populated transaction without a short setup
+            // deadline or sleep: CI load must not determine test behavior.
+            transaction.budget.started = Instant::now()
+                .checked_sub(MAX_DURATION + Duration::from_secs(1))
+                .unwrap();
+            let result = if bundle {
+                transaction.publish_bundle("bundle")
+            } else {
+                transaction.publish_file("content", "result.txt")
+            };
+            assert!(matches!(result, Err(BridgeError::Timeout(_))));
+            assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+        }
+    }
+}

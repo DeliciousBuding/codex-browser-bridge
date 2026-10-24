@@ -108,23 +108,6 @@ fn name_traversal_and_duplicate_names_are_rejected_without_overwrite() {
 }
 
 #[test]
-fn elapsed_budget_prevents_publication_and_removes_stage() {
-    let dir = tempdir().unwrap();
-    let budget = FileBudget::new(FileLimits {
-        max_files: 1,
-        max_file_bytes: 3,
-        max_total_bytes: 3,
-        max_duration: Duration::from_millis(20),
-    })
-    .unwrap();
-    let mut transaction = StagedFiles::new(dir.path(), budget).unwrap();
-    transaction.write("content", b"abc").unwrap();
-    std::thread::sleep(Duration::from_millis(30));
-    assert!(transaction.publish_file("content", "result.txt").is_err());
-    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
-}
-
-#[test]
 fn invalid_hard_limits_are_rejected() {
     for limits in [
         (0, 1, 1),
