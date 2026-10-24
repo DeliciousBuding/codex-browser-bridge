@@ -74,7 +74,7 @@ performance checks support that goal; none replaces functional parity.
 - [x] **Installer proxy support.** ✅ Done (v1.11.1). `install.js` honors `HTTPS_PROXY`/`NO_PROXY` via an HTTP CONNECT tunnel, so `npm i -g` works behind corporate/Clash-style proxies.
 - [x] **MCP resources/prompts.** ✅ Done. `resources/list` + `resources/read` expose `codex://tabs` (snapshot via getTabs). `prompts/list` + `prompts/get` ship `login` and `extract-table` workflow templates (each cites the concrete tools to call). `initialize` advertises `resources` + `prompts` capabilities. Subscribe / list-changes omitted — these are on-demand snapshots, not a live feed. 5 tests under `cfg(not(windows))`.
   - Effort: M · landed in `src/mcp/mod.rs`
-- [x] **Config file** (`.codex-browser-bridge.toml`) for profile + upload_base. ✅ Done. `src/config.rs` reads `CODEX_BRIDGE_CONFIG` env path or `./.codex-browser-bridge.toml`; precedence CLI flags > config > env > default. Malformed file warns + is ignored (never bricks startup).
+- [x] **Config file** (`.codex-browser-bridge.toml`) for profile + upload_base. ✅ Done. `src/config.rs` reads `CODEX_BRIDGE_CONFIG` env path or `./.codex-browser-bridge.toml`; precedence CLI flags > env > config > default. Malformed file warns + is ignored (never bricks startup).
   - Effort: S · landed in `src/config.rs`, `src/main.rs`, `Cargo.toml` (toml dep)
 - [x] **ARCHITECTURE.md** — design-decision record for contributors. ✅ Done.
   - Effort: S · `ARCHITECTURE.md`

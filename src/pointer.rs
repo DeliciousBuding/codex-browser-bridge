@@ -20,7 +20,8 @@ const CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 const CLEANUP_EVENT_TIMEOUT: Duration = Duration::from_millis(250);
 const MAX_PATH_POINTS: usize = 1_000;
 const MAX_COORDINATE: f64 = 10_000_000.0;
-/// Time allowed for the renderer to commit one frame after activation.
+/// Bounded settle window after activation; this is a safety delay, not a
+/// requestAnimationFrame guarantee.
 const FOREGROUND_SETTLE: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Copy)]

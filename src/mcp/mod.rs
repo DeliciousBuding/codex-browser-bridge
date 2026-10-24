@@ -27,14 +27,23 @@ const SHUTDOWN_TURN_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 ///
 /// Shared by the MCP server (stdio EOF) and the shell (interactive exit and
 /// signal handling). Errors are logged, never surfaced: this runs on the way out.
-pub async fn shutdown_client(client: &Client) {
+pub async fn shutdown_client(client: &Client) -> bool {
     if !client.has_live_connection().await {
-        return;
+        return false;
     }
     match tokio::time::timeout(SHUTDOWN_TURN_TIMEOUT, client.end_turn()).await {
-        Ok(Ok(ended)) => tracing::debug!(ended, "ended browser turn on shutdown"),
-        Ok(Err(err)) => tracing::debug!(error = %err, "turn cleanup on shutdown failed"),
-        Err(_) => tracing::debug!("turn cleanup on shutdown timed out"),
+        Ok(Ok(ended)) => {
+            tracing::debug!(ended, "ended browser turn on shutdown");
+            ended
+        }
+        Ok(Err(err)) => {
+            tracing::warn!(error = %err, "turn cleanup on shutdown failed");
+            false
+        }
+        Err(_) => {
+            tracing::warn!("turn cleanup on shutdown timed out");
+            false
+        }
     }
 }
 
@@ -136,8 +145,8 @@ impl Server {
     /// disconnects or the shell is interrupted, leaving unmarked agent tabs owned
     /// by a dead session makes them impossible to attach or close later. This
     /// never fails the caller and never blocks for long.
-    pub async fn shutdown_turn(&self) {
-        shutdown_client(&self.client_snapshot()).await;
+    pub async fn shutdown_turn(&self) -> bool {
+        shutdown_client(&self.client_snapshot()).await
     }
 
     pub async fn handle_jsonrpc_line(&self, line: &str) -> Option<String> {

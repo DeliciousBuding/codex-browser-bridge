@@ -386,7 +386,7 @@ async fn send(
     timeout: Duration,
 ) -> Result<()> {
     client
-        .execute_cdp_with_timeout(
+        .execute_cdp_once_with_timeout(
             tab,
             "Input.dispatchKeyEvent",
             Some(event(spec, kind, modifiers, shifted)),

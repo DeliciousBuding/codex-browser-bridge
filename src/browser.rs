@@ -260,7 +260,8 @@ fn ensure_navigation_accepted(raw: &RawValue, url: &str) -> Result<()> {
         error_text: Option<String>,
     }
 
-    let parsed = serde_json::from_str::<NavigationResult>(raw.get()).unwrap_or_default();
+    let parsed = serde_json::from_str::<NavigationResult>(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("decode Page.navigate result: {err}")))?;
     match parsed.error_text.filter(|text| !text.is_empty()) {
         Some(error_text) => Err(BridgeError::Protocol(format!(
             "navigation to {url} failed: {error_text}"
@@ -339,12 +340,11 @@ pub async fn wait_for_load(client: &Client, tab_id: &str, timeout_ms: u64) -> Re
                     if last == "complete" {
                         // A browser error page also reports readyState=complete;
                         // distinguish a real load from a failed navigation.
-                        if let Ok(url) = get_url(client, tab_id).await {
-                            if url.starts_with("chrome-error://") {
-                                return Err(BridgeError::Protocol(format!(
-                                    "tab {tab_id} loaded a browser error page ({url}); the navigation did not succeed"
-                                )));
-                            }
+                        let url = get_url(client, tab_id).await?;
+                        if url.starts_with("chrome-error://") {
+                            return Err(BridgeError::Protocol(format!(
+                                "tab {tab_id} loaded a browser error page ({url}); the navigation did not succeed"
+                            )));
                         }
                         return Ok(last);
                     }
@@ -1201,7 +1201,12 @@ pub async fn cua_type(client: &Client, tab_id: &str, text: &str) -> Result<()> {
     }
     crate::pointer::ensure_foreground(client, id, Instant::now() + Duration::from_secs(3)).await?;
     client
-        .execute_cdp(id, "Input.insertText", Some(json!({ "text": text })))
+        .execute_cdp_once_with_timeout(
+            id,
+            "Input.insertText",
+            Some(json!({ "text": text })),
+            Duration::from_secs(10),
+        )
         .await
         .map(|_| ())
 }
@@ -2458,6 +2463,16 @@ mod navigation_and_management_tests {
     fn navigation_without_result_body_is_accepted() {
         let raw = RawValue::from_string("{}".into()).unwrap();
         assert!(ensure_navigation_accepted(&raw, "https://example.com").is_ok());
+    }
+
+    #[test]
+    fn malformed_navigation_result_is_rejected() {
+        let raw = RawValue::from_string("\"not-a-navigation-result\"".into()).unwrap();
+        let err = ensure_navigation_accepted(&raw, "https://example.com").unwrap_err();
+        assert!(
+            err.to_string().contains("decode Page.navigate result"),
+            "{err}"
+        );
     }
 
     #[test]

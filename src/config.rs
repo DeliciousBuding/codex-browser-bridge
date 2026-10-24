@@ -6,7 +6,7 @@
 //! authoritative; missing or malformed files warn and yield the empty config
 //! instead of falling through to a working-directory config.
 //!
-//! Config precedence overall: CLI flags > config file > env > built-in default
+//! Config precedence overall: CLI flags > env > config file > built-in default
 //! (applied in `main.rs`).
 
 use serde::Deserialize;

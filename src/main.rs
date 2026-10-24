@@ -2,6 +2,7 @@ use anyhow::Context;
 use clap::{Parser, ValueEnum};
 use codex_browser_bridge::registry::BrowserSelector;
 use codex_browser_bridge::{cli, client, config, discovery, doctor, logging, mcp};
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Mode {
@@ -44,20 +45,21 @@ struct Args {
     #[arg(long, global = true, default_value = "16384", value_parser = cli::parse_output_budget)]
     max_output_bytes: usize,
 
-    /// Reuse one browser session across separate shell commands.
+    /// Reuse one browser session across separate `call` or `batch` commands.
     ///
     /// Each process otherwise starts a fresh session, so a tab created by one
     /// `call` cannot be used by the next. Commands write the active identifiers
     /// here and read them on the next invocation; `--finalize` deletes the file.
+    /// MCP stdio owns its turn for the process lifetime and does not use this.
     #[arg(long, global = true)]
     session_file: Option<std::path::PathBuf>,
 
     /// End the browser turn after a `call` or `batch`, even on failure.
     ///
     /// This is the default for one-shot commands and preserves marked
-    /// handoff/deliverable tabs. It is ignored when `--session-file` is used,
-    /// because that combination means "continue this turn later".
-    #[arg(long, global = true)]
+    /// handoff/deliverable tabs. With `--session-file`, cleanup is off by
+    /// default; pass this flag to end the turn and delete the session file.
+    #[arg(long, global = true, conflicts_with = "keep_turn")]
     finalize: bool,
 
     /// Leave the browser turn open after the command exits.
@@ -84,6 +86,15 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse_from(normalized_args(std::env::args()));
     if args.command.is_some() && !matches!(args.mode, Mode::Mcp) {
         anyhow::bail!("commands cannot be combined with --mode; omit --mode for tools/call/batch");
+    }
+    let owns_turn = matches!(
+        args.command.as_ref(),
+        Some(cli::Command::Call { .. }) | Some(cli::Command::Batch)
+    );
+    if (args.session_file.is_some() || args.finalize || args.keep_turn) && !owns_turn {
+        anyhow::bail!(
+            "--session-file, --finalize, and --keep-turn require a call or batch command"
+        );
     }
     let config = config::Config::load();
     // Documented precedence is CLI flags > environment > config file > default.
@@ -180,21 +191,36 @@ async fn main() -> anyhow::Result<()> {
                         args.session_file.as_deref(),
                         finalize,
                     ),
+                    finalize,
+                    args.session_file.as_deref(),
                 )
                 .await?;
             } else {
-                server.run_stdio().await?;
-                // The client disconnected: end the turn so agent tabs are not
-                // left owned by a session that no longer has a reader.
+                let result = tokio::select! {
+                    result = server.run_stdio() => result,
+                    _ = shutdown_signal() => {
+                        let _ = server.shutdown_turn().await;
+                        anyhow::bail!("interrupted; attempted browser turn cleanup")
+                    }
+                };
+                // EOF and stdio errors both release the turn this process owned.
                 server.shutdown_turn().await;
+                result?;
             }
         }
         Mode::Cli => {
             let client = client::Client::connect_with_selector(args.pipe.as_deref(), selector)
                 .await
                 .context("failed to connect to the ChatGPT browser-extension pipe")?;
-            cli::run_cli(client.clone()).await?;
+            let result = tokio::select! {
+                result = cli::run_cli(client.clone()) => result,
+                _ = shutdown_signal() => {
+                    let _ = mcp::shutdown_client(&client).await;
+                    anyhow::bail!("interrupted; attempted browser turn cleanup")
+                }
+            };
             mcp::shutdown_client(&client).await;
+            result?;
         }
         Mode::Doctor => {
             let result = doctor::run_diagnostics().await;
@@ -228,17 +254,41 @@ fn profile_from_env() -> Option<Profile> {
 
 /// Run a command until it finishes or the process is asked to stop.
 ///
-/// An interrupted shell command still owns its browser turn, so the same
-/// cleanup the normal exit path performs runs here before returning.
-async fn run_until_interrupted<F>(server: &mcp::Server, future: F) -> anyhow::Result<()>
+/// An interrupted shell command may own its browser turn. Cleanup follows the
+/// same finalize policy as a normal exit; session-file and --keep-turn preserve
+/// the turn and its session file.
+async fn run_until_interrupted<F>(
+    server: &mcp::Server,
+    future: F,
+    cleanup_on_interrupt: bool,
+    session_file: Option<&Path>,
+) -> anyhow::Result<()>
 where
     F: std::future::Future<Output = anyhow::Result<()>>,
 {
     tokio::select! {
         result = future => result,
         _ = shutdown_signal() => {
-            server.shutdown_turn().await;
-            anyhow::bail!("interrupted; attempted browser turn cleanup")
+            if cleanup_on_interrupt {
+                let ended = server.shutdown_turn().await;
+                if ended {
+                    if let Some(path) = session_file {
+                        if let Err(err) = cli::clear_session(path) {
+                            anyhow::bail!(
+                                "interrupted; browser turn cleanup completed, but the session file could not be removed: {err:#}"
+                            );
+                        }
+                    }
+                    anyhow::bail!("interrupted; browser turn cleanup completed")
+                } else {
+                    anyhow::bail!("interrupted; browser turn cleanup was not confirmed")
+                }
+            } else {
+                tracing::warn!(
+                    "interrupted; leaving the browser turn open because --keep-turn or --session-file is active"
+                );
+                anyhow::bail!("interrupted; browser turn left open")
+            }
         }
     }
 }

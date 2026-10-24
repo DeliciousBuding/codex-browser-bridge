@@ -26,7 +26,8 @@ backend; it does not select a different automation implementation.
 
 - `codex_browser_history` maps `Browser.history` through `getUserHistory`.
 - `codex_browser_management` maps the official `management` capability:
-  `windows`, `tabs`, `tabGroups`, and `bookmarks`.
+  `windows`, `tabs`, `tabGroups`, and `bookmarks`; methods that remove or
+  discard state require `confirm=true` after the user explicitly requested it.
 - `codex_browser_viewport` maps the official `viewport` capability.
 - `codex_browser_visibility` maps the official `visibility` capability when the
   selected extension advertises it.

@@ -23,7 +23,7 @@ the shell closes the turn it opened unless you explicitly keep it.
 |---|---|---|
 | `call NAME [JSON]` | one process, one turn | **on by default** (`codex_finalize` on exit) |
 | `batch` | one process, one turn | **on by default**, including after a failed line |
-| `--session-file <path>` | one turn shared by several processes | off until you finalize |
+| `--session-file <path>` | one turn shared by several processes | off until `--finalize` or `codex_finalize` |
 | `--keep-turn` | one process, one turn | off |
 
 - **Default cleanup preserves marks.** Unmarked agent tabs are closed and
@@ -37,19 +37,24 @@ the shell closes the turn it opened unless you explicitly keep it.
   session and turn identifiers so a later process resumes the same turn. It does
   not store cookies, storage, or tab content, and it is not portable between
   machines. `--finalize`, or a successful `codex_finalize` call, deletes it.
-- **Interrupts clean up.** Ctrl-C and SIGTERM attempt the same turn cleanup once,
-  with a bounded wait, before exiting.
+- **Interrupts follow the cleanup policy.** Ctrl-C and SIGTERM attempt turn
+  cleanup only when the command is configured to finalize. `--keep-turn` and an
+  unfinalized `--session-file` leave the turn open and keep the session file.
 
-`--finalize` can still be passed explicitly; it is already the default for a
-one-shot command and only changes behaviour together with `--keep-turn` or a
-session file.
+`--finalize` is the default for a one-shot `call`/`batch`. With a session file it
+explicitly ends the shared turn and deletes the file. It conflicts with
+`--keep-turn`; choose one lifecycle policy.
+
+`--session-file` is accepted only for `call` and `batch`; MCP stdio and the
+interactive CLI own their turn for the process lifetime and reject it.
 
 ## Multi-step work
 
 ```bash
-# One process, several dependent calls. Stops at the first error.
+# One process, several dependent calls on a tab id already returned by
+# codex_user_tabs. Stops at the first error.
 codex-browser-bridge batch <<'JSONL'
-{"name":"codex_create_tab","arguments":{}}
+{"name":"codex_claim_tab","arguments":{"tab_id":"123"}}
 {"name":"codex_navigate","arguments":{"tab_id":"123","url":"https://example.com"}}
 JSONL
 
@@ -75,7 +80,10 @@ into a valid JSON envelope with `truncated` and `originalBytes`.
 
 - A failed tool call writes the JSON result to stdout and exits non-zero; the
   reason stays in the JSON, not only on stderr.
-- Cleanup runs even when the command failed, so a partial workflow does not
-  leave tabs behind.
+- Cleanup runs after a failed tool call when the command is configured to
+  finalize, so a partial one-shot workflow does not leave tabs behind.
+- A requested `--session-file` write or removal is part of the command result.
+  If it fails, the process exits non-zero instead of claiming that a future
+  process can resume the same turn.
 - A disconnected transport is not equivalent to a successful finalization; the
   `codex_finalize` result says so explicitly.

@@ -103,10 +103,11 @@ npm i -g @delicious233/codex-browser-bridge
 Bridge 不会安装第二套浏览器扩展，也不会复制浏览器配置。一个 MCP session
 只控制一个浏览器扩展实例，不会把多个浏览器 profile 的标签页合并成一个列表。
 
-Linux 源码发现 `/tmp/codex-browser-use/*.sock`，检查 socket 所有者、私有权限和
-peer UID，并接受官方共享目录 `1777` 配合 socket `0600` 的布局。Doctor 会报告
-transport kind/path，同时保留兼容的 `pipe_*` 字段。Linux/WSL 进程需要本环境
-内的 socket，不会自动跨 OS 发现 Windows pipe。
+Linux 源码优先发现 `CODEX_BRIDGE_SOCKET_DIR`，否则依次尝试
+`$XDG_RUNTIME_DIR/codex-browser-use` 和 `/tmp/codex-browser-use`。它会检查
+socket 所有者、私有权限和 peer UID，并接受官方共享目录 `1777` 配合 socket
+`0600` 的布局。Doctor 会报告 transport kind/path，同时保留兼容的 `pipe_*`
+字段。Linux/WSL 进程需要本环境内的 socket，不会自动跨 OS 发现 Windows pipe。
 
 ### 浏览器实例识别
 
@@ -200,7 +201,7 @@ Cursor、OpenClaw、Hermes Agent 的配置见 [examples/](examples/)。npm 包�
 
 ## 配置
 
-配置优先级：CLI 参数 > 配置文件 > 环境变量 > 默认值。
+配置优先级：CLI 参数 > 环境变量 > 配置文件 > 默认值。
 
 默认配置文件是当前工作目录下的 `.codex-browser-bridge.toml`。也可以用 `CODEX_BRIDGE_CONFIG` 指定显式路径；设置后不会再回退读取工作目录配置：
 
@@ -242,6 +243,10 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 - `CODEX_BRIDGE_MAX_IMAGE_BYTES` 限制每个 base64 image content，默认 `3145728`。
 - 两者都有 8 MiB 硬上限。文本截断会带原始字节数标记；超大图片返回文本摘要，不返回无效的半截 base64。
 - 也可以在 `.codex-browser-bridge.toml` 中使用 `max_text_bytes` / `max_image_bytes`，或用 CLI 参数 `--max-text-bytes` / `--max-image-bytes`。
+- `CODEX_BRIDGE_SOCKET_DIR` 可以覆盖 Unix socket 发现目录；未设置时先尝试
+  `$XDG_RUNTIME_DIR/codex-browser-use`，再回退到 `/tmp/codex-browser-use`。
+- `CODEX_BRIDGE_NO_AUTO_FOREGROUND=1` 会关闭合成输入前的自动隐藏标签页激活；
+  默认会激活标签页，关闭后可能恢复旧的静默输入丢失风险。
 
 支持 MCP resources 的客户端可以读取 `codex://tabs`，它只返回当前 bridge session 拥有的标签页，不是所有 Chrome 标签页。支持 MCP prompts 的客户端还会看到 `login` 和 `extract-table` 两个提示模板。
 
@@ -253,7 +258,7 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 | `codex_list_browsers` | 列出实时实例的 `browser_id`、family、profile、版本、能力和 pipe 信息 |
 | `codex_bind_browser` | 绑定精确 `browser_id`；仅单一匹配时允许按 family 绑定 |
 | `codex_browser_history` | 按关键词、时间范围和 limit 读取浏览器历史 |
-| `codex_browser_management` | 官方 windows/tabs/tabGroups/bookmarks 管理能力及变更审计 |
+| `codex_browser_management` | 官方 windows/tabs/tabGroups/bookmarks 管理能力及变更审计；remove/delete/clear/close/discard 需要 `confirm=true` |
 | `codex_browser_viewport` | 设置或重置官方浏览器 viewport 覆盖 |
 | `codex_browser_visibility` | 在扩展声明该能力时查询或设置浏览器可见性 |
 
@@ -376,8 +381,8 @@ codex-browser-bridge --mode mcp --max-text-bytes 1048576 --max-image-bytes 31457
 ```bash
 codex-browser-bridge tools codex_locator
 codex-browser-bridge call codex_list_browsers '{}'
-codex-browser-bridge --max-output-bytes 4096 batch --finalize <<'JSONL'
-{"name":"codex_create_tab","arguments":{}}
+codex-browser-bridge --max-output-bytes 4096 batch <<'JSONL'
+{"name":"codex_user_tabs","arguments":{}}
 JSONL
 ```
 
@@ -385,7 +390,9 @@ JSONL
 因此不会留下属于已消失进程的未标记标签；`deliverable` 与 `handoff` 标记的标签会保留。
 `batch` 从 stdin 每行读取一个 `{name, arguments}` JSON，共用一个 turn，遇错即停。
 需要在多个独立命令之间共享同一 turn 时用 `--session-file <path>`；
-`--keep-turn` 则显式保留 turn、不清理。Ctrl-C 与 SIGTERM 也会尝试同样的清理。
+`--session-file` 只适用于 `call` / `batch`，MCP stdio 和交互式 CLI 会拒绝；
+`--keep-turn` 则显式保留 turn、不清理。Ctrl-C 与 SIGTERM 只在命令配置为 finalize
+时尝试清理；`--keep-turn` 和未 finalize 的 `--session-file` 会保留 turn。
 CLI 默认每条 JSON 结果上限 16384 bytes，图片只返回摘要、不输出 base64；
 该上限独立于 MCP content 限额。CLI 是可选入口，不是独立的能力实现或 parity 验收标准。
 

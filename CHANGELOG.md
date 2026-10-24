@@ -19,18 +19,28 @@ All notable changes to this project will be documented in this file.
   `Page.navigate` carries `net::ERR_*` in `errorText` without raising an error,
   and a browser error page also reports `readyState=complete`; both are now
   surfaced by `codex_navigate`, `codex_nav_and_wait` and `codex_wait_for_load`.
+  Malformed navigation results are protocol errors, and a failed URL probe is
+  no longer accepted as a completed load.
+- Keyboard events and `Input.insertText` use the non-replayed CDP path. A
+  `Debugger unattached` response can no longer duplicate a keydown or inserted
+  text while recovering the attachment.
 
 ### Changed
 
 - `call` and `batch` end the browser turn on exit by default, including the
   failure path, so a tab can no longer be left owned by a process that exited.
   `--keep-turn` opts out, and `--session-file` keeps one turn across separate
-  commands. Ctrl-C and SIGTERM attempt the same cleanup once.
+  `call`/`batch` commands. Ctrl-C and SIGTERM follow the same finalize policy;
+  `--keep-turn` and an unfinalized session file leave the turn open.
+- `--session-file` is rejected outside `call`/`batch`, and `--finalize` conflicts
+  with `--keep-turn`. A command rejected before dialing no longer creates a
+  phantom session file or deletes an existing one, and session-file write or
+  removal failures now make the command fail instead of logging a warning.
 - `codex_browser_management` requires `confirm=true` for methods that remove or
   discard browser state (`remove`, `delete`, `clear`, `close`, `discard`).
 - `CODEX_BRIDGE_SOCKET_DIR` is now an explicit override on Unix and
-  `$XDG_RUNTIME_DIR/codex-browser-use` is tried before `/tmp`; discovery reports
-  which directories it polled.
+  `$XDG_RUNTIME_DIR/codex-browser-use` is tried before `/tmp`; returned socket
+  paths identify the directory that produced them.
 - Configuration precedence now matches the documented order: CLI flags >
   environment > config file > default. Previously the config file overrode the
   environment for profile, browser selector, upload base and content limits.
