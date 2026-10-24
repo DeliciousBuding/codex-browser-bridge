@@ -1,6 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
-use codex_browser_bridge::{cli, client, config, discovery, doctor, logging, mcp};
+use codex_browser_bridge::{cli, client, config, discovery, doctor, logging, mcp, session};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -48,7 +48,8 @@ struct Args {
     ///
     /// Each process otherwise starts a fresh session, so a tab created by one
     /// `call` cannot be used by the next. Commands write the active identifiers
-    /// here and read them on the next invocation; `--finalize` deletes the file.
+    /// here with exact browser identity, and lock the file for each invocation;
+    /// `--finalize` deletes it. Legacy/corrupt tokens are rejected, not reset.
     /// MCP stdio owns its turn for the process lifetime and does not use this.
     #[arg(long, global = true)]
     session_file: Option<std::path::PathBuf>,
@@ -116,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
         args.browser_instance.clone(),
         &environment,
     )?;
-    let selector = browser_selection.selector;
+    let selector = browser_selection.selector.clone();
     if args.pipe.is_some() && !selector.is_empty() {
         anyhow::bail!("--pipe cannot be combined with a browser family or instance selector");
     }
@@ -132,12 +133,38 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&pipes)?);
         }
         Mode::Mcp => {
-            let session_ids = args.session_file.as_deref().and_then(cli::load_session);
-            let client = client::Client::lazy_with_selector_and_ids(
-                args.pipe.clone(),
-                selector,
-                session_ids,
-            );
+            let session_lock = args
+                .session_file
+                .as_deref()
+                .map(session::SessionLock::acquire)
+                .transpose()?;
+            let session_path = session_lock.as_ref().map(|lock| lock.path.as_path());
+            let saved = session_path
+                .map(session::load_session)
+                .transpose()?
+                .flatten();
+            let selector = match &saved {
+                Some(saved) => saved.browser.selector(&selector)?,
+                None => selector,
+            };
+            let session_ids = saved
+                .as_ref()
+                .map(|saved| (saved.session_id.clone(), saved.turn_id.clone()));
+            let client = match (&args.pipe, session_path) {
+                (Some(pipe), Some(_)) => client::Client::lazy_with_verified_endpoint_and_ids(
+                    pipe.clone(),
+                    selector,
+                    session_ids,
+                ),
+                _ => client::Client::lazy_with_selector_and_ids(
+                    args.pipe.clone(),
+                    selector,
+                    session_ids,
+                ),
+            };
+            if let Some(path) = session_path {
+                client.set_continuation_path(path);
+            }
             if let Some(base) = args
                 .upload_base
                 .clone()
@@ -183,6 +210,7 @@ async fn main() -> anyhow::Result<()> {
                 ),
                 None => mcp::Server::new(client),
             };
+            server.set_browser_selection(browser_selection.clone());
             if let Some(command) = args.command {
                 let finalize = !args.keep_turn && (args.finalize || args.session_file.is_none());
                 run_until_interrupted(
@@ -191,11 +219,11 @@ async fn main() -> anyhow::Result<()> {
                         &server,
                         command,
                         args.max_output_bytes,
-                        args.session_file.as_deref(),
+                        session_path,
                         finalize,
                     ),
                     finalize,
-                    args.session_file.as_deref(),
+                    session_path,
                 )
                 .await?;
             } else {
@@ -226,7 +254,8 @@ async fn main() -> anyhow::Result<()> {
             result?;
         }
         Mode::Doctor => {
-            let result = doctor::run_diagnostics().await;
+            let mut result = serde_json::to_value(doctor::run_diagnostics().await)?;
+            result["browserSelection"] = serde_json::to_value(&browser_selection)?;
             println!("{}", serde_json::to_string_pretty(&result)?);
         }
     }

@@ -19,6 +19,7 @@ pub mod pointer;
 pub mod protocol;
 pub mod registry;
 pub mod security;
+pub mod session;
 pub mod webmcp;
 
 #[doc(hidden)]

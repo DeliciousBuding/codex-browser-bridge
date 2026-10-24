@@ -53,6 +53,7 @@ pub struct Server {
     /// Tool operations keep their binding stable while rebinding has exclusive
     /// access. This also serializes concurrent bind requests.
     pub(crate) binding_lock: Arc<tokio::sync::RwLock<()>>,
+    browser_selection: Arc<std::sync::Mutex<Option<crate::config::BrowserSelection>>>,
     pub(crate) clipboard: Arc<tokio::sync::Mutex<crate::clipboard::VirtualClipboard>>,
     pub(crate) webmcp: Arc<crate::webmcp::WebMcpRegistry>,
     pub(crate) page_assets: crate::page_assets::PageAssetsRegistry,
@@ -72,6 +73,7 @@ impl Server {
         Self {
             client: Arc::new(RwLock::new(client)),
             binding_lock: Arc::new(tokio::sync::RwLock::new(())),
+            browser_selection: Arc::new(std::sync::Mutex::new(None)),
             clipboard: Arc::new(tokio::sync::Mutex::new(
                 crate::clipboard::VirtualClipboard::default(),
             )),
@@ -91,6 +93,7 @@ impl Server {
         Self {
             client: Arc::new(RwLock::new(client)),
             binding_lock: Arc::new(tokio::sync::RwLock::new(())),
+            browser_selection: Arc::new(std::sync::Mutex::new(None)),
             clipboard: Arc::new(tokio::sync::Mutex::new(
                 crate::clipboard::VirtualClipboard::default(),
             )),
@@ -260,11 +263,18 @@ impl Server {
     }
 
     pub(crate) fn bridge_runtime_info(&self) -> Value {
-        Self::runtime_info_for(
+        let mut info = Self::runtime_info_for(
             self.profile,
             self.tools.len(),
             std::env::var_os("CODEX_BRIDGE_UPLOAD_BASE").is_some(),
-        )
+        );
+        info["startupBrowserSelection"] =
+            serde_json::to_value(&*self.browser_selection.lock().unwrap()).unwrap_or(Value::Null);
+        info
+    }
+
+    pub fn set_browser_selection(&self, selection: crate::config::BrowserSelection) {
+        *self.browser_selection.lock().unwrap() = Some(selection);
     }
 
     fn runtime_info_for(
@@ -276,6 +286,14 @@ impl Server {
         json!({
             "bridgeVersion": env!("CARGO_PKG_VERSION"),
             "profile": profile.as_str(),
+            "toolProfile": profile.as_str(),
+            "browserOwnership": {
+                "mode": "attach_existing_extension",
+                "tabScope": "extension_session_turn",
+                "cookieStorageIsolation": false,
+                "crossProcessSameTabControl": "unsupported",
+                "observationStop": "local_journal_only_domains_remain_enabled_until_detach"
+            },
             "toolCount": tool_count,
             "uploadBaseConfigured": upload_base_configured,
             "implementedCapabilities": {
@@ -907,6 +925,15 @@ mod tools_call_tests {
         let info: Value = serde_json::from_str(text).unwrap();
 
         assert_eq!(info["bridge"]["profile"], "network");
+        assert_eq!(info["bridge"]["toolProfile"], "network");
+        assert_eq!(
+            info["bridge"]["browserOwnership"]["cookieStorageIsolation"],
+            false
+        );
+        assert_eq!(
+            info["bridge"]["capabilityAvailability"]["usablePermissions"],
+            "not_probed"
+        );
         assert_eq!(info["bridge"]["bridgeVersion"], env!("CARGO_PKG_VERSION"));
         assert!(info["bridge"]["toolCount"].as_u64().unwrap() > 0);
         assert!(

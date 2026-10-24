@@ -286,7 +286,15 @@ impl super::Server {
             return error_response(Some(id), -32601, &format!("Tool not found: {name}"));
         };
 
-        let _binding = if matches!(tool.handler, ToolHandler::BindBrowser) {
+        let _exclusive = if matches!(tool.handler, ToolHandler::Finalize) {
+            Some(self.binding_lock.write().await)
+        } else {
+            None
+        };
+        let _binding = if matches!(
+            tool.handler,
+            ToolHandler::BindBrowser | ToolHandler::Finalize
+        ) {
             None
         } else {
             Some(self.binding_lock.read().await)
@@ -473,6 +481,12 @@ impl super::Server {
             })
         };
 
+        if let Some(path) = previous.continuation_path() {
+            // Publish the newly bound continuation before it can own tabs.
+            // Failure keeps the old binding (possibly already finalized).
+            client.set_continuation_path(&path);
+            client.persist_continuation().await.map_err(|err| anyhow::anyhow!("New continuation could not be saved; previous binding retained. Previous cleanup status: {prior_session}. {err}"))?;
+        }
         let old = self.replace_client(client);
         self.clipboard.lock().await.clear();
         self.webmcp.clear().await;
@@ -897,9 +911,9 @@ impl super::Server {
         // still live in the extension, so connect before ending it.
         client.connect_if_needed().await?;
         if !client.end_turn().await? {
-            return Ok(vec![Content::text(
-                "No live browser turn to end; remote tab cleanup was not confirmed.".to_string(),
-            )]);
+            anyhow::bail!(
+                "Remote turn cleanup was not confirmed; continuation state was preserved"
+            );
         }
         Ok(vec![Content::text(
             "Browser turn ended: unmarked agent tabs were closed, unmarked claimed user tabs were released, and deliverable/handoff marks were preserved."
@@ -920,7 +934,11 @@ impl super::Server {
             } else {
                 "bridge"
             };
-            obj.insert(runtime_key.into(), self.bridge_runtime_info());
+            let mut runtime = self.bridge_runtime_info();
+            runtime["selectedBrowser"] =
+                serde_json::to_value(self.client_snapshot().browser_identity())?;
+            runtime["capabilityAvailability"] = json!({"advertisedByExtension":obj.get("capabilities"), "usablePermissions":"not_probed", "profileName":"backend_label_only"});
+            obj.insert(runtime_key.into(), runtime);
         } else {
             info = json!({
                 "raw": info,
@@ -1892,6 +1910,62 @@ mod rebind_tests {
         drop(reader);
         info(&mut new_peer, "new").await;
         assert!(timeout(WAIT, task).await.unwrap().unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn finalize_excludes_mutation_until_turn_rotation() {
+        let (client, mut peer) = pair();
+        let server = Server::new(client.clone());
+        let old_ids = client.session_ids().await;
+        let cloned = server.clone();
+        let finalize = tokio::spawn(async move {
+            cloned.handle_jsonrpc_line(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"codex_finalize","arguments":{}}}).to_string()).await
+        });
+        let end = request(&mut peer).await;
+        assert_eq!(end["method"], "turnEnded");
+        let cloned = server.clone();
+        let create = tokio::spawn(async move {
+            cloned.handle_jsonrpc_line(&json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"codex_create_tab","arguments":{}}}).to_string()).await
+        });
+        assert!(
+            timeout(Duration::from_millis(40), protocol::decode_frame(&mut peer))
+                .await
+                .is_err()
+        );
+        reply(&mut peer, &end, json!({})).await;
+        timeout(WAIT, finalize).await.unwrap().unwrap();
+        let mutation = request(&mut peer).await;
+        assert_eq!(mutation["method"], "createTab");
+        assert_ne!(mutation["params"]["turn_id"], old_ids.1);
+        reply(
+            &mut peer,
+            &mutation,
+            json!({"id":42,"title":"","url":"about:blank"}),
+        )
+        .await;
+        timeout(WAIT, create).await.unwrap().unwrap();
+        assert!(client.has_unresolved_turn());
+    }
+
+    #[tokio::test]
+    async fn failed_local_persistence_does_not_block_remote_cleanup() {
+        let (client, mut peer) = pair();
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("missing").join("session.json");
+        client.set_continuation_path(&path);
+        let cloned = client.clone();
+        let end = tokio::spawn(async move { cloned.end_turn().await });
+        let req = request(&mut peer).await;
+        assert_eq!(req["method"], "turnEnded");
+        reply(&mut peer, &req, json!({})).await;
+        assert!(timeout(WAIT, end).await.unwrap().unwrap().unwrap());
+        // Any new ownership is still blocked until recovery state is writable.
+        assert!(client.send_request("createTab", None).await.is_err());
+        assert!(
+            timeout(Duration::from_millis(40), protocol::decode_frame(&mut peer))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

@@ -7,10 +7,11 @@ use tokio::io::{AsyncRead, AsyncWrite};
 fn bridge() -> Command {
     let mut command = Command::cargo_bin("codex-browser-bridge").unwrap();
     command
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures"))
         .env_remove("CODEX_BRIDGE_PROFILE")
         .env_remove("CODEX_BRIDGE_BROWSER_FAMILY")
         .env_remove("CODEX_BRIDGE_BROWSER_INSTANCE")
-        .env("CODEX_BRIDGE_CONFIG", "nonexistent-cli-test-config.toml")
+        .env_remove("CODEX_BRIDGE_CONFIG")
         // Keep the suite hermetic: a developer machine may have a live extension,
         // and these tests must never create or close real browser tabs.
         .env(
@@ -45,7 +46,7 @@ async fn serve_mock_extension<S>(
         let response = match method {
             "getInfo" => serde_json::json!({
                 "id": id,
-                "result": {"type": "extension", "family": "chrome"}
+                "result": {"type": "extension", "family": "chrome", "metadata": {"extensionInstanceId": "mock-cli-instance"}}
             }),
             "createTab" => serde_json::json!({
                 "id": id,
@@ -334,7 +335,8 @@ async fn tab_creation_with_a_session_file_persists_the_turn() {
     server.abort();
 
     let saved: Value = serde_json::from_slice(&std::fs::read(&session).unwrap()).unwrap();
-    assert_eq!(saved["version"], 1);
+    assert_eq!(saved["version"], 2);
+    assert_eq!(saved["browser"]["instance_id"], "mock-cli-instance");
     assert_eq!(saved["session_id"], seen.session_id);
     assert_eq!(saved["turn_id"], seen.turn_id);
 }
@@ -426,7 +428,7 @@ async fn session_file_write_failure_is_observable() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
     assert!(
-        stderr.contains("could not persist browser session file"),
+        stderr.contains("session file parent directory must exist"),
         "{stderr}"
     );
 }

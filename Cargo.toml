@@ -23,6 +23,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 uuid = { version = "1.11", features = ["v4"] }
 toml = "0.8"
+fs2 = "0.4.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
