@@ -470,7 +470,12 @@ async fn run_until(
             if ch.is_ascii() && !ch.is_ascii_control() {
                 // Let the shared dispatcher finish its bounded release cleanup;
                 // canceling it at the locator deadline could strand a held key.
-                crate::input::keypress(client, tab, &[ch.to_string()]).await?;
+                let keys = if ch.is_ascii_uppercase() {
+                    vec!["Shift".to_string(), ch.to_string()]
+                } else {
+                    vec![ch.to_string()]
+                };
+                crate::input::keypress(client, tab, &keys).await?;
             } else {
                 client
                     .execute_cdp_once_with_timeout(

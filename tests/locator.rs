@@ -226,6 +226,47 @@ async fn sequential_text_appends_through_shared_keys_and_unicode_insert_text() {
 }
 
 #[tokio::test]
+async fn sequential_uppercase_uses_a_real_shift_chord() {
+    let (client, mut peer) = setup();
+    client.mark_attached(7).await;
+    let task = tokio::spawn(async move {
+        locator::run(
+            &client,
+            "7",
+            json!({"selector":"input","action":"press_sequentially","value":"A","timeout_ms":2000}),
+        )
+        .await
+    });
+    foreground(&mut peer).await;
+    let request = next(&mut peer).await;
+    locator_reply(&mut peer, &request, json!({"ok":true,"focused":true})).await;
+    for (kind, key, mask) in [
+        ("rawKeyDown", "Shift", 8),
+        ("keyDown", "A", 8),
+        ("keyUp", "A", 8),
+        ("keyUp", "Shift", 0),
+    ] {
+        let request = next(&mut peer).await;
+        assert_eq!(request["params"]["method"], "Input.dispatchKeyEvent");
+        assert_eq!(request["params"]["commandParams"]["type"], kind);
+        assert_eq!(request["params"]["commandParams"]["key"], key);
+        assert_eq!(request["params"]["commandParams"]["modifiers"], mask);
+        if kind == "keyDown" {
+            assert_eq!(request["params"]["commandParams"]["text"], "A");
+        }
+        reply(&mut peer, &request, json!({})).await;
+    }
+    assert_eq!(
+        timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()["characters"],
+        1
+    );
+}
+
+#[tokio::test]
 async fn invalid_composition_fails_before_transport() {
     let (client, mut peer) = setup();
     let result = locator::run(
