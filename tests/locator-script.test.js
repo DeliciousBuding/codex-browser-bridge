@@ -222,6 +222,21 @@ test("regex matchers preserve raw whitespace, honor flags and reject unsafe patt
   assert.equal(f.run({text:{regex:"["},action:"count"}).ok,false);
 });
 
+test("or unions base predicates with branches instead of intersecting the base selector", () => {
+  const f=fixture();
+  const button=f.element("button",{tagName:"BUTTON",innerText:"Save",textContent:"Save"});
+  const next=f.element("#next",{tagName:"A",innerText:"Next",textContent:"Next"});
+  f.element("#unrelated",{innerText:"Unrelated",textContent:"Unrelated"});
+  const spec={selector:"button",or:[{selector:"#next"},{selector:"button"}]};
+  assert.equal(f.run({...spec,action:"count"}).count,2);
+  assert.deepEqual(f.run({...spec,action:"all"}).values.map((entry)=>entry.element.text),["Save","Next"]);
+  assert.equal(f.run({...spec,nth:-1,action:"text_content"}).value,"Next");
+  assert.equal(f.run({or:[{selector:"#next"},{selector:"button"}],action:"count"}).count,2);
+  assert.equal(f.run({selector:"#missing",or:[{selector:"#next"}],action:"text_content"}).value,"Next");
+  assert.equal(f.run({and:[spec,{selector:"button"}],action:"text_content"}).value,"Save");
+  assert.equal(button.textContent,"Save"); assert.equal(next.textContent,"Next");
+});
+
 test("descriptor and multi-select selection validates every option before any mutation", () => {
   const f = fixture();
   const options=[{value:"a",label:"Alpha",selected:true},{value:"b",label:"Beta",selected:false},{value:"c",label:"Gamma",selected:false}];

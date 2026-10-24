@@ -120,17 +120,13 @@
       if (query[field] && typeof query[field] === "object") matchesText("", query[field], false);
     }
     let elements = Array.from(new Set(roots.flatMap((root) => allElements(root, []))));
+    const documentOrder = elements;
     if (query.and != null) {
       if (!Array.isArray(query.and)) throw new Error("locator and must be an array");
       for (const child of query.and) {
         const allowed = new Set(matching(roots, child, depth + 1));
         elements = elements.filter((el) => allowed.has(el));
       }
-    }
-    if (query.or != null) {
-      if (!Array.isArray(query.or) || !query.or.length) throw new Error("locator or must be a nonempty array");
-      const allowed = new Set(query.or.flatMap((child) => matching(roots, child, depth + 1)));
-      elements = elements.filter((el) => allowed.has(el));
     }
     if (query.selector != null) {
       const selector = String(query.selector);
@@ -169,6 +165,16 @@
     if (query.has != null) elements = elements.filter((el) => matching([el], query.has, depth + 1).length > 0);
     if (query.has_not != null) elements = elements.filter((el) => matching([el], query.has_not, depth + 1).length === 0);
     if (query.visible != null) elements = elements.filter((el) => isVisible(el) === query.visible);
+    if (query.or != null) {
+      if (!Array.isArray(query.or) || !query.or.length) throw new Error("locator or must be a nonempty array");
+      // A base predicate is one union branch, not a filter on every branch.
+      // A composition-only {or:[A,B]} has no implicit all-elements branch.
+      const hasBase = ["selector", "role", "name", "text", "test_id", "placeholder", "label", "has_text", "has_not_text", "has", "has_not", "visible", "and"]
+        .some((field) => query[field] != null);
+      const allowed = new Set(hasBase ? elements : []);
+      for (const child of query.or) for (const el of matching(roots, child, depth + 1)) allowed.add(el);
+      elements = documentOrder.filter((el) => allowed.has(el));
+    }
     if (query.nth != null) {
       const index = Number(query.nth);
       if (!Number.isInteger(index) || index < -1) throw new Error("locator nth must be -1 (last) or a nonnegative integer");
