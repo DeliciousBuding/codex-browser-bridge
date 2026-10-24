@@ -1,5 +1,17 @@
 # Network, CDP, And Session
 
+`codex_observe` starts opt-in tab/document observation before an action. Read
+state, events or rendered logs with generation/sequence cursors; gaps and
+truncation are explicit. Use its armed cursor with wait_navigation. Earlier logs
+before start are not complete; reconnect/turn cleanup invalidate state and IDs.
+
+`codex_file_chooser` explicitly arms before clicking input, returns an opaque
+chooser ID/multiple mode, and disarms after capture. set_files needs the current
+ID, configured upload base and colocated_browser=true. Remote browser-host
+uploads/OOPIF/completed browser downloads are unsupported. Use stop on abandonment.
+Local exports instead report bridge_host/browser_download=false.
+
+
 Use this reference for cookies, storage, traffic capture, raw diagnostics, and
 cleanup.
 

@@ -22,13 +22,13 @@ v1.12.0 publishes Windows x64/arm64 and Linux GNU x64/arm64 binaries
 (glibc >= 2.39 for the Linux release builds). Linux discovery uses
 `CODEX_BRIDGE_SOCKET_DIR` when set, otherwise
 `$XDG_RUNTIME_DIR/codex-browser-use`, then `/tmp/codex-browser-use`; native
-Rust/Node gates run on Ubuntu 24.04 x64 and arm64. Unix runtime support has not
-been verified against a live Linux extension service, and a compiling macOS
+Rust/Node gates run on Ubuntu 24.04 x64 and arm64. The Linux arm64 extension synthetic smoke is now verified; it is not the
+full tool surface. A compiling macOS
 target does not establish macOS support.
 
 The repository is both the Claude plugin source and the generic MCP server
 source. A Claude plugin marketplace distributes the manifest, progressive
-skill, and MCP launch configuration; it does not wrap or duplicate the 64-tool
+skill, and MCP launch configuration; it does not wrap or duplicate the 66-tool
 protocol surface. Codex and ChatGPT desktop already have native browser access
 and are not plugin targets for this bridge.
 
@@ -45,11 +45,14 @@ and are not plugin targets for this bridge.
 | `browser.rs` | Browser tool implementations over `Client` (navigate, DOM, screenshot, management, history, network_monitor, …) |
 | `input.rs` | Bounded failure-safe keyboard chords; shared modifier parsing |
 | `pointer.rs` | CUA pointer click/move/scroll/drag, official button/modifier/path fields, no-replay mutation path |
+| `locator.rs` / `locator.js` | Bounded declarative matching/actionability and shared trusted input; no mutation retry |
+| `observation.rs` | Exact-tab bounded cursor journal, loader/frame state and document-bound dialog/chooser IDs |
+| `file_results.rs` | Shared explicit roots, count/byte/time budgets, staged atomic no-overwrite publication |
 | `clipboard.rs` | Bounded session-virtual clipboard and paste integration; never reads the OS clipboard |
 | `webmcp.rs` | Top-document same-origin WebMCP registry with document epochs and stale-handle rejection |
 | `page_assets.rs` | Document-bound asset inventory, cached content, atomic local bundle/manifest output |
 | `export.rs` | Bounded atomic local GSuite and YouTube transcript exports |
-| `mcp/` | MCP server: JSON-RPC dispatch, 64 tool handlers, schema, profiles, resources/prompts, dual-era lifecycle |
+| `mcp/` | MCP server: JSON-RPC dispatch, 66 tool handlers, schema, profiles, resources/prompts, dual-era lifecycle |
 | `cli.rs` | Shell commands reuse MCP dispatch; bounded JSON output and same-session JSONL batch; legacy debug REPL |
 | `security.rs` | URL scheme + file-path validation (path-traversal defense) |
 | `config.rs` | Optional TOML config (profile, upload_base) |
@@ -150,7 +153,7 @@ turn a real capture into a silently empty result. Untagged events stay
 deliverable so transports that don't annotate them keep working.
 
 ### Tool profiles
-64 tools, filtered by profile — `basic` (45) / `network` (63) / `full` (64) —
+66 tools, filtered by profile — `basic` (46) / `network` (65) / `full` (66) —
 via `CODEX_BRIDGE_PROFILE` env, `--profile` flag, or config file. Keeps the
 tool list small for agents that don't need the network/debugging surface.
 

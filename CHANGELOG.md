@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `codex_observe`: bounded tab/document event journal, cursor gaps, frame/loader
+  state, active dialog/chooser IDs and persistent rendered logs. Capture begins
+  before the action; no claim of complete pre-start history or OOPIF routing.
+- `codex_file_chooser`: explicit interception, opaque document-bound handles,
+  multiple mode and bounded colocated uploads. Remote host paths and verified
+  browser-level downloads remain unsupported.
+- Locator declarative and/or/has/has_not, bounded all specs and limited safe
+  regex; exact select descriptors/multiple, trial/force, sequential typing,
+  trusted setChecked and same-target async postcondition without replay.
+- Screenshot explicit bounded clip/scale; network URL substring filter; local
+  MCP guide resource.
+
 ### Fixed
 
 - Pointer and keyboard input now activate a background tab before dispatching.
@@ -34,6 +48,14 @@ All notable changes to this project will be documented in this file.
   neighbouring tab can no longer produce an empty result.
 
 ### Changed
+
+- Exports and page assets share bounded acquisition/output budgets, strict
+  explicit directories, staging and atomic no-overwrite publication. Results
+  distinguish bridge-host files from browser downloads. Filesystems lacking
+  the atomic contract fail without a destructive fallback.
+- Navigation composites arm before action and wait for commit, DOMContentLoaded
+  or load. Navigation/dialog/file mutations do not replay on ambiguous errors.
+  Shared observation producers are not disabled by timed captures.
 
 - `call` and `batch` end the browser turn on exit by default, including the
   failure path, so a tab can no longer be left owned by a process that exited.

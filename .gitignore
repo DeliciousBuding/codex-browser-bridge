@@ -21,6 +21,7 @@ npm/checksums.json
 npm/skills/
 
 # Local private files
+.local/
 .env
 .env.*
 *.local

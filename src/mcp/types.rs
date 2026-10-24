@@ -72,6 +72,8 @@ pub(super) enum ToolHandler {
     ConsoleLogs,
     WaitForUrl,
     PerformanceMetrics,
+    Observe,
+    FileChooser,
 }
 
 #[derive(Clone)]

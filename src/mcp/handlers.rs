@@ -42,6 +42,226 @@ struct PageAssetsResponse {
 }
 
 impl super::Server {
+    async fn handle_observe(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = browser::parse_tab_id("observe", required_str(&args, "tab_id")?)?;
+        let action = required_str(&args, "action")?;
+        let client = self.client_snapshot();
+        let timeout_ms = optional_duration_ms(&args, "timeout_ms", MAX_WAIT_MS)?.unwrap_or(10_000);
+        let cursor: Option<crate::observation::ObservationCursor> = args
+            .get("cursor")
+            .map(|value| serde_json::from_value(value.clone()))
+            .transpose()?;
+        let result = match action {
+            "start" => serde_json::to_value(
+                client
+                    .start_observation(tab_id, Duration::from_millis(timeout_ms))
+                    .await?,
+            )?,
+            "state" => serde_json::to_value(client.observation_snapshot(tab_id)?)?,
+            "stop" => {
+                client
+                    .stop_file_chooser_interception(tab_id, Duration::from_millis(timeout_ms))
+                    .await?;
+                client.stop_observation(tab_id);
+                json!({"stopped": true})
+            }
+            "events" | "logs" => {
+                let requested = optional_str_array(&args, "methods")?.unwrap_or_default();
+                if requested.len() > 16 || requested.iter().any(|s| s.len() > 128) {
+                    anyhow::bail!("methods permits at most 16 names of 128 bytes");
+                }
+                let methods: Vec<&str> = if action == "logs" {
+                    vec!["Runtime.consoleAPICalled", "Log.entryAdded"]
+                } else {
+                    requested.iter().map(String::as_str).collect()
+                };
+                let limit = optional_u64(&args, "limit")?.unwrap_or(100);
+                let bytes = optional_u64(&args, "max_bytes")?.unwrap_or(256 * 1024);
+                if !(1..=512).contains(&limit) || !(1..=262_144).contains(&bytes) {
+                    anyhow::bail!("limit must be 1..512 and max_bytes 1..262144");
+                }
+                let batch = client.read_observed_events(
+                    tab_id,
+                    cursor.as_ref(),
+                    &methods,
+                    limit as usize,
+                    bytes as usize,
+                )?;
+                let mut result = serde_json::to_value(&batch)?;
+                if action == "logs" {
+                    let logs: Vec<Value> = batch.events.iter().map(|entry| {
+                        let event = &entry.event;
+                        if event["method"] == "Log.entryAdded" {
+                            json!({"sequence": entry.sequence, "document_epoch": entry.document_epoch,
+                                "level": event.pointer("/params/entry/level"),
+                                "timestamp": event.pointer("/params/entry/timestamp"),
+                                "text": event.pointer("/params/entry/text")})
+                        } else {
+                            let args = event.pointer("/params/args").and_then(Value::as_array);
+                            let text = args.into_iter().flatten().map(|arg| {
+                                arg.get("value").map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string()))
+                                    .or_else(|| arg.get("description").and_then(Value::as_str).map(str::to_owned))
+                                    .unwrap_or_else(|| "[unserializable]".into())
+                            }).collect::<Vec<_>>().join(" ");
+                            json!({"sequence":entry.sequence,"document_epoch":entry.document_epoch,
+                                "level":event.pointer("/params/type"),"timestamp":event.pointer("/params/timestamp"),"text":text})
+                        }
+                    }).collect();
+                    result["logs"] = json!(logs);
+                }
+                result
+            }
+            "wait_navigation" => {
+                let cursor = cursor.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "wait_navigation requires the cursor captured before the action"
+                    )
+                })?;
+                let wait_until = serde_json::from_value(
+                    args.get("wait_until")
+                        .cloned()
+                        .unwrap_or_else(|| json!("load")),
+                )?;
+                let url = args
+                    .get("url")
+                    .map(|v| {
+                        v.as_str()
+                            .ok_or_else(|| anyhow::anyhow!("url must be a string"))
+                    })
+                    .transpose()?;
+                serde_json::to_value(
+                    client
+                        .wait_for_observed_navigation(
+                            tab_id,
+                            cursor,
+                            url,
+                            wait_until,
+                            Duration::from_millis(timeout_ms),
+                        )
+                        .await?,
+                )?
+            }
+            _ => anyhow::bail!("unsupported observation action"),
+        };
+        Ok(vec![Content::text(serde_json::to_string(&result)?)])
+    }
+
+    async fn handle_file_chooser(&self, args: Value) -> anyhow::Result<Vec<Content>> {
+        let tab_id = browser::parse_tab_id("file_chooser", required_str(&args, "tab_id")?)?;
+        let action = required_str(&args, "action")?;
+        let client = self.client_snapshot();
+        let timeout_ms = optional_duration_ms(&args, "timeout_ms", MAX_WAIT_MS)?.unwrap_or(10_000);
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        let result = match action {
+            "start" => {
+                client
+                    .start_file_chooser_interception(tab_id, Duration::from_millis(timeout_ms))
+                    .await?;
+                json!({"armed":true,"path_scope":"browser_host"})
+            }
+            "state" => {
+                let chooser = client.observation_snapshot(tab_id)?.file_chooser;
+                if chooser.is_some() {
+                    client
+                        .stop_file_chooser_interception(tab_id, Duration::from_millis(timeout_ms))
+                        .await?;
+                }
+                json!({"chooser":chooser,"path_scope":"browser_host"})
+            }
+            "stop" => {
+                client
+                    .stop_file_chooser_interception(tab_id, Duration::from_millis(timeout_ms))
+                    .await?;
+                if let Some(chooser) = client.observation_snapshot(tab_id)?.file_chooser {
+                    client.close_observed_file_chooser(tab_id, &chooser.id);
+                }
+                json!({"armed":false})
+            }
+            "set_files" => {
+                if optional_bool(&args, "colocated_browser")? != Some(true) {
+                    anyhow::bail!("file upload requires explicit colocated_browser=true; remote browser-host paths cannot be verified locally");
+                }
+                let files = required_string_vec(&args, "files")?;
+                if files.is_empty() {
+                    anyhow::bail!("file chooser requires at least one file");
+                }
+                let allowed_base = std::env::var_os("CODEX_BRIDGE_UPLOAD_BASE")
+                    .map(std::path::PathBuf::from)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("file chooser requires configured CODEX_BRIDGE_UPLOAD_BASE")
+                    })?;
+                let files = crate::file_results::validate_uploads(&files, &allowed_base)?;
+                let chooser_id = required_str(&args, "chooser_id")?;
+                let chooser = client.validate_file_chooser(tab_id, chooser_id)?;
+                if chooser.mode != "selectMultiple" && files.len() != 1 {
+                    anyhow::bail!("this chooser accepts one file only");
+                }
+                let raw = client
+                    .execute_cdp_once_with_timeout(
+                        tab_id,
+                        "DOM.resolveNode",
+                        Some(json!({"backendNodeId":chooser.backend_node_id})),
+                        deadline.saturating_duration_since(Instant::now()),
+                    )
+                    .await?;
+                let node: Value = serde_json::from_str(raw.get())?;
+                let object_id = node
+                    .pointer("/object/objectId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow::anyhow!("chooser node could not be resolved"))?;
+                let probe = client.execute_cdp_once_with_timeout(tab_id,"Runtime.callFunctionOn",Some(json!({"objectId":object_id,
+                    "functionDeclaration":"function(){return {valid:this.isConnected && this.tagName==='INPUT' && this.type==='file' && !this.disabled,multiple:this.multiple};}","returnByValue":true})), deadline.saturating_duration_since(Instant::now())).await;
+                let _ = client
+                    .execute_cdp_once_with_timeout(
+                        tab_id,
+                        "Runtime.releaseObject",
+                        Some(json!({"objectId":object_id})),
+                        Duration::from_millis(250),
+                    )
+                    .await;
+                let probe = probe?;
+                let probe: Value = serde_json::from_str(probe.get())?;
+                if probe
+                    .pointer("/result/value/valid")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+                    || probe
+                        .pointer("/result/value/multiple")
+                        .and_then(Value::as_bool)
+                        != Some(chooser.mode == "selectMultiple")
+                {
+                    anyhow::bail!("chooser input is stale, disabled, or changed mode");
+                }
+                if client
+                    .observation_snapshot(tab_id)?
+                    .main_frame_id
+                    .as_deref()
+                    != Some(chooser.frame_id.as_str())
+                {
+                    anyhow::bail!("file chooser child-frame/OOPIF uploads are unsupported");
+                }
+                client.validate_file_chooser(tab_id, chooser_id)?;
+                let uploaded = client
+                    .execute_cdp_once_with_timeout(
+                        tab_id,
+                        "DOM.setFileInputFiles",
+                        Some(json!({"backendNodeId":chooser.backend_node_id,"files":files})),
+                        deadline.saturating_duration_since(Instant::now()),
+                    )
+                    .await;
+                client.close_observed_file_chooser(tab_id, chooser_id);
+                let stopped = client
+                    .stop_file_chooser_interception(tab_id, Duration::from_secs(2))
+                    .await;
+                uploaded?;
+                stopped?;
+                json!({"uploaded":files.len(),"path_scope":"browser_host","colocated_browser":true})
+            }
+            _ => anyhow::bail!("unsupported file chooser action"),
+        };
+        Ok(vec![Content::text(serde_json::to_string(&result)?)])
+    }
+
     pub(super) async fn handle_tool_call(&self, id: Value, params: Option<Value>) -> String {
         use super::types::{error_response, result_response};
 
@@ -131,6 +351,8 @@ impl super::Server {
             ToolHandler::ConsoleLogs => self.handle_console_logs(args).await,
             ToolHandler::WaitForUrl => self.handle_wait_for_url(args).await,
             ToolHandler::PerformanceMetrics => self.handle_performance_metrics(args).await,
+            ToolHandler::Observe => self.handle_observe(args).await,
+            ToolHandler::FileChooser => self.handle_file_chooser(args).await,
         };
 
         match result {
@@ -444,8 +666,15 @@ impl super::Server {
             .unwrap_or(false);
         let format = args.get("format").and_then(Value::as_str).unwrap_or("png");
         let quality = optional_u64(&args, "quality")?;
-        let data = browser::screenshot(&self.client_snapshot(), tab_id, full_page, format, quality)
-            .await?;
+        let data = browser::screenshot_with_clip(
+            &self.client_snapshot(),
+            tab_id,
+            full_page,
+            format,
+            quality,
+            args.get("clip").cloned(),
+        )
+        .await?;
         Ok(vec![
             Content::image_or_summary(data.clone(), mime_for(format), "Screenshot"),
             Content::text(format!(
@@ -947,8 +1176,16 @@ impl super::Server {
         let tab_id = required_str(&args, "tab_id")?;
         let action = required_str(&args, "action")?;
 
+        let client = self.client_snapshot();
+        let id = browser::parse_tab_id("dialog", tab_id)?;
+        if action == "get" {
+            let dialog = client.observation_snapshot(id)?.dialog;
+            return Ok(vec![Content::text(serde_json::to_string(
+                &json!({"dialog":dialog}),
+            )?)]);
+        }
         if action != "accept" && action != "dismiss" {
-            anyhow::bail!("Invalid action '{action}': must be 'accept' or 'dismiss'");
+            anyhow::bail!("Invalid action '{action}': must be 'get', 'accept' or 'dismiss'");
         }
 
         let prompt_text = args
@@ -960,13 +1197,24 @@ impl super::Server {
             anyhow::bail!("prompt_text is only valid with action='accept'");
         }
 
-        browser::handle_dialog(
-            &self.client_snapshot(),
-            tab_id,
-            action,
-            prompt_text.as_deref(),
-        )
-        .await?;
+        let dialog_id = args
+            .get("dialog_id")
+            .map(|v| {
+                v.as_str()
+                    .ok_or_else(|| anyhow::anyhow!("dialog_id must be a string"))
+            })
+            .transpose()?;
+        if let Some(dialog_id) = dialog_id {
+            let dialog = client.validate_dialog(id, dialog_id)?;
+            if prompt_text.is_some() && dialog.dialog_type != "prompt" {
+                anyhow::bail!("prompt_text requires a prompt dialog");
+            }
+        }
+        let handled = browser::handle_dialog(&client, tab_id, action, prompt_text.as_deref()).await;
+        if let Some(dialog_id) = dialog_id {
+            client.close_observed_dialog(id, dialog_id);
+        }
+        handled?;
         Ok(vec![Content::text(format!(
             "Dialog {action}ed in tab {tab_id}"
         ))])
@@ -1001,110 +1249,8 @@ impl super::Server {
     async fn handle_locator(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
         let action = required_str(&args, "action")?;
-        const ACTIONS: &[&str] = &[
-            "count",
-            "text",
-            "inner_text",
-            "text_content",
-            "all_text",
-            "all_text_contents",
-            "attribute",
-            "value",
-            "visible",
-            "enabled",
-            "checked",
-            "click",
-            "dblclick",
-            "focus",
-            "press",
-            "fill",
-            "select_option",
-            "set_checked",
-            "wait",
-        ];
-        if !ACTIONS.contains(&action) {
-            anyhow::bail!("unsupported locator action: {action}");
-        }
-
-        let mut spec = serde_json::Map::new();
-        spec.insert("action".into(), json!(action));
-        for key in [
-            "selector",
-            "role",
-            "name",
-            "text",
-            "test_id",
-            "placeholder",
-            "label",
-            "has_text",
-            "has_not_text",
-        ] {
-            if let Some(value) = args.get(key) {
-                let value = value
-                    .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("{key} must be a string"))?;
-                spec.insert(key.into(), json!(value));
-            }
-        }
-        if let Some(frames) = optional_str_array(&args, "frame_selectors")? {
-            if frames.len() > 8 {
-                anyhow::bail!("frame_selectors supports at most 8 frames");
-            }
-            spec.insert("frame_selectors".into(), json!(frames));
-        }
-        if let Some(scopes) = args.get("scopes") {
-            let scopes = scopes
-                .as_array()
-                .ok_or_else(|| anyhow::anyhow!("scopes must be an array of locator objects"))?;
-            if scopes.len() > 16 || scopes.iter().any(|scope| !scope.is_object()) {
-                anyhow::bail!("scopes must contain at most 16 locator objects");
-            }
-            spec.insert("scopes".into(), json!(scopes));
-        }
-        if spec.len() == 1 {
-            anyhow::bail!(
-                "provide one of selector, role, name, text, test_id, placeholder, or label"
-            );
-        }
-        if let Some(exact) = optional_bool(&args, "exact")? {
-            spec.insert("exact".into(), json!(exact));
-        }
-        if let Some(strict) = optional_bool(&args, "strict")? {
-            spec.insert("strict".into(), json!(strict));
-        }
-        if let Some(visible) = optional_bool(&args, "visible")? {
-            spec.insert("visible".into(), json!(visible));
-        }
-        if let Some(nth) = args.get("nth") {
-            let nth = nth.as_i64().filter(|n| *n >= -1).ok_or_else(|| {
-                anyhow::anyhow!("nth must be -1 (last) or a non-negative integer")
-            })?;
-            spec.insert("nth".into(), json!(nth));
-        }
-        if let Some(max_results) = optional_u64(&args, "max_results")? {
-            spec.insert("max_results".into(), json!(max_results.min(200)));
-        }
-
-        if action == "attribute" {
-            spec.insert("attribute".into(), json!(required_str(&args, "attribute")?));
-        }
-        if matches!(action, "fill" | "select_option") {
-            spec.insert(
-                "value".into(),
-                json!(required_string_value(&args, "value")?),
-            );
-        }
-        if action == "set_checked" {
-            let checked = optional_bool(&args, "checked")?
-                .ok_or_else(|| anyhow::anyhow!("missing required argument: checked"))?;
-            spec.insert("checked".into(), json!(checked));
-        }
-        let keys = if action == "press" {
-            Some(required_string_vec(&args, "keys")?)
-        } else {
-            None
-        };
-
+        crate::locator::validate_spec(&args)?;
+        let client = self.client_snapshot();
         if action == "wait" {
             let timeout_ms =
                 optional_duration_ms(&args, "timeout_ms", MAX_WAIT_MS)?.unwrap_or(10_000);
@@ -1116,95 +1262,76 @@ impl super::Server {
                 anyhow::bail!("state must be visible, attached, hidden, or detached");
             }
             let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-            let mut probe_spec = spec.clone();
-            probe_spec.insert("action".into(), json!("probe"));
-            probe_spec.insert("wait_state".into(), json!(state));
+            let mut probe = args.clone();
+            probe["action"] = json!("probe");
+            probe["wait_state"] = json!(state);
             loop {
-                let client = self.client_snapshot();
-                let probe = tokio::time::timeout_at(
+                let result = tokio::time::timeout_at(
                     deadline,
-                    browser::locator(&client, tab_id, Value::Object(probe_spec.clone())),
+                    browser::locator(&client, tab_id, probe.clone()),
                 )
                 .await
-                .map_err(|_| {
-                    anyhow::anyhow!("locator wait timed out after {timeout_ms}ms ({state})")
-                })??;
-                let matched = probe.get("matched").and_then(Value::as_bool) == Some(true);
-                if matched {
-                    return Ok(vec![Content::text(serde_json::to_string_pretty(&json!({
-                        "wait_state": state,
-                        "matched": true,
-                        "probe": probe
-                    }))?)]);
+                .map_err(|_| anyhow::anyhow!("locator wait timed out ({state})"))??;
+                if result.get("matched").and_then(Value::as_bool) == Some(true) {
+                    return Ok(vec![Content::text(serde_json::to_string(
+                        &json!({"wait_state":state,"matched":true,"probe":result}),
+                    )?)]);
                 }
                 if Instant::now() >= deadline {
-                    anyhow::bail!("locator wait timed out after {timeout_ms}ms ({state})");
+                    anyhow::bail!("locator wait timed out ({state})");
                 }
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::time::sleep_until(
+                    (Instant::now() + Duration::from_millis(100)).min(deadline),
+                )
+                .await;
             }
         }
-
-        let result = browser::locator(&self.client_snapshot(), tab_id, Value::Object(spec)).await?;
-        if matches!(action, "click" | "dblclick") {
-            let x = result
-                .pointer("/rect/x")
-                .and_then(Value::as_f64)
-                .ok_or_else(|| anyhow::anyhow!("locator result omitted clickable rect"))?;
-            let y = result
-                .pointer("/rect/y")
-                .and_then(Value::as_f64)
-                .ok_or_else(|| anyhow::anyhow!("locator result omitted clickable rect"))?;
-            let click_count = if action == "dblclick" { 2 } else { 1 };
-            let button = match args.get("button").and_then(Value::as_str).unwrap_or("left") {
-                "left" => 1,
-                "middle" => 2,
-                "right" => 3,
-                other => anyhow::bail!("button must be left, middle, or right, got {other:?}"),
-            };
-            let modifiers = optional_str_array(&args, "modifiers")?.unwrap_or_default();
-            browser::cua_click_with_count(
-                &self.client_snapshot(),
-                tab_id,
-                x,
-                y,
-                button,
-                click_count,
-                &modifiers,
-            )
-            .await?;
-        } else if action == "press" {
-            if result.get("focused").and_then(Value::as_bool) != Some(true) {
-                anyhow::bail!("locator matched an element that could not receive keyboard focus");
-            }
-            let keys = keys.unwrap_or_default();
-            if let Some(clipboard_action) = crate::clipboard::shortcut_action(&keys) {
+        if action == "press" && args.get("trial") != Some(&json!(true)) {
+            let keys = required_string_vec(&args, "keys")?;
+            if let Some(shortcut) = crate::clipboard::shortcut_action(&keys) {
+                let mut focus = args.clone();
+                focus["action"] = json!("focus");
+                let result = browser::locator(&client, tab_id, focus).await?;
+                if result.get("focused").and_then(Value::as_bool) != Some(true) {
+                    anyhow::bail!("locator target did not receive focus");
+                }
                 let id = browser::parse_tab_id("locator.press", tab_id)?;
                 let clipboard = self.clipboard.lock().await;
-                match clipboard_action {
+                match shortcut {
                     crate::clipboard::ClipboardShortcut::Paste => {
-                        clipboard.paste(&self.client_snapshot(), id).await?
+                        clipboard.paste(&client, id).await?
                     }
                     crate::clipboard::ClipboardShortcut::PastePlainText => {
-                        clipboard
-                            .paste_plain_text(&self.client_snapshot(), id)
-                            .await?
+                        clipboard.paste_plain_text(&client, id).await?
                     }
                 }
-            } else {
-                browser::cua_keypress(&self.client_snapshot(), tab_id, &keys).await?;
+                return Ok(vec![Content::text(serde_json::to_string(&result)?)]);
             }
         }
-
-        Ok(vec![Content::text(serde_json::to_string_pretty(&result)?)])
+        let result = browser::locator(&client, tab_id, args.clone()).await?;
+        Ok(vec![Content::text(serde_json::to_string(&result)?)])
     }
 
     async fn handle_nav_and_wait(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
         let url = required_str(&args, "url")?;
         let timeout_ms = optional_duration_ms(&args, "timeout_ms", MAX_WAIT_MS)?.unwrap_or(30_000);
-        browser::nav_and_wait(&self.client_snapshot(), tab_id, url, timeout_ms).await?;
+        let wait_until = serde_json::from_value(
+            args.get("wait_until")
+                .cloned()
+                .unwrap_or_else(|| json!("load")),
+        )?;
+        browser::navigation_action_and_wait(
+            &self.client_snapshot(),
+            tab_id,
+            Some(url),
+            None,
+            timeout_ms,
+            wait_until,
+        )
+        .await?;
         Ok(vec![Content::text(format!(
-            "Navigated to {url} and loaded in tab {tab_id}"
+            "Navigated to {url} and reached {wait_until:?} in tab {tab_id}"
         ))])
     }
 
@@ -1212,7 +1339,20 @@ impl super::Server {
         let tab_id = required_str(&args, "tab_id")?;
         let selector = required_str(&args, "selector")?;
         let timeout_ms = optional_duration_ms(&args, "timeout_ms", MAX_WAIT_MS)?.unwrap_or(10_000);
-        browser::click_and_wait(&self.client_snapshot(), tab_id, selector, timeout_ms).await?;
+        let wait_until = serde_json::from_value(
+            args.get("wait_until")
+                .cloned()
+                .unwrap_or_else(|| json!("load")),
+        )?;
+        browser::navigation_action_and_wait(
+            &self.client_snapshot(),
+            tab_id,
+            None,
+            Some(selector),
+            timeout_ms,
+            wait_until,
+        )
+        .await?;
         Ok(vec![Content::text(format!(
             "Clicked {selector} and waited in tab {tab_id}"
         ))])
@@ -1436,7 +1576,28 @@ impl super::Server {
         let tab_id = required_str(&args, "tab_id")?;
         let duration_ms =
             optional_duration_ms(&args, "duration_ms", MAX_CAPTURE_MS)?.unwrap_or(5_000);
-        let result = browser::network_monitor(&self.client_snapshot(), tab_id, duration_ms).await?;
+        let filter = args
+            .get("url_filter")
+            .map(|v| {
+                v.as_str().filter(|s| s.len() <= 2048).ok_or_else(|| {
+                    anyhow::anyhow!("url_filter must be a string of at most 2048 bytes")
+                })
+            })
+            .transpose()?;
+        let mut result =
+            browser::network_monitor(&self.client_snapshot(), tab_id, duration_ms).await?;
+        if let Some(filter) = filter {
+            if let Some(requests) = result.get_mut("requests").and_then(Value::as_array_mut) {
+                requests.retain(|r| {
+                    r.get("url")
+                        .and_then(Value::as_str)
+                        .is_some_and(|url| url.contains(filter))
+                });
+                let count = requests.len();
+                result["request_count"] = json!(count);
+                result["url_filter"] = json!(filter);
+            }
+        }
         Ok(vec![Content::text(serde_json::to_string_pretty(&result)?)])
     }
 
