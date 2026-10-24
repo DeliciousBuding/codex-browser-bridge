@@ -195,7 +195,9 @@ impl TabState {
         let parent = bounded_string(frame.get("parentId"));
         let loader = bounded_string(frame.get("loaderId"));
         let is_main = parent.is_none();
-        if !self.frames.contains_key(id) && self.frames.len() >= MAX_FRAMES {
+        // A new top frame replaces its entire previous document registry. It
+        // must still commit when the old document used every frame slot.
+        if !is_main && !self.frames.contains_key(id) && self.frames.len() >= MAX_FRAMES {
             self.frames_truncated = true;
             return;
         }
@@ -215,6 +217,7 @@ impl TabState {
                 self.file_chooser = None;
                 // A main-document commit invalidates its previous descendants.
                 self.frames.clear();
+                self.frames_truncated = false;
             }
             self.main_frame_id = Some(id.into());
         }
@@ -855,6 +858,62 @@ mod tests {
         assert_eq!(after.main_frame_id, before.main_frame_id);
         assert_eq!(after.document_epoch, before.document_epoch);
         assert_eq!(after.retained_event_count, before.retained_event_count + 1);
+    }
+
+    #[test]
+    fn new_main_frame_commits_even_when_previous_frame_registry_is_full() {
+        let mut store = ObservationStore::default();
+        store.register(1).unwrap();
+        navigate(&mut store, "old-loader");
+        for index in 1..=MAX_FRAMES {
+            store.record(&event(
+                1,
+                "Page.frameAttached",
+                json!({"frameId":format!("old-child{index}"),"parentFrameId":"main"}),
+            ));
+        }
+        store.record(&event(
+            1,
+            "Page.lifecycleEvent",
+            json!({"frameId":"main","loaderId":"old-loader","name":"load"}),
+        ));
+        store.record(&event(
+            1,
+            "Page.javascriptDialogOpening",
+            json!({"type":"confirm","message":"old"}),
+        ));
+        let before = store.snapshot(1).unwrap();
+        assert_eq!(before.frames.len(), MAX_FRAMES);
+        assert!(before.frames_truncated && before.load && before.dialog.is_some());
+        store.record(&event(1, "Page.frameNavigated", json!({"frame":{"id":"replacement-main","loaderId":"new-loader","url":"https://example.com/new"}})));
+        let after = store.snapshot(1).unwrap();
+        assert_eq!(after.document_epoch, before.document_epoch + 1);
+        assert_eq!(after.main_frame_id.as_deref(), Some("replacement-main"));
+        assert_eq!(after.url.as_deref(), Some("https://example.com/new"));
+        assert_eq!(after.frames.len(), 1);
+        assert!(!after.frames_truncated && !after.load && after.dialog.is_none());
+    }
+
+    #[test]
+    fn same_document_navigation_keeps_loader_readiness() {
+        let mut store = ObservationStore::default();
+        store.register(1).unwrap();
+        navigate(&mut store, "same-loader");
+        store.record(&event(
+            1,
+            "Page.lifecycleEvent",
+            json!({"frameId":"main","loaderId":"same-loader","name":"load"}),
+        ));
+        let before = store.snapshot(1).unwrap();
+        store.record(&event(
+            1,
+            "Page.navigatedWithinDocument",
+            json!({"frameId":"main","url":"https://example.com/#hash"}),
+        ));
+        let after = store.snapshot(1).unwrap();
+        assert_eq!(after.document_epoch, before.document_epoch);
+        assert!(after.load && after.domcontentloaded);
+        assert!(after.navigation_sequence > before.navigation_sequence);
     }
 
     #[tokio::test]
