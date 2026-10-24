@@ -140,6 +140,15 @@ routes the whole frame to subscribers matched by method prefix
 (`network_monitor`, `console_logs`). Subscribers get the entire frame so they
 can dispatch on the exact method themselves.
 
+The extension does not send bare CDP frames: it wraps them as
+`{method: "onCDPEvent", params: {method, params, source: {tabId}}}`. The read
+loop unwraps that envelope once, so subscribers see the same shape for both
+transports. Capture tools subscribe with `subscribe_events_with_budget_for_tab`,
+which drops events tagged with a different `source.tabId` *before* any
+bookkeeping — otherwise a busy neighbour tab could exhaust the byte budget and
+turn a real capture into a silently empty result. Untagged events stay
+deliverable so transports that don't annotate them keep working.
+
 ### Tool profiles
 64 tools, filtered by profile — `basic` (45) / `network` (63) / `full` (64) —
 via `CODEX_BRIDGE_PROFILE` env, `--profile` flag, or config file. Keeps the

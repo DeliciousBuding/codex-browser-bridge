@@ -938,11 +938,12 @@ pub async fn network_monitor(client: &Client, tab_id: &str, duration_ms: u64) ->
     let id = parse_tab_id("network_monitor", tab_id)?;
     let duration_ms = bounded_duration_ms("duration_ms", duration_ms, 5_000, MAX_CAPTURE_MS)?;
     let (sub_id, mut rx, stats) = client
-        .subscribe_events_with_budget(
+        .subscribe_events_with_budget_for_tab(
             "Network.",
             &["Network.requestWillBeSent", "Network.responseReceived"],
             512,
             MAX_CAPTURE_EVENT_BYTES,
+            id,
         )
         .await;
     if let Err(err) = client.execute_cdp(id, "Network.enable", None).await {
@@ -953,8 +954,9 @@ pub async fn network_monitor(client: &Client, tab_id: &str, duration_ms: u64) ->
     client.execute_cdp(id, "Network.disable", None).await.ok();
     client.unsubscribe_events(sub_id).await;
 
-    let captured =
-        drain_events_with_byte_budget(&mut rx, MAX_CAPTURE_EVENT_BYTES, is_pairable_network_event);
+    let captured = drain_events_with_byte_budget(&mut rx, MAX_CAPTURE_EVENT_BYTES, |event| {
+        is_pairable_network_event(event)
+    });
     let stats = stats.snapshot();
     let truncated = stats.truncated || captured.truncated;
     let limit_reason = stats.limit_reason.or(captured.limit_reason);
@@ -1099,11 +1101,12 @@ pub async fn console_logs(client: &Client, tab_id: &str, duration_ms: u64) -> Re
     let id = parse_tab_id("console_logs", tab_id)?;
     let duration_ms = bounded_duration_ms("duration_ms", duration_ms, 5_000, MAX_CAPTURE_MS)?;
     let (sub_id, mut rx, stats) = client
-        .subscribe_events_with_budget(
+        .subscribe_events_with_budget_for_tab(
             "Runtime.consoleAPICalled",
             &[],
             512,
             MAX_CAPTURE_EVENT_BYTES,
+            id,
         )
         .await;
     if let Err(err) = client.execute_cdp(id, "Runtime.enable", None).await {

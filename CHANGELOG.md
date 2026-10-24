@@ -26,6 +26,12 @@ All notable changes to this project will be documented in this file.
   text while recovering the attachment.
 - `codex_hover` confirms that the target is observed in the `:hover` state
   before reporting success; a dispatched-but-undelivered pointer move now fails.
+- `codex_console_logs` and `codex_network_monitor` capture real events again.
+  The extension delivers CDP notifications inside an `onCDPEvent` envelope,
+  which the read loop now unwraps; both tools previously returned
+  `log_count: 0` / an empty request list while reporting success. Captures are
+  also scoped to the requested tab before byte accounting, so a noisy
+  neighbouring tab can no longer produce an empty result.
 
 ### Changed
 
@@ -38,6 +44,9 @@ All notable changes to this project will be documented in this file.
   with `--keep-turn`. A command rejected before dialing no longer creates a
   phantom session file or deletes an existing one, and session-file write or
   removal failures now make the command fail instead of logging a warning.
+- The mock-transport client tests (read loop, reconnect, event routing) now run
+  on Windows as well as Linux. They were gated behind `not(windows)`, which left
+  the primary platform's event dispatch untested.
 - `codex_browser_management` requires `confirm=true` for methods that remove or
   discard browser state (`remove`, `delete`, `clear`, `close`, `discard`).
 - `CODEX_BRIDGE_SOCKET_DIR` is now an explicit override on Unix and

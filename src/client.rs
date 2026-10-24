@@ -57,6 +57,10 @@ struct EventSubscription {
     id: u64,
     method_prefix: String,
     allowed_methods: Option<Vec<String>>,
+    /// When set, only events the extension attributes to this tab are delivered.
+    /// Events without a `source.tabId` stay deliverable so bridge-native
+    /// transports that don't tag events keep working.
+    tab_id: Option<i64>,
     max_buffered_bytes: Option<usize>,
     stats: Option<EventSubscriptionStats>,
     sender: mpsc::Sender<Value>,
@@ -65,8 +69,23 @@ struct EventSubscription {
 struct EventDispatchTarget {
     sender: mpsc::Sender<Value>,
     allowed_methods: Option<Vec<String>>,
+    tab_id: Option<i64>,
     max_buffered_bytes: Option<usize>,
     stats: Option<EventSubscriptionStats>,
+}
+
+/// Tab the extension attributed an event frame to, when it says so.
+fn event_tab_id(event: &Value) -> Option<i64> {
+    event.pointer("/source/tabId").and_then(Value::as_i64)
+}
+
+/// A subscription with no tab scope accepts every event; a scoped one accepts
+/// its own tab plus unscoped events from transports that don't annotate them.
+fn event_in_scope(scope: Option<i64>, event: &Value) -> bool {
+    match (scope, event_tab_id(event)) {
+        (Some(scope), Some(actual)) => scope == actual,
+        _ => true,
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -377,7 +396,7 @@ impl Client {
 
     /// Test-only constructor: inject a custom connection factory so reconnect
     /// logic can be exercised without a real ChatGPT desktop browser-extension pipe.
-    #[cfg(all(test, not(windows)))]
+    #[cfg(test)]
     pub(crate) fn from_stream_with_factory<T: TransportIo + 'static>(
         stream: T,
         factory: ConnectionFactory,
@@ -627,14 +646,34 @@ impl Client {
                 // (e.g. Network.requestWillBeSent vs Network.responseReceived).
                 if value.get("id").is_none() {
                     if let Some(method) = value.get("method").and_then(|m| m.as_str()) {
+                        // The extension wraps debugger notifications as
+                        // `onCDPEvent` with `{method, params, source}` nested
+                        // under `params`. Unwrap that envelope before routing so
+                        // subscribers see the same shape as direct CDP frames.
+                        let event = if method == "onCDPEvent" {
+                            let Some(event) = value.get("params").cloned() else {
+                                continue;
+                            };
+                            event
+                        } else {
+                            value.clone()
+                        };
+                        let Some(event_method) = event.get("method").and_then(|m| m.as_str())
+                        else {
+                            continue;
+                        };
+                        let event_bytes = serde_json::to_vec(&event)
+                            .map(|encoded| encoded.len())
+                            .unwrap_or(frame.len());
                         let matched: Vec<EventDispatchTarget> = {
                             let mut subs = inner.event_subs.lock().await;
                             subs.retain(|s| !s.sender.is_closed());
                             subs.iter()
-                                .filter(|s| method.starts_with(s.method_prefix.as_str()))
+                                .filter(|s| event_method.starts_with(s.method_prefix.as_str()))
                                 .map(|s| EventDispatchTarget {
                                     sender: s.sender.clone(),
                                     allowed_methods: s.allowed_methods.clone(),
+                                    tab_id: s.tab_id,
                                     max_buffered_bytes: s.max_buffered_bytes,
                                     stats: s.stats.clone(),
                                 })
@@ -642,26 +681,32 @@ impl Client {
                         };
                         let mut closed_sender = false;
                         for sub in matched {
+                            // Tab scope is decided before any bookkeeping so a
+                            // noisy neighbour tab can't consume this
+                            // subscription's byte budget.
+                            if !event_in_scope(sub.tab_id, &event) {
+                                continue;
+                            }
                             if let Some(stats) = &sub.stats {
                                 stats.record_observed();
                             }
                             if let Some(allowed) = &sub.allowed_methods {
-                                if !allowed.iter().any(|allowed| allowed == method) {
+                                if !allowed.iter().any(|allowed| allowed == event_method) {
                                     continue;
                                 }
                             }
                             if let (Some(stats), Some(max_bytes)) =
                                 (&sub.stats, sub.max_buffered_bytes)
                             {
-                                if !stats.can_accept(frame.len(), max_bytes) {
+                                if !stats.can_accept(event_bytes, max_bytes) {
                                     continue;
                                 }
                             }
                             // try_send: never block the read loop on a slow consumer
-                            match sub.sender.try_send(value.clone()) {
+                            match sub.sender.try_send(event.clone()) {
                                 Ok(()) => {
                                     if let Some(stats) = &sub.stats {
-                                        stats.record_accepted(frame.len());
+                                        stats.record_accepted(event_bytes);
                                     }
                                 }
                                 Err(mpsc::error::TrySendError::Closed(_)) => {
@@ -740,7 +785,7 @@ impl Client {
         buffer: usize,
     ) -> (u64, mpsc::Receiver<Value>) {
         let (id, rx, _) = self
-            .subscribe_events_inner(method_prefix, buffer, None, None, None)
+            .subscribe_events_inner(method_prefix, buffer, None, None, None, None)
             .await;
         (id, rx)
     }
@@ -751,6 +796,46 @@ impl Client {
         allowed_methods: &[&str],
         buffer: usize,
         max_buffered_bytes: usize,
+    ) -> (u64, mpsc::Receiver<Value>, EventSubscriptionStats) {
+        self.subscribe_events_with_budget_scoped(
+            method_prefix,
+            allowed_methods,
+            buffer,
+            max_buffered_bytes,
+            None,
+        )
+        .await
+    }
+
+    /// Same as [`Self::subscribe_events_with_budget`], but when the transport
+    /// tags events with `source.tabId` only that tab's events are observed or
+    /// buffered. Untagged events are still delivered, since not every transport
+    /// annotates them.
+    pub async fn subscribe_events_with_budget_for_tab(
+        &self,
+        method_prefix: &str,
+        allowed_methods: &[&str],
+        buffer: usize,
+        max_buffered_bytes: usize,
+        tab_id: i64,
+    ) -> (u64, mpsc::Receiver<Value>, EventSubscriptionStats) {
+        self.subscribe_events_with_budget_scoped(
+            method_prefix,
+            allowed_methods,
+            buffer,
+            max_buffered_bytes,
+            Some(tab_id),
+        )
+        .await
+    }
+
+    async fn subscribe_events_with_budget_scoped(
+        &self,
+        method_prefix: &str,
+        allowed_methods: &[&str],
+        buffer: usize,
+        max_buffered_bytes: usize,
+        tab_id: Option<i64>,
     ) -> (u64, mpsc::Receiver<Value>, EventSubscriptionStats) {
         let stats = EventSubscriptionStats::new();
         let allowed_methods = if allowed_methods.is_empty() {
@@ -768,6 +853,7 @@ impl Client {
                 method_prefix,
                 buffer,
                 allowed_methods,
+                tab_id,
                 Some(max_buffered_bytes),
                 Some(stats.clone()),
             )
@@ -780,6 +866,7 @@ impl Client {
         method_prefix: &str,
         buffer: usize,
         allowed_methods: Option<Vec<String>>,
+        tab_id: Option<i64>,
         max_buffered_bytes: Option<usize>,
         stats: Option<EventSubscriptionStats>,
     ) -> (u64, mpsc::Receiver<Value>, Option<EventSubscriptionStats>) {
@@ -789,6 +876,7 @@ impl Client {
             id,
             method_prefix: method_prefix.to_string(),
             allowed_methods,
+            tab_id,
             max_buffered_bytes,
             stats: stats.clone(),
             sender: tx,
@@ -1359,7 +1447,7 @@ fn check_cdp_error(method: &str, raw: &RawValue) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(test, not(windows)))]
+#[cfg(test)]
 mod reconnect_tests {
     use super::*;
     use crate::error::BridgeError;
@@ -1686,6 +1774,103 @@ mod reconnect_tests {
         .unwrap();
 
         expect_event_sub_len(&client, 0).await;
+    }
+
+    #[tokio::test]
+    async fn extension_event_envelope_is_unwrapped_for_subscribers() {
+        let (client, mut server) = test_client(4096).await;
+        let (_sub_id, mut rx) = client.subscribe_events("Runtime.", 8).await;
+
+        encode_frame(
+            &mut server,
+            &json!({
+                "method": "onCDPEvent",
+                "params": {
+                    "method": "Runtime.consoleAPICalled",
+                    "params": {"type": "log"},
+                    "source": {"tabId": 7}
+                }
+            }),
+        )
+        .await
+        .unwrap();
+
+        let event = timeout(TEST_STATE_TIMEOUT, rx.recv())
+            .await
+            .expect("event timeout")
+            .expect("event channel closed");
+        assert_eq!(event["method"], "Runtime.consoleAPICalled");
+        assert_eq!(event["params"]["type"], "log");
+        assert_eq!(event["source"]["tabId"], 7);
+    }
+
+    #[tokio::test]
+    async fn tab_scoped_subscription_ignores_other_tabs_before_observing() {
+        let (client, mut server) = test_client(8192).await;
+        let (_sub_id, mut rx, stats) = client
+            .subscribe_events_with_budget_for_tab(
+                "Network.",
+                &["Network.requestWillBeSent"],
+                8,
+                200,
+                7,
+            )
+            .await;
+
+        // A neighbour tab must not reach the receiver...
+        encode_frame(
+            &mut server,
+            &json!({
+                "method": "onCDPEvent",
+                "params": {
+                    "method": "Network.requestWillBeSent",
+                    "params": {"requestId": "other"},
+                    "source": {"tabId": 8}
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        // ...and it must not eat the byte budget either: each event below is
+        // ~90 bytes, so a 200-byte budget fits exactly these two and nothing
+        // more. A neighbour that reached accounting would truncate us.
+        encode_frame(
+            &mut server,
+            &json!({
+                "method": "onCDPEvent",
+                "params": {
+                    "method": "Network.requestWillBeSent",
+                    "params": {"requestId": "mine"},
+                    "source": {"tabId": 7}
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        // Untagged events stay compatible with transports that don't say which
+        // tab they came from.
+        encode_frame(
+            &mut server,
+            &json!({"method":"Network.requestWillBeSent","params":{"requestId":"untagged"}}),
+        )
+        .await
+        .unwrap();
+
+        let first = timeout(TEST_STATE_TIMEOUT, rx.recv())
+            .await
+            .expect("event timeout")
+            .expect("event channel closed");
+        let second = timeout(TEST_STATE_TIMEOUT, rx.recv())
+            .await
+            .expect("event timeout")
+            .expect("event channel closed");
+        assert_eq!(first["params"]["requestId"], "mine");
+        assert_eq!(second["params"]["requestId"], "untagged");
+
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.observed_count, 2, "neighbour tab was observed");
+        assert_eq!(snapshot.accepted_count, 2);
+        assert!(!snapshot.truncated);
     }
 
     #[tokio::test]
