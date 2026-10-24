@@ -1,15 +1,19 @@
 (function(spec) {
   const MAX_ELEMENTS = 50000;
+  let queryCount = 0;
+  let traversed = 0;
+  let regexCharacters = 0;
   const maxResults = Math.max(1, Math.min(Number(spec.max_results) || 50, 200));
   const clean = (value) => String(value == null ? "" : value).replace(/\s+/g, " ").trim();
   const textOf = (el) => String(el.innerText != null ? el.innerText : el.textContent || "");
   const windowOf = (el) => el.ownerDocument && el.ownerDocument.defaultView || globalThis;
 
   function allElements(root, out) {
-    if (out.length >= MAX_ELEMENTS) return out;
+    if (out.length >= MAX_ELEMENTS) throw new Error("locator traversal exceeds 50000 elements");
     for (const el of root.querySelectorAll("*")) {
+      if (++traversed > 200000) throw new Error("locator traversal exceeds 200000 cumulative elements");
       out.push(el);
-      if (out.length >= MAX_ELEMENTS) return out;
+      if (out.length >= MAX_ELEMENTS) throw new Error("locator traversal exceeds 50000 elements");
       if (el.shadowRoot) allElements(el.shadowRoot, out);
     }
     return out;
@@ -27,13 +31,25 @@
     if (/^h[1-6]$/.test(tag)) return "heading";
     if (tag === "img") return "img";
     if (tag === "input") {
-      const type = clean(el.getAttribute("type") || "text").toLowerCase();
-      if (type === "button" || type === "submit" || type === "reset") return "button";
+      const type = clean(el.getAttribute("type") || el.type || "text").toLowerCase();
+      if (type === "button" || type === "submit" || type === "reset" || type === "image") return "button";
       if (type === "checkbox") return "checkbox";
       if (type === "radio") return "radio";
       if (type === "range") return "slider";
-      if (type !== "hidden") return "textbox";
+      if (type === "number") return "spinbutton";
+      if (type === "search") return "searchbox";
+      if (type !== "hidden" && type !== "password" && type !== "file" && type !== "color" && !type.startsWith("date") && type !== "time" && type !== "month" && type !== "week") return "textbox";
     }
+    if (tag === "table") return "table";
+    if (tag === "tr") return "row";
+    if (tag === "th") return el.getAttribute("scope") === "row" ? "rowheader" : "columnheader";
+    if (tag === "td") return "cell";
+    if (tag === "ul" || tag === "ol") return "list";
+    if (tag === "li") return "listitem";
+    if (tag === "nav") return "navigation";
+    if (tag === "main") return "main";
+    if (tag === "progress") return "progressbar";
+    if (tag === "dialog") return "dialog";
     if (el.isContentEditable) return "textbox";
     return "";
   }
@@ -43,8 +59,8 @@
     if (labelledBy) {
       const fromIds = labelledBy.split(/\s+/).map((id) => {
         const root = el.getRootNode();
-        const node = root && root.getElementById ? root.getElementById(id) : document.getElementById(id);
-        return node ? textOf(node) : "";
+        const node = root && root.getElementById ? root.getElementById(id) : el.ownerDocument.getElementById(id);
+        return node ? clean(node.getAttribute("aria-label") || node.textContent || textOf(node)) : "";
       }).filter(Boolean).join(" ");
       if (fromIds) return fromIds;
     }
@@ -54,11 +70,26 @@
       const labels = Array.from(el.labels).map(textOf).filter(Boolean).join(" ");
       if (labels) return labels;
     }
-    return clean(el.getAttribute("alt") || el.getAttribute("title") ||
-      el.getAttribute("placeholder") || el.getAttribute("data-testid") || textOf(el));
+    const tag = el.tagName.toLowerCase();
+    if (tag === "img" || tag === "area" || tag === "input" && el.type === "image") return clean(el.getAttribute("alt") || el.getAttribute("title"));
+    if (tag === "input" && /^(button|submit|reset)$/.test(el.type || "")) {
+      return clean(el.value || (el.type === "submit" ? "Submit" : el.type === "reset" ? "Reset" : "") || el.getAttribute("title"));
+    }
+    // Placeholder and test IDs are separate locator fields, never an accessible name.
+    return clean(textOf(el) || el.getAttribute("title"));
   }
 
   function matchesText(actual, expected, exact) {
+    if (expected && typeof expected === "object") {
+      if (typeof expected.regex !== "string" || expected.regex.length > 256 || /[()|{}]/.test(expected.regex) || /\\[1-9]/.test(expected.regex) ||
+          (expected.regex.match(/(?<!\\)[*+?]/g) || []).length > 1 ||
+          !/^[imsu]*$/.test(expected.flags || "")) throw new Error("invalid bounded regex matcher");
+      const value = String(actual == null ? "" : actual);
+      if (value.length > 4096) throw new Error("regex input exceeds 4096 characters");
+      regexCharacters += value.length;
+      if (regexCharacters > 1000000) throw new Error("locator regex input exceeds 1000000 cumulative characters");
+      return new RegExp(expected.regex, expected.flags || "").test(value);
+    }
     if (exact === true) return clean(actual) === clean(expected);
     return clean(actual).toLowerCase().includes(clean(expected).toLowerCase());
   }
@@ -68,7 +99,7 @@
     if (rect.width <= 0 || rect.height <= 0) return false;
     const style = windowOf(el).getComputedStyle(el);
     return style.display !== "none" && style.visibility !== "hidden" &&
-      style.visibility !== "collapse" && Number(style.opacity) !== 0;
+      style.visibility !== "collapse";
   }
 
   function isEnabled(el) {
@@ -81,8 +112,26 @@
     return {tag: el.tagName.toLowerCase(), role: roleOf(el), name: accessibleName(el), text: clean(textOf(el)).slice(0, 200)};
   }
 
-  function matching(roots, query) {
+  function matching(roots, query, depth = 0) {
+    if (!query || typeof query !== "object" || Array.isArray(query) || depth > 8 || ++queryCount > 128) {
+      throw new Error("locator composition exceeds the bounded query budget");
+    }
+    for (const field of ["name", "text", "test_id", "placeholder", "label", "has_text", "has_not_text"]) {
+      if (query[field] && typeof query[field] === "object") matchesText("", query[field], false);
+    }
     let elements = Array.from(new Set(roots.flatMap((root) => allElements(root, []))));
+    if (query.and != null) {
+      if (!Array.isArray(query.and)) throw new Error("locator and must be an array");
+      for (const child of query.and) {
+        const allowed = new Set(matching(roots, child, depth + 1));
+        elements = elements.filter((el) => allowed.has(el));
+      }
+    }
+    if (query.or != null) {
+      if (!Array.isArray(query.or) || !query.or.length) throw new Error("locator or must be a nonempty array");
+      const allowed = new Set(query.or.flatMap((child) => matching(roots, child, depth + 1)));
+      elements = elements.filter((el) => allowed.has(el));
+    }
     if (query.selector != null) {
       const selector = String(query.selector);
       elements = elements.filter((el) => {
@@ -117,6 +166,8 @@
     }
     if (query.has_text != null) elements = elements.filter((el) => matchesText(el.textContent, query.has_text, false));
     if (query.has_not_text != null) elements = elements.filter((el) => !matchesText(el.textContent, query.has_not_text, false));
+    if (query.has != null) elements = elements.filter((el) => matching([el], query.has, depth + 1).length > 0);
+    if (query.has_not != null) elements = elements.filter((el) => matching([el], query.has_not, depth + 1).length === 0);
     if (query.visible != null) elements = elements.filter((el) => isVisible(el) === query.visible);
     if (query.nth != null) {
       const index = Number(query.nth);
@@ -128,9 +179,15 @@
   }
 
   function assertEditable(el) {
-    if (!isEnabled(el)) throw new Error("matched element is disabled");
-    if (el.readOnly === true || el.getAttribute("aria-readonly") === "true") throw new Error("matched element is readonly");
-    if (!isVisible(el)) throw new Error("matched element is hidden");
+    if (!isEnabled(el)) fail("matched element is disabled");
+    if (el.readOnly === true || el.getAttribute("aria-readonly") === "true") fail("matched element is readonly");
+    if (!isVisible(el) && spec.force !== true) fail("matched element is hidden");
+  }
+
+  function fail(message, retryable = true) {
+    const error = new Error(message);
+    error.retryable = retryable;
+    throw error;
   }
 
   function dispatchChange(el) {
@@ -148,6 +205,10 @@
   }
 
   try {
+    if (spec.action === "release_target") {
+      delete globalThis[spec.target_token];
+      return JSON.stringify({ok: true});
+    }
     let page = document;
     const frames = [];
     for (const selector of spec.frame_selectors || []) {
@@ -171,6 +232,14 @@
     if (spec.action === "count") {
       return JSON.stringify({ok: true, count, visible_count: visibleCount});
     }
+    if (spec.action === "all") {
+      const locator = {...spec};
+      for (const field of ["action", "max_results", "target_token", "checked", "value", "options", "keys", "timeout_ms", "force", "trial", "delay_ms"]) delete locator[field];
+      return JSON.stringify({ok: true, count, visible_count: visibleCount,
+        values: elements.slice(0, maxResults).map((el, index) => ({
+          locator: {...locator, nth: spec.nth == null ? index : spec.nth}, element: describe(el)
+        })), truncated: count > maxResults});
+    }
     if (spec.action === "all_text" || spec.action === "all_text_contents") {
       return JSON.stringify({
         ok: true,
@@ -182,9 +251,12 @@
     }
 
     if (count === 0) {
+      if (spec.action === "visible" || spec.action === "enabled") {
+        return JSON.stringify({ok: true, count: 0, visible_count: 0, value: false});
+      }
       if (spec.action === "probe") return JSON.stringify({ok: true, count: 0, visible_count: 0,
         matched: spec.wait_state === "hidden" || spec.wait_state === "detached"});
-      return JSON.stringify({ok: false, error: "locator matched no elements", count: 0});
+      return JSON.stringify({ok: false, error: "locator matched no elements", retryable: true, count: 0});
     }
     if (count > 1 && spec.strict !== false) {
       return JSON.stringify({
@@ -195,6 +267,9 @@
       });
     }
     const el = elements[0];
+    if (spec.action === "checked_probe" && globalThis[spec.target_token] !== el) {
+      return JSON.stringify({ok: false, retryable: false, error: "checked target was detached or replaced"});
+    }
     if (spec.action === "probe") {
       const visible = isVisible(el);
       return JSON.stringify({ok: true, count: 1, visible_count: visible ? 1 : 0,
@@ -209,23 +284,31 @@
     if (spec.action === "value") return JSON.stringify({...base, value: "value" in el ? el.value : textOf(el)});
     if (spec.action === "visible") return JSON.stringify({...base, value: isVisible(el)});
     if (spec.action === "enabled") return JSON.stringify({...base, value: isEnabled(el)});
-    if (spec.action === "checked") {
+    if (spec.action === "checked" || spec.action === "checked_probe") {
       return JSON.stringify({...base, value: "checked" in el ? !!el.checked : el.getAttribute("aria-checked") === "true"});
     }
-    if (spec.action === "click" || spec.action === "dblclick" || spec.action === "pointer") {
-      if (!isVisible(el) || !isEnabled(el)) return JSON.stringify({...base, ok: false, error: "matched element is hidden or disabled"});
+    let checkState = null;
+    if (spec.action === "set_checked") {
+      assertEditable(el);
+      const native = el.tagName.toLowerCase() === "input" && /^(checkbox|radio)$/i.test(el.type);
+      if (!native && !/^(checkbox|radio|switch)$/.test(roleOf(el))) fail("matched element is not checkable", false);
+      checkState = native ? !!el.checked : el.getAttribute("aria-checked") === "true";
+      if (checkState === (spec.checked === true)) return JSON.stringify({...base, value: checkState, needs_click: false});
+    }
+    if (["click", "dblclick", "pointer", "set_checked"].includes(spec.action)) {
+      if (spec.force !== true && (!isVisible(el) || !isEnabled(el))) fail("matched element is hidden or disabled");
       for (const frame of frames) frame.scrollIntoView({block: "center", inline: "center", behavior: "instant"});
       el.scrollIntoView({block: "center", inline: "center", behavior: "instant"});
       const rect = el.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return JSON.stringify({...base, ok: false, error: "matched element has no clickable box"});
+      if (rect.width <= 0 || rect.height <= 0) fail("matched element has no clickable box");
       const win = windowOf(el);
       const left = Math.max(0, rect.left), right = Math.min(win.innerWidth, rect.right);
       const top = Math.max(0, rect.top), bottom = Math.min(win.innerHeight, rect.bottom);
-      if (right <= left || bottom <= top) return JSON.stringify({...base, ok: false, error: "matched element is outside the viewport"});
+      if (right <= left || bottom <= top) fail("matched element is outside the viewport");
       let x = (left + right) / 2, y = (top + bottom) / 2;
       const root = el.getRootNode();
       const hit = (root.elementFromPoint ? root : el.ownerDocument).elementFromPoint(x, y);
-      if (!hit || (hit !== el && !el.contains(hit))) return JSON.stringify({...base, ok: false, error: "matched element is covered by another element"});
+      if (spec.force !== true && (!hit || (hit !== el && !el.contains(hit)))) fail("matched element is covered by another element");
       for (const frame of frames.slice().reverse()) {
         const bounds = frame.getBoundingClientRect();
         if (frame.offsetWidth && (Math.abs(bounds.width - frame.offsetWidth) > 1 || Math.abs(bounds.height - frame.offsetHeight) > 1)) {
@@ -235,16 +318,26 @@
         y += bounds.top + frame.clientTop;
         const parent = frame.ownerDocument;
         const parentHit = parent.elementFromPoint(x, y);
-        if (parentHit !== frame) throw new Error("matched frame is covered or outside its parent viewport");
+        if (spec.force !== true && parentHit !== frame) fail("matched frame is covered or outside its parent viewport");
       }
-      return JSON.stringify({...base, rect: {x, y}});
+      const targetChanged = !!spec.target_token && globalThis[spec.target_token] != null && globalThis[spec.target_token] !== el;
+      if (spec.target_token) globalThis[spec.target_token] = el;
+      return JSON.stringify({...base, rect: {x, y}, bounds: {x: rect.left, y: rect.top, width: rect.width, height: rect.height},
+        target_changed: targetChanged,
+        ...(spec.action === "set_checked" ? {value: checkState, needs_click: true} : {})});
     }
-    if (spec.action === "focus" || spec.action === "press") {
-      if (el.focus) el.focus();
+    if (["focus", "press", "type", "press_sequentially"].includes(spec.action)) {
+      if (!isVisible(el)) fail("matched element is hidden");
+      if (!isEnabled(el)) fail("matched element is disabled");
+      if (spec.action === "type" || spec.action === "press_sequentially") assertEditable(el);
+      if (spec.trial !== true && el.focus) el.focus();
       return JSON.stringify({...base, focused: el.getRootNode().activeElement === el});
     }
     if (spec.action === "fill") {
       assertEditable(el);
+      const fillable = el.isContentEditable || /^(input|textarea)$/i.test(el.tagName) && !/^(checkbox|radio|file|hidden|button|submit|reset|image)$/i.test(el.type || "");
+      if (!fillable) return JSON.stringify({...base, ok: false, error: "matched element is not fillable"});
+      if (spec.trial === true) return JSON.stringify({...base, trial: true});
       if (el.focus) el.focus();
       if (el.isContentEditable) el.textContent = String(spec.value == null ? "" : spec.value);
       else if (/^(input|textarea)$/i.test(el.tagName) && !/^(checkbox|radio|file|hidden|button|submit|reset|image)$/i.test(el.type || "")) {
@@ -257,26 +350,33 @@
     if (spec.action === "select_option") {
       assertEditable(el);
       if (el.tagName.toLowerCase() !== "select") return JSON.stringify({...base, ok: false, error: "matched element is not a select"});
-      const requested = String(spec.value == null ? "" : spec.value);
-      if (!Array.from(el.options || []).some((option) => option.value === requested)) {
-        return JSON.stringify({...base, ok: false, error: "select has no option with value " + JSON.stringify(requested)});
-      }
-      el.value = requested;
+      const selection = spec.options == null ? spec.value : spec.options;
+      const requested = Array.isArray(selection) ? selection : [selection];
+      if (requested.length > 200) fail("select_option supports at most 200 options", false);
+      if (!el.multiple && requested.length > 1) fail("multiple options require a multiple select", false);
+      const available = Array.from(el.options || []);
+      const selected = requested.map((request) => {
+        const descriptor = typeof request === "string" ? {value: request} : request;
+        if (!descriptor || typeof descriptor !== "object" ||
+            !["value", "label", "index"].some((key) => key in descriptor)) fail("invalid select option descriptor", false);
+        const option = available.find((candidate, index) =>
+          (descriptor.value == null || candidate.value === descriptor.value) &&
+          (descriptor.label == null || (candidate.label == null ? candidate.textContent : candidate.label) === descriptor.label) &&
+          (descriptor.index == null || index === descriptor.index));
+        if (!option) fail("select has no option matching " + JSON.stringify(descriptor));
+        if (option.disabled || option.parentElement && option.parentElement.disabled) fail("requested select option is disabled");
+        return option;
+      });
+      if (spec.trial === true) return JSON.stringify({...base, trial: true});
+      for (const option of available) option.selected = false;
+      for (const option of selected) option.selected = true;
+      if (!selected.length) el.selectedIndex = -1;
+      if (!el.multiple && selected.length) el.value = selected[0].value;
       dispatchChange(el);
-      return JSON.stringify({...base, value: el.value});
-    }
-    if (spec.action === "set_checked") {
-      assertEditable(el);
-      const native = el.tagName.toLowerCase() === "input" && /^(checkbox|radio)$/i.test(el.type);
-      if (!native && !/^(checkbox|radio|switch)$/.test(roleOf(el))) return JSON.stringify({...base, ok: false, error: "matched element is not checkable"});
-      const checked = () => native ? !!el.checked : el.getAttribute("aria-checked") === "true";
-      const desired = spec.checked === true;
-      if (checked() !== desired) el.click();
-      if (checked() !== desired) throw new Error("click did not produce the requested checked state");
-      return JSON.stringify({...base, value: checked()});
+      return JSON.stringify({...base, value: el.value, values: available.filter((option) => option.selected).map((option) => option.value)});
     }
     return JSON.stringify({ok: false, error: "unsupported locator action: " + spec.action, count});
   } catch (err) {
-    return JSON.stringify({ok: false, error: String(err && err.message || err)});
+    return JSON.stringify({ok: false, retryable: err.retryable === true, error: String(err && err.message || err)});
   }
 })(__CODEX_LOCATOR_SPEC__)
