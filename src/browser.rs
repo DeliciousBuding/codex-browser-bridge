@@ -579,11 +579,32 @@ pub async fn hover(client: &Client, tab_id: &str, selector: &str) -> Result<()> 
     let id = parse_tab_id("hover", tab_id)?;
     let (x, y) = pointer_target(client, tab_id, selector).await?;
     crate::pointer::move_to(client, id, x, y, &[]).await?;
-    // Pointer movement is dispatched without waiting for an extension ack.
-    // Give the renderer a short turn to process mouseover before a subsequent
-    // locator read observes hover-driven DOM changes.
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    Ok(())
+    wait_for_hover_at(client, id, x, y).await
+}
+
+async fn wait_for_hover_at(client: &Client, tab_id: i64, x: f64, y: f64) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_millis(1_500);
+    let expression = format!(
+        "(()=>{{const e=document.elementFromPoint({x},{y});return !!e&&e.matches(':hover')}})()"
+    );
+    loop {
+        let raw = client
+            .execute_cdp(
+                tab_id,
+                "Runtime.evaluate",
+                Some(json!({ "expression": expression, "returnByValue": true })),
+            )
+            .await?;
+        if runtime_value_string(&raw)?.as_deref() == Some("true") {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(BridgeError::Protocol(format!(
+                "pointer move was not observed as hover at ({x}, {y})"
+            )));
+        }
+        sleep_until(deadline, Duration::from_millis(25)).await;
+    }
 }
 
 /// Render the page to PDF via `Page.printToPDF`. Returns base64 byte count.

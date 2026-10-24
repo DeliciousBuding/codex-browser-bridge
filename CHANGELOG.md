@@ -24,6 +24,8 @@ All notable changes to this project will be documented in this file.
 - Keyboard events and `Input.insertText` use the non-replayed CDP path. A
   `Debugger unattached` response can no longer duplicate a keydown or inserted
   text while recovering the attachment.
+- `codex_hover` confirms that the target is observed in the `:hover` state
+  before reporting success; a dispatched-but-undelivered pointer move now fails.
 
 ### Changed
 

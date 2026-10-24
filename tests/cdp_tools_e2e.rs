@@ -134,6 +134,66 @@ async fn evaluate_awaits_promises_and_returns_by_value() {
 }
 
 #[tokio::test]
+async fn hover_waits_until_the_pointer_is_observed_on_the_target() {
+    let (client, mut server) = test_client();
+
+    let hover_task = tokio::spawn({
+        let client = client.clone();
+        async move { browser::hover(&client, "7", "#secondary").await }
+    });
+
+    let detach = next_request(&mut server).await;
+    assert_eq!(detach["method"], "detach");
+    reply_result(&mut server, &detach, json!({})).await;
+
+    let attach = next_request(&mut server).await;
+    assert_eq!(attach["method"], "attach");
+    reply_result(&mut server, &attach, json!({})).await;
+
+    let resolve = next_request(&mut server).await;
+    assert_eq!(resolve["params"]["method"], "Runtime.evaluate");
+    reply_result(
+        &mut server,
+        &resolve,
+        json!({"result":{"value":"{\"ok\":true,\"rect\":{\"x\":10,\"y\":20}}"}}),
+    )
+    .await;
+
+    let visibility = next_request(&mut server).await;
+    assert_eq!(visibility["params"]["method"], "Runtime.evaluate");
+    reply_result(
+        &mut server,
+        &visibility,
+        json!({"result":{"value":"visible"}}),
+    )
+    .await;
+
+    let movement = next_request(&mut server).await;
+    assert_eq!(movement["params"]["method"], "Input.dispatchMouseEvent");
+    assert_eq!(movement["params"]["commandParams"]["type"], "mouseMoved");
+    reply_result(&mut server, &movement, json!({})).await;
+
+    let pending_hover = next_request(&mut server).await;
+    assert_eq!(pending_hover["params"]["method"], "Runtime.evaluate");
+    let expression = pending_hover["params"]["commandParams"]["expression"]
+        .as_str()
+        .unwrap();
+    assert!(expression.contains("matches(':hover')"), "{expression}");
+    reply_result(
+        &mut server,
+        &pending_hover,
+        json!({"result":{"value":false}}),
+    )
+    .await;
+
+    let confirmed = next_request(&mut server).await;
+    assert_eq!(confirmed["params"]["method"], "Runtime.evaluate");
+    reply_result(&mut server, &confirmed, json!({"result":{"value":true}})).await;
+
+    hover_task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
 async fn blocked_navigation_and_cdp_methods_do_not_touch_pipe() {
     let (client, mut server) = test_client();
 
