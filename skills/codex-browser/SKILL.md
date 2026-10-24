@@ -37,7 +37,7 @@ or Chrome instances by pipe name.
 1. If several browser instances are live, call `codex_list_browsers` and bind
    the exact requested one with `codex_bind_browser`.
 2. Use `codex_create_tab` for a new page, or `codex_user_tabs` followed by
-   `codex_claim_tab` for an existing logged-in tab.
+   `codex_claim_tab` with the exact entry's title/URL for an existing logged-in tab.
 3. Use `codex_nav_and_wait` rather than separate navigate and wait calls.
 4. Prefer `codex_find_element` plus `codex_click_element`, or
    `codex_dom_snapshot` plus `codex_dom_click`, over fragile CSS selectors.

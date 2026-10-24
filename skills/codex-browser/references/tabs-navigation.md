@@ -25,13 +25,19 @@ Reuse an existing logged-in page:
 
 ```text
 codex_user_tabs
-codex_claim_tab tab_id=<id>
+codex_claim_tab tab_id=<id> expected_title=<exact-title> expected_url=<exact-url>
 codex_get_title tab_id=<id>
 codex_dom_get_visible tab_id=<id>
 ```
 
 `codex_close_tab` must only target a tab owned by the current bridge session.
 Calling it on an unclaimed user tab should fail.
+
+Use title and URL from the same fresh `codex_user_tabs` entry, including empty
+strings; numeric-only claims fail. Missing/changed snapshots fail before claim.
+The native backend only accepts tab ID, not atomic snapshot comparison: a change
+during claim is reported as possible ownership change. Inspect ownership rather
+than retrying a claim blindly.
 
 ## Navigation
 

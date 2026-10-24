@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- CLI continuation files use v2, bind exact extension identity and reject legacy
+  or malformed tokens. OS-backed locks reject concurrent use; state is saved
+  before operations and survives uncertain disconnects.
+- `codex_claim_tab` requires expected title/URL from current user-tab enumeration;
+  numeric-only calls are rejected. Native claim lacks atomic snapshot comparison,
+  so a changed response reports possible ownership change without replay.
+- Explicit configuration errors/unknown keys fail; browser selectors use coherent
+  CLI/environment/file precedence. Diagnostic output distinguishes tool profiles,
+  attached-instance identity and permission-gated capability availability.
+
+### Fixed
+
+- Incomplete discovery cannot prove an implicit unique browser. Rebind/finalize
+  exclude in-flight tools and unresolved old turns remain recoverable; rebinding
+  the same instance preserves its turn.
+
 ## [1.13.0] - 2026-10-24
 
 ### Added

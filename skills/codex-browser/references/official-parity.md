@@ -12,6 +12,13 @@ Codex Browser plugin but not obvious in the older bridge tool names.
 - With owned tabs, rebinding requires prior finalization or explicit
   `end_previous_turn=true`; successful switching must not abandon an old turn.
 - `codex_get_info` reports the currently bound instance.
+- `basic/network/full` are tool profiles; optional `profile_name` is only a
+  backend label. Tab ownership never isolates cookies/storage of one user profile.
+- Implicit selection requires complete discovery. A disconnected unresolved old
+  turn must reconnect for ownership/cleanup checks before switching. Same-instance
+  bind preserves its turn; finalize and rebind exclude in-flight tool operations.
+- Extension-advertised capabilities, bridge implementations and current website
+  permissions differ. Diagnostics do not infer permission success from advertising.
 - `codex_doctor` reports all probed pipe instances with identity fields.
 
 Never treat `Chrome` and `Edge` as interchangeable when the user names one.
