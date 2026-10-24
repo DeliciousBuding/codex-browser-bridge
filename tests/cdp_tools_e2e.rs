@@ -1,5 +1,3 @@
-#![cfg(not(windows))]
-
 use codex_browser_bridge::client::Client;
 use codex_browser_bridge::{browser, protocol};
 use serde_json::{json, Value};
@@ -156,6 +154,27 @@ async fn hover_waits_until_the_pointer_is_observed_on_the_target() {
         &mut server,
         &resolve,
         json!({"result":{"value":"{\"ok\":true,\"rect\":{\"x\":10,\"y\":20}}"}}),
+    )
+    .await;
+
+    let stable = next_request(&mut server).await;
+    assert_eq!(stable["params"]["method"], "Runtime.evaluate");
+    reply_result(
+        &mut server,
+        &stable,
+        json!({"result":{"value":"{\"ok\":true,\"rect\":{\"x\":10,\"y\":20}}"}}),
+    )
+    .await;
+    let cleanup = next_request(&mut server).await;
+    assert_eq!(cleanup["params"]["method"], "Runtime.evaluate");
+    assert!(cleanup["params"]["commandParams"]["expression"]
+        .as_str()
+        .unwrap()
+        .contains("release_target"));
+    reply_result(
+        &mut server,
+        &cleanup,
+        json!({"result":{"value":"{\"ok\":true}"}}),
     )
     .await;
 

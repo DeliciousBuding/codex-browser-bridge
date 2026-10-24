@@ -2558,14 +2558,19 @@ mod navigation_and_management_tests {
 
     #[test]
     fn screenshot_clip_rejects_unbounded_geometry() {
-        assert!(validate_screenshot_clip(&json!({"x":0,"y":0,"width":100,"height":50,"scale":1})).is_ok());
+        assert!(
+            validate_screenshot_clip(&json!({"x":0,"y":0,"width":100,"height":50,"scale":1}))
+                .is_ok()
+        );
         for clip in [
             json!({"x":-1,"y":0,"width":100,"height":50,"scale":1}),
             json!({"x":0,"y":0,"width":0,"height":50,"scale":1}),
             json!({"x":0,"y":0,"width":10000,"height":10000,"scale":4}),
             json!({"x":0,"y":0,"width":100,"height":50,"scale":5}),
-            json!({"x":0,"y":0,"width":100,"height":50})
-        ] { assert!(validate_screenshot_clip(&clip).is_err()); }
+            json!({"x":0,"y":0,"width":100,"height":50}),
+        ] {
+            assert!(validate_screenshot_clip(&clip).is_err());
+        }
     }
 
     #[test]
