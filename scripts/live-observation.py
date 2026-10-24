@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import tempfile
 import threading
+import time
 
 from importlib.util import module_from_spec, spec_from_file_location
 
@@ -59,7 +60,12 @@ def main():
         assert selected["result"]["value"] == ["red","green"]
         checks.append("locator-boolean-composition-list-select")
         locator("click", selector="#alert")
-        dialog = bridge.value("codex_dialog", {"tab_id":tab,"action":"get"})["dialog"]
+        dialog = None
+        deadline = time.monotonic() + 5
+        while dialog is None and time.monotonic() < deadline:
+            dialog = bridge.value("codex_dialog", {"tab_id":tab,"action":"get"})["dialog"]
+            if dialog is None:
+                time.sleep(0.05)
         assert dialog["dialog_type"] == "alert" and dialog["message"] == "fixture dialog"
         bridge.tool("codex_dialog", {"tab_id":tab,"action":"dismiss","dialog_id":dialog["id"]})
         stale = bridge.tool("codex_dialog", {"tab_id":tab,"action":"dismiss","dialog_id":dialog["id"]}, True)
@@ -67,7 +73,12 @@ def main():
         checks.append("dialog-state-stale-rejection")
         bridge.tool("codex_file_chooser", {"tab_id":tab,"action":"start"})
         locator("click", selector="#upload")
-        chooser = bridge.value("codex_file_chooser", {"tab_id":tab,"action":"state"})["chooser"]
+        chooser = None
+        deadline = time.monotonic() + 5
+        while chooser is None and time.monotonic() < deadline:
+            chooser = bridge.value("codex_file_chooser", {"tab_id":tab,"action":"state"})["chooser"]
+            if chooser is None:
+                time.sleep(0.05)
         assert chooser and chooser["mode"] == "selectMultiple"
         denied = bridge.tool("codex_file_chooser", {"tab_id":tab,"action":"set_files","chooser_id":chooser["id"],"files":["/not-authorized"]}, True)
         assert denied.get("isError")
@@ -97,9 +108,10 @@ def main():
         assert typed == "Prefix-汉字", repr(typed)
         checks.append("unicode-sequential-append")
         with tempfile.TemporaryDirectory(prefix="bridge-file-smoke-") as output:
+            bridge.tool("codex_evaluate", {"tab_id":tab,"expression":"(()=>{const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('width','20');s.setAttribute('height','20');s.innerHTML='<rect width=\"20\" height=\"20\" fill=\"red\"/>';document.body.appendChild(s);return true})()"})
             inventory = bridge.value("codex_page_assets", {"tab_id":tab,"action":"list"})
-            # This fixture has no bundleable external resources: still emit its bounded manifest.
-            bundle = bridge.value("codex_page_assets", {"tab_id":tab,"action":"bundle","inventory_id":inventory["id"],"output_dir":output})
+            svg = next(asset for asset in inventory["assets"] if asset["url"].startswith("inline-svg:"))
+            bundle = bridge.value("codex_page_assets", {"tab_id":tab,"action":"bundle","inventory_id":inventory["id"],"output_dir":output,"asset_ids":[svg["id"]]})
             assert bundle["path_scope"] == "bridge_host" and bundle["browser_download"] is False
             assert Path(bundle["manifest_path"]).is_file()
             checks.append("atomic-file-result-path-scope")
