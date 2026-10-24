@@ -92,20 +92,97 @@ pub async fn list_user_tabs(client: &Client) -> Result<Vec<UserTab>> {
     decode_user_tabs(&raw)
 }
 
-pub async fn claim_user_tab(client: &Client, tab_id: &str) -> Result<Tab> {
+/// Claim only the tab the caller observed, after an exact fresh snapshot check.
+///
+/// The native protocol accepts only `tabId`, not an atomic compare-and-claim.
+/// A tab can still change between enumeration and claim; the returned snapshot
+/// is checked too, but a failure then cannot undo the ownership transfer.
+pub async fn claim_user_tab(
+    client: &Client,
+    tab_id: &str,
+    expected_title: &str,
+    expected_url: &str,
+) -> Result<Tab> {
     let id = parse_tab_id("claimUserTab", tab_id)?;
+    let raw = client.send_request("getUserTabs", None).await?;
+    let value: Value = serde_json::from_str(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("decode getUserTabs: {err}")))?;
+    let tabs = value
+        .as_array()
+        .or_else(|| value.get("tabs").and_then(Value::as_array))
+        .ok_or_else(|| BridgeError::Protocol("getUserTabs did not return a tab list".into()))?;
+    let mut matches = tabs.iter().filter(|tab| {
+        tab.get("id")
+            .map(normalize_id_value)
+            .and_then(|id| id.parse::<i64>().ok())
+            == Some(id)
+    });
+    let Some(current) = matches.next() else {
+        return Err(BridgeError::User(
+            "tab snapshot is stale: tab no longer exists; run codex_user_tabs again before claiming"
+                .into(),
+        ));
+    };
+    if matches.next().is_some() {
+        return Err(BridgeError::Protocol(
+            "getUserTabs returned duplicate tab IDs; refusing to claim".into(),
+        ));
+    }
+    let title = current.get("title").and_then(Value::as_str);
+    let url = current.get("url").and_then(Value::as_str);
+    if title.is_none() || url.is_none() {
+        return Err(BridgeError::Protocol(
+            "getUserTabs tab is missing its title/URL snapshot; refusing to claim".into(),
+        ));
+    }
+    if title != Some(expected_title) || url != Some(expected_url) {
+        return Err(BridgeError::User(
+            "tab snapshot is stale: title or URL changed; run codex_user_tabs again before claiming"
+                .into(),
+        ));
+    }
+
     let raw = client
         .send_request("claimUserTab", Some(json!({ "tabId": id })))
         .await?;
-    let tab: Tab = serde_json::from_str(raw.get())
-        .map_err(|err| BridgeError::Protocol(format!("decode claimUserTab: {err}")))?;
+    #[derive(Deserialize)]
+    struct ClaimedTab {
+        id: Value,
+        title: String,
+        url: String,
+    }
+    let tab: ClaimedTab = serde_json::from_str(raw.get()).map_err(|err| {
+        BridgeError::Protocol(format!(
+            "decode claimUserTab: {err}; ownership may have changed, do not retry blindly"
+        ))
+    })?;
+    if normalize_id_value(&tab.id).parse::<i64>().ok() != Some(id)
+        || tab.title != expected_title
+        || tab.url != expected_url
+    {
+        return Err(BridgeError::User(
+            "tab snapshot changed during claim; ownership may have changed; no attach was sent, inspect codex_list_tabs and codex_user_tabs before proceeding"
+                .into(),
+        ));
+    }
     client
         .send_request("attach", Some(json!({ "tabId": id })))
-        .await?;
+        .await
+        .map_err(|err| {
+            BridgeError::Protocol(format!(
+                "tab was claimed but attach failed: {err}; inspect codex_list_tabs before proceeding"
+            ))
+        })?;
     // Mark as attached only after attach succeeds so subsequent CDP calls can
     // safely skip the detach+attach cycle.
     client.mark_attached(id).await;
-    Ok(tab.normalize())
+    Ok(Tab {
+        id: String::new(),
+        raw_id: tab.id,
+        title: tab.title,
+        url: tab.url,
+    }
+    .normalize())
 }
 
 pub async fn get_user_history(client: &Client, params: Value) -> Result<Value> {

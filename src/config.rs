@@ -1,137 +1,188 @@
-//! Optional TOML config file for persistent defaults.
+//! Strict TOML defaults and browser-selector precedence.
 //!
-//! Lookup order (first hit wins): `CODEX_BRIDGE_CONFIG` env path, then
-//! `./.codex-browser-bridge.toml`. A missing default file is fine — returns the
-//! default (empty) config. If `CODEX_BRIDGE_CONFIG` is set, that path is
-//! authoritative; missing or malformed files warn and yield the empty config
-//! instead of falling through to a working-directory config.
-//!
-//! Config precedence overall: CLI flags > env > config file > built-in default
-//! (applied in `main.rs`).
+//! An explicit `CODEX_BRIDGE_CONFIG` path is authoritative and must be readable.
+//! Only a missing working-directory `.codex-browser-bridge.toml` is optional.
+//! Invalid configuration is never replaced with defaults. CLI > environment >
+//! file > defaults applies to settings; family and instance form one selector.
 
-use serde::Deserialize;
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+use crate::registry::BrowserSelector;
+
+pub const MIN_CONTENT_BYTES: usize = 1024;
+pub const MAX_CONTENT_BYTES: usize = 8 * 1024 * 1024;
+
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
-    /// Tool profile name: "basic" | "network" | "full".
-    #[serde(default)]
+    /// Tool profile name: "basic" | "network" | "full" (not a browser profile).
     pub profile: Option<String>,
     /// Preferred Chromium browser family, for example "edge" or "chrome".
-    #[serde(default)]
     pub browser_family: Option<String>,
     /// Exact extensionInstanceId when multiple instances of a family are live.
-    #[serde(default)]
     pub browser_instance: Option<String>,
     /// Base directory `codex_file_input` may upload from.
-    #[serde(default)]
     pub upload_base: Option<String>,
-    /// Maximum bytes per MCP text content item.
-    #[serde(default)]
+    /// Maximum bytes per MCP text content item (1024..=8 MiB).
     pub max_text_bytes: Option<usize>,
-    /// Maximum bytes per MCP base64 image content item.
-    #[serde(default)]
+    /// Maximum bytes per MCP base64 image content item (1024..=8 MiB).
     pub max_image_bytes: Option<usize>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigSource {
+    Cli,
+    Environment,
+    Config,
+    Default,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct BrowserSelection {
+    pub selector: BrowserSelector,
+    pub source: ConfigSource,
+}
+
 impl Config {
-    /// Load config from the first available source, or `Default::default()`.
-    pub fn load() -> Self {
+    pub fn load() -> Result<Self> {
         if let Some(path) = std::env::var_os("CODEX_BRIDGE_CONFIG") {
-            return Self::load_from(Path::new(&path)).unwrap_or_default();
+            return Self::load_from(Path::new(&path));
         }
-        Self::load_from(Path::new(".codex-browser-bridge.toml")).unwrap_or_default()
+        let path = Path::new(".codex-browser-bridge.toml");
+        match std::fs::read_to_string(path) {
+            Ok(text) => Self::parse(&text).context("invalid default configuration file"),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(err) => Err(err).context("cannot read default configuration file"),
+        }
     }
 
-    fn load_from(path: &Path) -> Option<Self> {
-        let text = match std::fs::read_to_string(path) {
-            Ok(text) => text,
-            Err(_) => return None, // missing file is the common, silent path
+    /// Load a required configuration file. Paths are explicit; no fallback.
+    pub fn load_from(path: &Path) -> Result<Self> {
+        let text =
+            std::fs::read_to_string(path).context("cannot read explicit configuration file")?;
+        Self::parse(&text).context("invalid explicit configuration file")
+    }
+
+    pub fn parse(text: &str) -> Result<Self> {
+        // TOML errors may include source lines or values. Configuration can
+        // contain private paths; report only the location, not its contents.
+        let mut config: Self = toml::from_str(text).map_err(|err: toml::de::Error| {
+            let line = err.span().map(|span| {
+                text.as_bytes()[..span.start.min(text.len())]
+                    .iter()
+                    .filter(|b| **b == b'\n')
+                    .count()
+                    + 1
+            });
+            anyhow::anyhow!(
+                "invalid TOML or unknown configuration key{}",
+                line.map(|line| format!(" at line {line}"))
+                    .unwrap_or_default()
+            )
+        })?;
+        config.normalize_and_validate()?;
+        Ok(config)
+    }
+
+    /// Read explicit environment settings without silently discarding errors.
+    pub fn from_env() -> Result<Self> {
+        let mut config = Self {
+            profile: env_string("CODEX_BRIDGE_PROFILE")?,
+            browser_family: env_string("CODEX_BRIDGE_BROWSER_FAMILY")?,
+            browser_instance: env_string("CODEX_BRIDGE_BROWSER_INSTANCE")?,
+            upload_base: env_string("CODEX_BRIDGE_UPLOAD_BASE")?,
+            max_text_bytes: env_usize("CODEX_BRIDGE_MAX_TEXT_BYTES")?,
+            max_image_bytes: env_usize("CODEX_BRIDGE_MAX_IMAGE_BYTES")?,
         };
-        tracing::debug!(path = %path.display(), "loaded config file");
-        match toml::from_str(&text) {
-            Ok(cfg) => Some(cfg),
-            Err(err) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %err,
-                    "failed to parse config file, ignoring"
-                );
-                None
+        config
+            .normalize_and_validate()
+            .context("invalid environment configuration")?;
+        Ok(config)
+    }
+
+    fn normalize_and_validate(&mut self) -> Result<()> {
+        let selector =
+            BrowserSelector::new(self.browser_family.clone(), self.browser_instance.clone());
+        selector.validate()?;
+        self.browser_family = selector.family;
+        self.browser_instance = selector.instance_id;
+        if let Some(profile) = self.profile.as_mut() {
+            *profile = profile.trim().to_ascii_lowercase();
+            if !matches!(profile.as_str(), "basic" | "network" | "full") {
+                bail!("profile must be basic, network, or full");
             }
         }
+        if self
+            .upload_base
+            .as_ref()
+            .is_some_and(|base| base.trim().is_empty())
+        {
+            bail!("upload_base must not be empty");
+        }
+        if let Some(limit) = self.max_text_bytes {
+            validate_content_bytes("max_text_bytes", limit)?;
+        }
+        if let Some(limit) = self.max_image_bytes {
+            validate_content_bytes("max_image_bytes", limit)?;
+        }
+        Ok(())
+    }
+
+    /// A higher-precedence family OR instance replaces the whole lower layer.
+    /// In particular, `--browser-family chrome` never retains a file's Edge ID.
+    pub fn browser_selection(
+        &self,
+        cli_family: Option<String>,
+        cli_instance: Option<String>,
+        environment: &Self,
+    ) -> Result<BrowserSelection> {
+        let (family, instance, source) = if cli_family.is_some() || cli_instance.is_some() {
+            (cli_family, cli_instance, ConfigSource::Cli)
+        } else if environment.browser_family.is_some() || environment.browser_instance.is_some() {
+            (
+                environment.browser_family.clone(),
+                environment.browser_instance.clone(),
+                ConfigSource::Environment,
+            )
+        } else if self.browser_family.is_some() || self.browser_instance.is_some() {
+            (
+                self.browser_family.clone(),
+                self.browser_instance.clone(),
+                ConfigSource::Config,
+            )
+        } else {
+            (None, None, ConfigSource::Default)
+        };
+        let selector = BrowserSelector::new(family, instance);
+        selector.validate()?;
+        Ok(BrowserSelection { selector, source })
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_profile_and_upload_base() {
-        let cfg: Config = toml::from_str(
-            r#"
-            profile = "network"
-            browser_family = "edge"
-            browser_instance = "instance-id"
-            upload_base = "C:/uploads"
-            max_text_bytes = 2097152
-            max_image_bytes = 4194304
-            "#,
-        )
-        .unwrap();
-        assert_eq!(cfg.profile.as_deref(), Some("network"));
-        assert_eq!(cfg.browser_family.as_deref(), Some("edge"));
-        assert_eq!(cfg.browser_instance.as_deref(), Some("instance-id"));
-        assert_eq!(cfg.upload_base.as_deref(), Some("C:/uploads"));
-        assert_eq!(cfg.max_text_bytes, Some(2_097_152));
-        assert_eq!(cfg.max_image_bytes, Some(4_194_304));
+pub fn validate_content_bytes(name: &str, value: usize) -> Result<()> {
+    if !(MIN_CONTENT_BYTES..=MAX_CONTENT_BYTES).contains(&value) {
+        bail!("{name} must be between {MIN_CONTENT_BYTES} and {MAX_CONTENT_BYTES} bytes");
     }
+    Ok(())
+}
 
-    #[test]
-    fn empty_file_yields_default() {
-        let cfg: Config = toml::from_str("").unwrap();
-        assert!(cfg.profile.is_none());
-        assert!(cfg.browser_family.is_none());
-        assert!(cfg.browser_instance.is_none());
-        assert!(cfg.upload_base.is_none());
-        assert!(cfg.max_text_bytes.is_none());
-        assert!(cfg.max_image_bytes.is_none());
+fn env_string(name: &str) -> Result<Option<String>> {
+    match std::env::var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => bail!("{name} must be valid Unicode"),
     }
+}
 
-    #[test]
-    fn unknown_keys_are_ignored() {
-        // Extra keys must not break parsing (forward-compat for future fields).
-        let cfg: Config = toml::from_str(
-            r#"
-            profile = "basic"
-            future_field = true
-            "#,
-        )
-        .unwrap();
-        assert_eq!(cfg.profile.as_deref(), Some("basic"));
-    }
-
-    #[test]
-    fn explicit_config_path_is_authoritative_when_missing() {
-        let previous = std::env::var_os("CODEX_BRIDGE_CONFIG");
-        std::env::set_var(
-            "CODEX_BRIDGE_CONFIG",
-            "definitely-missing-codex-browser-bridge.toml",
-        );
-
-        let cfg = Config::load();
-
-        match previous {
-            Some(value) => std::env::set_var("CODEX_BRIDGE_CONFIG", value),
-            None => std::env::remove_var("CODEX_BRIDGE_CONFIG"),
-        }
-
-        assert!(cfg.profile.is_none());
-        assert!(cfg.browser_family.is_none());
-        assert!(cfg.browser_instance.is_none());
-        assert!(cfg.upload_base.is_none());
-        assert!(cfg.max_text_bytes.is_none());
-        assert!(cfg.max_image_bytes.is_none());
-    }
+fn env_usize(name: &str) -> Result<Option<usize>> {
+    env_string(name)?
+        .map(|value| {
+            value
+                .parse()
+                .with_context(|| format!("{name} must be a non-negative integer"))
+        })
+        .transpose()
 }

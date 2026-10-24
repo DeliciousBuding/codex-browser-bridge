@@ -135,6 +135,7 @@ async fn discover_codex_pipes_with_timeout(timeout_duration: Duration) -> Result
     let mut command = Command::new("powershell");
     command
         .kill_on_drop(true)
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW: never flash a console for discovery.
         .args(["-NoProfile", "-Command", PIPE_ENUMERATION_SCRIPT]);
     let stdout = run_pipe_enumeration(command, timeout_duration).await?;
     Ok(parse_pipe_list(&stdout))

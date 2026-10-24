@@ -19,7 +19,7 @@ pub(super) fn registered_tools() -> Vec<Tool> {
         Tool::new("codex_create_tab", "[Tabs] Create a new blank browser tab. The tab starts at about:blank; use codex_navigate afterward to load a URL.", object_schema(), ToolHandler::CreateTab).with_hints(ToolHints::interaction()),
         Tool::new("codex_close_tab", "[Tabs] Close a browser tab by ID. The tab must be owned by the current bridge session.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID to close"}},"required":["tab_id"]}"#), ToolHandler::CloseTab).with_hints(ToolHints::destructive()),
         Tool::new("codex_user_tabs", "[Tabs] List all open tabs across all browser windows, including tabs NOT owned by the bridge. Use this to discover tabs available for claiming via codex_claim_tab. The tab IDs returned here can be passed to codex_claim_tab.", object_schema(), ToolHandler::UserTabs).with_hints(ToolHints::read_only()),
-        Tool::new("codex_claim_tab", "[Tabs] Claim an existing user tab for automation. The tab_id must come from codex_user_tabs. After claiming, the tab can be controlled by other codex_* tools. This transfers ownership to the bridge session.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID from codex_user_tabs to claim"}},"required":["tab_id"]}"#), ToolHandler::ClaimTab).with_hints(ToolHints::idempotent_write()),
+        Tool::new("codex_claim_tab", "[Tabs] Claim an existing user tab using its exact ID/title/URL snapshot from codex_user_tabs. All three are required; numeric-only claims are rejected. Fresh enumeration rejects missing or changed tabs before ownership transfer. The native claim is not atomic: a change during claim is reported as uncertain ownership and is not attached or retried.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string","description":"Tab ID from codex_user_tabs to claim"},"expected_title":{"type":"string","description":"Exact title from the same codex_user_tabs entry, including an empty title"},"expected_url":{"type":"string","description":"Exact URL from the same codex_user_tabs entry, without normalization"}},"required":["tab_id","expected_title","expected_url"]}"#), ToolHandler::ClaimTab).with_hints(ToolHints::interaction()),
         Tool::new("codex_mark_tab", "[Tabs] Mark an owned tab as a deliverable or as a handoff for later work. This mirrors the official browser turn-cleanup contract; the latest mark wins.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"},"status":{"type":"string","enum":["deliverable","handoff"]}},"required":["tab_id","status"]}"#), ToolHandler::MarkTab).with_hints(ToolHints::idempotent_write()),
         Tool::new("codex_navigate", "[Navigation] Navigate a tab to a URL. Blocks dangerous schemes (file:, javascript:, data:, etc.).", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"},"url":{"type":"string","description":"Full URL to navigate to (https://...) "}},"required":["tab_id","url"]}"#), ToolHandler::Navigate).with_hints(ToolHints::idempotent_write()),
         Tool::new("codex_reload", "[Navigation] Reload the current page in a tab.", schema_value(r#"{"type":"object","properties":{"tab_id":{"type":"string"}},"required":["tab_id"]}"#), ToolHandler::Reload).with_hints(ToolHints::idempotent_write()),
@@ -149,6 +149,17 @@ mod tests {
         assert_eq!(pa.input_schema["type"], "object");
         let required = pa.input_schema["required"].as_array().unwrap();
         assert_eq!(required[0], "tab_id");
+    }
+
+    #[test]
+    fn claim_tab_requires_snapshot_and_is_not_safe_to_replay() {
+        let tools = registered_tools();
+        let claim = tools.iter().find(|t| t.name == "codex_claim_tab").unwrap();
+        assert_eq!(
+            claim.input_schema["required"],
+            serde_json::json!(["tab_id", "expected_title", "expected_url"])
+        );
+        assert_eq!(claim.annotations.as_ref().unwrap()["idempotentHint"], false);
     }
 
     #[test]

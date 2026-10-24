@@ -23,7 +23,7 @@ the shell closes the turn it opened unless you explicitly keep it.
 |---|---|---|
 | `call NAME [JSON]` | one process, one turn | **on by default** (`codex_finalize` on exit) |
 | `batch` | one process, one turn | **on by default**, including after a failed line |
-| `--session-file <path>` | one turn shared by several processes | off until `--finalize` or `codex_finalize` |
+| `--session-file <path>` | one turn continued by sequential processes, exact instance bound | off until `--finalize` or `codex_finalize` |
 | `--keep-turn` | one process, one turn | off |
 
 - **Default cleanup preserves marks.** Unmarked agent tabs are closed and
@@ -34,7 +34,12 @@ the shell closes the turn it opened unless you explicitly keep it.
   only to inspect state by hand; prefer `batch` or `--session-file` for real
   multi-step work.
 - **`--session-file` is a continuation token, not browser state.** It stores the
-  session and turn identifiers so a later process resumes the same turn. It does
+  v2 session/turn identifiers and exact browser instance so a later process resumes
+  the same turn. An incompatible selector is rejected before saved IDs are sent.
+  Concurrent invocation fails under an OS file lock; its parent directory must
+  exist. Legacy/corrupt files fail explicitly; preserve them and finalize/recover
+  the original turn before starting a new continuation. The empty `.lock`
+  sidecar stays to prevent inode races, but process exit releases the lock. It does
   not store cookies, storage, or tab content, and it is not portable between
   machines. `--finalize`, or a successful `codex_finalize` call, deletes it.
 - **Interrupts follow the cleanup policy.** Ctrl-C and SIGTERM attempt turn
@@ -54,7 +59,7 @@ interactive CLI own their turn for the process lifetime and reject it.
 # One process, several dependent calls on a tab id already returned by
 # codex_user_tabs. Stops at the first error.
 codex-browser-bridge batch <<'JSONL'
-{"name":"codex_claim_tab","arguments":{"tab_id":"123"}}
+{"name":"codex_claim_tab","arguments":{"tab_id":"123","expected_title":"Example Domain","expected_url":"https://example.com/"}}
 {"name":"codex_navigate","arguments":{"tab_id":"123","url":"https://example.com"}}
 JSONL
 

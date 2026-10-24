@@ -149,6 +149,38 @@ async fn persistent_observation_stores_events_before_enable_ack_and_between_call
 }
 
 #[tokio::test]
+async fn stopping_one_local_journal_does_not_disable_another_subscriber() {
+    let (transport, mut server) = duplex(128 * 1024);
+    let client = Client::from_stream(transport).unwrap();
+    let worker = client.clone();
+    let started = tokio::spawn(async move { worker.start_observation(7, DEADLINE).await });
+    start(&mut server, false).await;
+    timeout(DEADLINE, started).await.unwrap().unwrap().unwrap();
+    let (subscription, mut events, _) = client
+        .subscribe_events_with_budget_for_tab("Runtime.", &["Runtime.consoleAPICalled"], 4, 4096, 7)
+        .await;
+    client.stop_observation(7);
+    assert!(
+        timeout(Duration::from_millis(40), decode_frame(&mut server))
+            .await
+            .is_err(),
+        "stop must not disable shared event domains"
+    );
+    event(
+        &mut server,
+        7,
+        "Runtime.consoleAPICalled",
+        json!({"args":[{"value":"subscriber alive"}]}),
+    )
+    .await;
+    let received = timeout(DEADLINE, events.recv()).await.unwrap().unwrap();
+    assert_eq!(received["params"]["args"][0]["value"], "subscriber alive");
+    assert!(client.observation_snapshot(7).is_err());
+    client.unsubscribe_events(subscription).await;
+    client.shutdown().await;
+}
+
+#[tokio::test]
 async fn observation_start_reuses_enabled_state_and_dialog_ids_are_stale_after_close() {
     let (transport, mut server) = duplex(128 * 1024);
     let client = Client::from_stream(transport).unwrap();

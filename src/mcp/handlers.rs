@@ -286,6 +286,19 @@ impl super::Server {
             return error_response(Some(id), -32601, &format!("Tool not found: {name}"));
         };
 
+        let _exclusive = if matches!(tool.handler, ToolHandler::Finalize) {
+            Some(self.binding_lock.write().await)
+        } else {
+            None
+        };
+        let _binding = if matches!(
+            tool.handler,
+            ToolHandler::BindBrowser | ToolHandler::Finalize
+        ) {
+            None
+        } else {
+            Some(self.binding_lock.read().await)
+        };
         let result = match tool.handler {
             ToolHandler::ListBrowsers => self.handle_list_browsers().await,
             ToolHandler::BindBrowser => self.handle_bind_browser(args).await,
@@ -396,11 +409,53 @@ impl super::Server {
         // turn. A missing/ambiguous target must leave existing tabs untouched.
         let selector = BrowserSelector::new(family, browser_id);
         let client = Client::connect_with_selector(None, selector).await?;
+        self.bind_verified_client(client, end_previous_turn).await
+    }
+
+    async fn bind_verified_client(
+        &self,
+        client: Client,
+        end_previous_turn: bool,
+    ) -> anyhow::Result<Vec<Content>> {
+        let _binding = self.binding_lock.write().await;
+        // Recheck the replacement after waiting for in-flight tools. Never
+        // clean up the old turn for a replacement that no longer responds.
         let info = client.send_request("getInfo", None).await?;
         let browser = serde_json::from_str::<Value>(info.get())?;
+        if browser.get("type").and_then(Value::as_str) != Some("extension")
+            || browser
+                .pointer("/metadata/extensionInstanceId")
+                .and_then(Value::as_str)
+                .is_none_or(str::is_empty)
+        {
+            anyhow::bail!("Replacement did not report a browser-extension instance identity; keeping the current binding");
+        }
 
         let previous = self.client_snapshot();
+        if previous.has_unresolved_turn() && !previous.has_live_connection().await {
+            previous.connect_if_needed().await.map_err(|err| anyhow::anyhow!(
+                "Previous browser turn ownership is unresolved; could not reconnect for confirmed cleanup, keeping the current binding: {err}"
+            ))?;
+        }
         let prior_session = if previous.has_live_connection().await {
+            let previous_info = previous.send_request("getInfo", None).await?;
+            let previous_info: Value = serde_json::from_str(previous_info.get())?;
+            if browser
+                .pointer("/metadata/extensionInstanceId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| {
+                    previous_info
+                        .pointer("/metadata/extensionInstanceId")
+                        .and_then(Value::as_str)
+                        == Some(id)
+                })
+            {
+                client.shutdown().await;
+                return Ok(vec![Content::text(serde_json::to_string_pretty(&json!({
+                    "bound": true, "unchanged": true, "browser": previous_info,
+                    "previous_session": {"cleanup": "none", "reason": "already_bound"}
+                }))?)]);
+            }
             let tabs = browser::list_tabs(&previous).await?;
             if !tabs.is_empty() && !end_previous_turn {
                 anyhow::bail!(
@@ -426,6 +481,12 @@ impl super::Server {
             })
         };
 
+        if let Some(path) = previous.continuation_path() {
+            // Publish the newly bound continuation before it can own tabs.
+            // Failure keeps the old binding (possibly already finalized).
+            client.set_continuation_path(&path);
+            client.persist_continuation().await.map_err(|err| anyhow::anyhow!("New continuation could not be saved; previous binding retained. Previous cleanup status: {prior_session}. {err}"))?;
+        }
         let old = self.replace_client(client);
         self.clipboard.lock().await.clear();
         self.webmcp.clear().await;
@@ -596,7 +657,19 @@ impl super::Server {
 
     async fn handle_claim_tab(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
-        let tab = browser::claim_user_tab(&self.client_snapshot(), tab_id).await?;
+        let expected_title = required_string_value(&args, "expected_title").map_err(|_| {
+            anyhow::anyhow!("codex_claim_tab requires expected_title and expected_url from codex_user_tabs; numeric-only claims are no longer accepted")
+        })?;
+        let expected_url = required_string_value(&args, "expected_url").map_err(|_| {
+            anyhow::anyhow!("codex_claim_tab requires expected_title and expected_url from codex_user_tabs; numeric-only claims are no longer accepted")
+        })?;
+        let tab = browser::claim_user_tab(
+            &self.client_snapshot(),
+            tab_id,
+            expected_title,
+            expected_url,
+        )
+        .await?;
         Ok(vec![Content::text(serde_json::to_string(&tab)?)])
     }
 
@@ -838,9 +911,9 @@ impl super::Server {
         // still live in the extension, so connect before ending it.
         client.connect_if_needed().await?;
         if !client.end_turn().await? {
-            return Ok(vec![Content::text(
-                "No live browser turn to end; remote tab cleanup was not confirmed.".to_string(),
-            )]);
+            anyhow::bail!(
+                "Remote turn cleanup was not confirmed; continuation state was preserved"
+            );
         }
         Ok(vec![Content::text(
             "Browser turn ended: unmarked agent tabs were closed, unmarked claimed user tabs were released, and deliverable/handoff marks were preserved."
@@ -861,7 +934,11 @@ impl super::Server {
             } else {
                 "bridge"
             };
-            obj.insert(runtime_key.into(), self.bridge_runtime_info());
+            let mut runtime = self.bridge_runtime_info();
+            runtime["selectedBrowser"] =
+                serde_json::to_value(self.client_snapshot().browser_identity())?;
+            runtime["capabilityAvailability"] = json!({"advertisedByExtension":obj.get("capabilities"), "usablePermissions":"not_probed", "profileName":"backend_label_only"});
+            obj.insert(runtime_key.into(), runtime);
         } else {
             info = json!({
                 "raw": info,
@@ -1623,5 +1700,313 @@ impl super::Server {
         let tab_id = required_str(&args, "tab_id")?;
         let result = browser::performance_metrics(&self.client_snapshot(), tab_id).await?;
         Ok(vec![Content::text(serde_json::to_string_pretty(&result)?)])
+    }
+}
+
+#[cfg(test)]
+mod rebind_tests {
+    use super::*;
+    use crate::mcp::Server;
+    use crate::protocol;
+    use tokio::io::{duplex, DuplexStream};
+    use tokio::time::timeout;
+
+    const WAIT: Duration = Duration::from_secs(2);
+
+    fn pair() -> (Client, DuplexStream) {
+        let (client, peer) = duplex(64 * 1024);
+        (Client::from_stream(client).unwrap(), peer)
+    }
+
+    async fn request(peer: &mut DuplexStream) -> Value {
+        let bytes = timeout(WAIT, protocol::decode_frame(peer))
+            .await
+            .expect("request timeout")
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    async fn reply(peer: &mut DuplexStream, request: &Value, result: Value) {
+        timeout(
+            WAIT,
+            protocol::encode_frame(peer, &json!({"id":request["id"],"result":result})),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
+    async fn info(peer: &mut DuplexStream, id: &str) {
+        let req = request(peer).await;
+        assert_eq!(req["method"], "getInfo");
+        reply(
+            peer,
+            &req,
+            json!({"type":"extension","family":"edge","metadata":{"extensionInstanceId":id}}),
+        )
+        .await;
+    }
+
+    async fn own_tab(client: &Client, peer: &mut DuplexStream) {
+        let client = client.clone();
+        let task = tokio::spawn(async move { client.send_request("createTab", None).await });
+        let req = request(peer).await;
+        reply(peer, &req, json!({"id":42})).await;
+        timeout(WAIT, task).await.unwrap().unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn same_instance_bind_preserves_owned_turn_without_cleanup() {
+        let (old, mut old_peer) = pair();
+        own_tab(&old, &mut old_peer).await;
+        let ids = old.session_ids().await;
+        let server = Server::new(old.clone());
+        let (replacement, mut new_peer) = pair();
+        let task =
+            tokio::spawn(async move { server.bind_verified_client(replacement, true).await });
+        info(&mut new_peer, "same").await;
+        info(&mut old_peer, "same").await;
+        let response = timeout(WAIT, task).await.unwrap().unwrap().unwrap();
+        assert!(serde_json::to_string(&response)
+            .unwrap()
+            .contains("already_bound"));
+        assert_eq!(ids, old.session_ids().await);
+        assert!(old.has_live_connection().await);
+        assert!(timeout(
+            Duration::from_millis(40),
+            protocol::decode_frame(&mut old_peer)
+        )
+        .await
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn owned_tabs_require_explicit_cleanup_and_failed_bind_preserves_client() {
+        let (old, mut old_peer) = pair();
+        let server = Server::new(old.clone());
+        let cloned = server.clone();
+        let (replacement, mut new_peer) = pair();
+        let task =
+            tokio::spawn(async move { cloned.bind_verified_client(replacement, false).await });
+        info(&mut new_peer, "new").await;
+        info(&mut old_peer, "old").await;
+        let req = request(&mut old_peer).await;
+        assert_eq!(req["method"], "getTabs");
+        reply(&mut old_peer, &req, json!([{"id":42}])).await;
+        let error = timeout(WAIT, task).await.unwrap().unwrap().unwrap_err();
+        assert!(error.to_string().contains("still owns"));
+        assert_eq!(
+            server.client_snapshot().session_ids().await,
+            old.session_ids().await
+        );
+        assert!(old.has_live_connection().await);
+        assert!(timeout(
+            Duration::from_millis(40),
+            protocol::decode_frame(&mut old_peer)
+        )
+        .await
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn unconfirmed_cleanup_keeps_binding_and_turn_identity() {
+        let (old, mut old_peer) = pair();
+        let ids = old.session_ids().await;
+        let server = Server::new(old.clone());
+        let cloned = server.clone();
+        let (replacement, mut new_peer) = pair();
+        let task =
+            tokio::spawn(async move { cloned.bind_verified_client(replacement, true).await });
+        info(&mut new_peer, "new").await;
+        info(&mut old_peer, "old").await;
+        let req = request(&mut old_peer).await;
+        reply(&mut old_peer, &req, json!([{"id":42}])).await;
+        let req = request(&mut old_peer).await;
+        assert_eq!(req["method"], "turnEnded");
+        timeout(
+            WAIT,
+            protocol::encode_frame(
+                &mut old_peer,
+                &json!({"id":req["id"],"error":{"code":-32000,"message":"cleanup rejected"}}),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(timeout(WAIT, task).await.unwrap().unwrap().is_err());
+        assert_eq!(server.client_snapshot().session_ids().await, ids);
+        assert!(old.has_unresolved_turn());
+        assert!(old.has_live_connection().await);
+    }
+
+    #[tokio::test]
+    async fn disconnected_mutated_turn_cannot_be_discarded() {
+        let (old, mut old_peer) = pair();
+        own_tab(&old, &mut old_peer).await;
+        old.shutdown().await;
+        let ids = old.session_ids().await;
+        let server = Server::new(old);
+        let cloned = server.clone();
+        let (replacement, mut new_peer) = pair();
+        let task =
+            tokio::spawn(async move { cloned.bind_verified_client(replacement, true).await });
+        info(&mut new_peer, "new").await;
+        let error = timeout(WAIT, task).await.unwrap().unwrap().unwrap_err();
+        assert!(error.to_string().contains("ownership is unresolved"));
+        assert_eq!(server.client_snapshot().session_ids().await, ids);
+    }
+
+    #[tokio::test]
+    async fn initial_lazy_binding_can_be_replaced_without_dialing_old_endpoint() {
+        let old = Client::lazy(Some("missing-test-endpoint".into()));
+        let server = Server::new(old);
+        let cloned = server.clone();
+        let (replacement, mut new_peer) = pair();
+        let new_ids = replacement.session_ids().await;
+        let task =
+            tokio::spawn(async move { cloned.bind_verified_client(replacement, false).await });
+        info(&mut new_peer, "new").await;
+        assert!(timeout(WAIT, task).await.unwrap().unwrap().is_ok());
+        assert_eq!(server.client_snapshot().session_ids().await, new_ids);
+    }
+
+    #[tokio::test]
+    async fn failed_replacement_is_checked_before_old_cleanup() {
+        let (old, mut old_peer) = pair();
+        let ids = old.session_ids().await;
+        let server = Server::new(old.clone());
+        let (replacement, peer) = pair();
+        replacement.shutdown().await;
+        drop(peer);
+        assert!(
+            timeout(WAIT, server.bind_verified_client(replacement, true))
+                .await
+                .unwrap()
+                .is_err()
+        );
+        assert_eq!(old.session_ids().await, ids);
+        assert!(timeout(
+            Duration::from_millis(40),
+            protocol::decode_frame(&mut old_peer)
+        )
+        .await
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn rebind_waits_for_tools_using_previous_binding() {
+        let server = Server::new(Client::lazy(Some("missing-test-endpoint".into())));
+        let reader = server.binding_lock.read().await;
+        let cloned = server.clone();
+        let (replacement, mut new_peer) = pair();
+        let task =
+            tokio::spawn(async move { cloned.bind_verified_client(replacement, false).await });
+        assert!(timeout(
+            Duration::from_millis(40),
+            protocol::decode_frame(&mut new_peer)
+        )
+        .await
+        .is_err());
+        drop(reader);
+        info(&mut new_peer, "new").await;
+        assert!(timeout(WAIT, task).await.unwrap().unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn finalize_excludes_mutation_until_turn_rotation() {
+        let (client, mut peer) = pair();
+        let server = Server::new(client.clone());
+        let old_ids = client.session_ids().await;
+        let cloned = server.clone();
+        let finalize = tokio::spawn(async move {
+            cloned.handle_jsonrpc_line(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"codex_finalize","arguments":{}}}).to_string()).await
+        });
+        let end = request(&mut peer).await;
+        assert_eq!(end["method"], "turnEnded");
+        let cloned = server.clone();
+        let create = tokio::spawn(async move {
+            cloned.handle_jsonrpc_line(&json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"codex_create_tab","arguments":{}}}).to_string()).await
+        });
+        assert!(
+            timeout(Duration::from_millis(40), protocol::decode_frame(&mut peer))
+                .await
+                .is_err()
+        );
+        reply(&mut peer, &end, json!({})).await;
+        timeout(WAIT, finalize).await.unwrap().unwrap();
+        let mutation = request(&mut peer).await;
+        assert_eq!(mutation["method"], "createTab");
+        assert_ne!(mutation["params"]["turn_id"], old_ids.1);
+        reply(
+            &mut peer,
+            &mutation,
+            json!({"id":42,"title":"","url":"about:blank"}),
+        )
+        .await;
+        timeout(WAIT, create).await.unwrap().unwrap();
+        assert!(client.has_unresolved_turn());
+    }
+
+    #[tokio::test]
+    async fn failed_local_persistence_does_not_block_remote_cleanup() {
+        let (client, mut peer) = pair();
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("missing").join("session.json");
+        client.set_continuation_path(&path);
+        let cloned = client.clone();
+        let end = tokio::spawn(async move { cloned.end_turn().await });
+        let req = request(&mut peer).await;
+        assert_eq!(req["method"], "turnEnded");
+        reply(&mut peer, &req, json!({})).await;
+        assert!(timeout(WAIT, end).await.unwrap().unwrap().unwrap());
+        // Any new ownership is still blocked until recovery state is writable.
+        assert!(client.send_request("createTab", None).await.is_err());
+        assert!(
+            timeout(Duration::from_millis(40), protocol::decode_frame(&mut peer))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_bind_uses_current_binding_after_waiting() {
+        let server = Server::new(Client::lazy(Some("missing-test-endpoint".into())));
+        let (first, mut first_peer) = pair();
+        let first_ids = first.session_ids().await;
+        let (second, mut second_peer) = pair();
+        let cloned = server.clone();
+        let first_task =
+            tokio::spawn(async move { cloned.bind_verified_client(first, false).await });
+        // Hold the first bind in replacement validation while the second queues.
+        let first_info = request(&mut first_peer).await;
+        assert_eq!(first_info["method"], "getInfo");
+        let cloned = server.clone();
+        let second_task =
+            tokio::spawn(async move { cloned.bind_verified_client(second, false).await });
+        assert!(timeout(
+            Duration::from_millis(40),
+            protocol::decode_frame(&mut second_peer)
+        )
+        .await
+        .is_err());
+        reply(
+            &mut first_peer,
+            &first_info,
+            json!({"type":"extension","family":"edge","metadata":{"extensionInstanceId":"first"}}),
+        )
+        .await;
+        assert!(timeout(WAIT, first_task).await.unwrap().unwrap().is_ok());
+        info(&mut second_peer, "second").await;
+        info(&mut first_peer, "first").await;
+        let tabs = request(&mut first_peer).await;
+        assert_eq!(tabs["method"], "getTabs");
+        reply(&mut first_peer, &tabs, json!([{"id":42}])).await;
+        let error = timeout(WAIT, second_task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("still owns"));
+        assert_eq!(server.client_snapshot().session_ids().await, first_ids);
     }
 }

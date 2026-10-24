@@ -15,65 +15,11 @@ use std::path::Path;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
 
 const MAX_COMMAND_BYTES: usize = 1024 * 1024;
-const SESSION_FILE_VERSION: u32 = 1;
+pub use crate::session::{clear_session, load_session, save_session};
 
 /// Tools that create or claim a tab. A tab is bound to the process session that
 /// created it, so a one-shot `call` without cleanup leaves it unowned.
 const TAB_OWNING_TOOLS: &[&str] = &["codex_create_tab", "codex_claim_tab"];
-#[derive(Debug, Deserialize, serde::Serialize)]
-struct SessionFile {
-    version: u32,
-    session_id: String,
-    turn_id: String,
-}
-
-/// Read persisted session identifiers. A missing or malformed file is treated as
-/// "no session": the shell starts a fresh one instead of failing the command.
-pub fn load_session(path: &Path) -> Option<(String, String)> {
-    let text = std::fs::read_to_string(path).ok()?;
-    let parsed: SessionFile = serde_json::from_str(&text).ok()?;
-    if parsed.version != SESSION_FILE_VERSION
-        || parsed.session_id.is_empty()
-        || parsed.turn_id.is_empty()
-    {
-        return None;
-    }
-    Some((parsed.session_id, parsed.turn_id))
-}
-
-/// Persist the active session so the next process can continue the same browser
-/// turn. Written through a temporary file and renamed to avoid a partial file.
-pub fn save_session(path: &Path, session_id: &str, turn_id: &str) -> anyhow::Result<()> {
-    let payload = serde_json::to_vec(&SessionFile {
-        version: SESSION_FILE_VERSION,
-        session_id: session_id.to_string(),
-        turn_id: turn_id.to_string(),
-    })?;
-    // A unique sibling avoids two bridge processes sharing one temporary file.
-    // Rename replaces the destination on both Windows and Unix without exposing
-    // a partially written payload.
-    let temporary = path.with_extension(format!(
-        "tmp-{}-{}",
-        std::process::id(),
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::write(&temporary, payload)?;
-    if let Err(err) = std::fs::rename(&temporary, path) {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(err.into());
-    }
-    Ok(())
-}
-
-pub fn clear_session(path: &Path) -> anyhow::Result<()> {
-    // The session ended; a stale file would attach the next call to a closed turn.
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err)
-            .with_context(|| format!("could not remove browser session file {}", path.display())),
-    }
-}
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -253,11 +199,15 @@ async fn persist_session(
     }
     // A command rejected before dialing must not create a session file for a
     // turn that never existed. An existing file is left untouched in that case.
-    if !server.client_snapshot().has_live_connection().await {
+    let client = server.client_snapshot();
+    if !client.has_live_connection().await && !client.has_unresolved_turn() {
         return Ok(());
     }
-    let (session_id, turn_id) = server.client_snapshot().session_ids().await;
-    save_session(path, &session_id, &turn_id)
+    let browser = client
+        .browser_identity()
+        .context("cannot persist a turn without verified browser identity")?;
+    let (session_id, turn_id) = client.session_ids().await;
+    save_session(path, browser, &session_id, &turn_id)
         .with_context(|| format!("could not persist browser session file {}", path.display()))?;
     Ok(())
 }
@@ -404,6 +354,7 @@ pub async fn run_cli(client: Client) -> anyhow::Result<()> {
     println!("          snapshot <id>, screenshot <id>, info, ping, try <method>, quit");
 
     let stdin = io::stdin();
+    let mut user_tab_snapshots = Vec::<browser::UserTab>::new();
     loop {
         print!("> ");
         io::stdout().flush()?;
@@ -464,21 +415,33 @@ pub async fn run_cli(client: Client) -> anyhow::Result<()> {
             }
             "user-tabs" => match browser::list_user_tabs(&client).await {
                 Ok(tabs) => {
-                    for tab in tabs {
+                    for tab in &tabs {
                         println!(
                             "  [{}] {} - {} (group: {})",
                             tab.id, tab.title, tab.url, tab.tab_group
                         );
                     }
+                    user_tab_snapshots = tabs;
                 }
-                Err(err) => println!("Error: {err}"),
+                Err(err) => {
+                    user_tab_snapshots.clear();
+                    println!("Error: {err}");
+                }
             },
             "claim" => {
                 if args.len() < 2 {
                     println!("Usage: claim <tab_id>");
                     continue;
                 }
-                match browser::claim_user_tab(&client, &args[1]).await {
+                let Some(snapshot) = user_tab_snapshots.iter().find(|tab| tab.id == args[1]) else {
+                    println!("Run user-tabs first and choose a tab from that snapshot");
+                    continue;
+                };
+                let result =
+                    browser::claim_user_tab(&client, &snapshot.id, &snapshot.title, &snapshot.url)
+                        .await;
+                user_tab_snapshots.clear();
+                match result {
                     Ok(tab) => println!("Claimed: [{}] {} - {}", tab.id, tab.title, tab.url),
                     Err(err) => println!("Error: {err}"),
                 }
@@ -735,7 +698,16 @@ mod tests {
         let mut output = Vec::new();
         let dir = tempfile::tempdir().unwrap();
         let session_file = dir.path().join("session.json");
-        save_session(&session_file, "session-before", "turn-before").unwrap();
+        save_session(
+            &session_file,
+            crate::session::BrowserIdentity {
+                family: "chrome".into(),
+                instance_id: "test-instance".into(),
+            },
+            "session-before",
+            "turn-before",
+        )
+        .unwrap();
         timeout(
             Duration::from_secs(2),
             run_command_with_io(
@@ -764,53 +736,5 @@ mod tests {
         assert_eq!(results[0]["content"][0]["text"], "Session named: first");
         assert_eq!(results[1]["content"][0]["text"], "Session named: second");
         assert!(!session_file.exists());
-    }
-}
-
-#[cfg(test)]
-mod session_file_tests {
-    use super::*;
-
-    #[test]
-    fn session_file_roundtrips() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("session.json");
-        assert!(load_session(&path).is_none());
-
-        save_session(&path, "session-1", "turn-1").unwrap();
-        assert_eq!(
-            load_session(&path),
-            Some(("session-1".to_string(), "turn-1".to_string()))
-        );
-
-        save_session(&path, "session-2", "turn-2").unwrap();
-        assert_eq!(
-            load_session(&path),
-            Some(("session-2".to_string(), "turn-2".to_string()))
-        );
-        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .filter(|name| name.to_string_lossy().contains(".tmp-"))
-            .collect();
-        assert!(leftovers.is_empty(), "temporary files left: {leftovers:?}");
-
-        clear_session(&path).unwrap();
-        assert!(load_session(&path).is_none());
-    }
-
-    #[test]
-    fn malformed_or_foreign_session_file_is_ignored() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("session.json");
-
-        std::fs::write(&path, b"not json").unwrap();
-        assert!(load_session(&path).is_none());
-
-        std::fs::write(&path, br#"{"version":99,"session_id":"s","turn_id":"t"}"#).unwrap();
-        assert!(load_session(&path).is_none());
-
-        std::fs::write(&path, br#"{"version":1,"session_id":"","turn_id":"t"}"#).unwrap();
-        assert!(load_session(&path).is_none());
     }
 }

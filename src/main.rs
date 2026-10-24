@@ -1,7 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
-use codex_browser_bridge::registry::BrowserSelector;
-use codex_browser_bridge::{cli, client, config, discovery, doctor, logging, mcp};
+use codex_browser_bridge::{cli, client, config, discovery, doctor, logging, mcp, session};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -49,7 +48,8 @@ struct Args {
     ///
     /// Each process otherwise starts a fresh session, so a tab created by one
     /// `call` cannot be used by the next. Commands write the active identifiers
-    /// here and read them on the next invocation; `--finalize` deletes the file.
+    /// here with exact browser identity, and lock the file for each invocation;
+    /// `--finalize` deletes it. Legacy/corrupt tokens are rejected, not reset.
     /// MCP stdio owns its turn for the process lifetime and does not use this.
     #[arg(long, global = true)]
     session_file: Option<std::path::PathBuf>,
@@ -96,20 +96,28 @@ async fn main() -> anyhow::Result<()> {
             "--session-file, --finalize, and --keep-turn require a call or batch command"
         );
     }
-    let config = config::Config::load();
+    let config = config::Config::load()?;
+    let environment = config::Config::from_env()?;
+    if let Some(limit) = args.max_text_bytes {
+        config::validate_content_bytes("--max-text-bytes", limit)?;
+    }
+    if let Some(limit) = args.max_image_bytes {
+        config::validate_content_bytes("--max-image-bytes", limit)?;
+    }
+    if args
+        .upload_base
+        .as_ref()
+        .is_some_and(|base| base.trim().is_empty())
+    {
+        anyhow::bail!("--upload-base must not be empty");
+    }
     // Documented precedence is CLI flags > environment > config file > default.
-    let browser_family = args
-        .browser_family
-        .clone()
-        .or_else(|| env_string("CODEX_BRIDGE_BROWSER_FAMILY"))
-        .or_else(|| config.browser_family.clone());
-    let browser_instance = args
-        .browser_instance
-        .clone()
-        .or_else(|| env_string("CODEX_BRIDGE_BROWSER_INSTANCE"))
-        .or_else(|| config.browser_instance.clone());
-    let selector = BrowserSelector::new(browser_family, browser_instance);
-    selector.validate()?;
+    let browser_selection = config.browser_selection(
+        args.browser_family.clone(),
+        args.browser_instance.clone(),
+        &environment,
+    )?;
+    let selector = browser_selection.selector.clone();
     if args.pipe.is_some() && !selector.is_empty() {
         anyhow::bail!("--pipe cannot be combined with a browser family or instance selector");
     }
@@ -125,44 +133,66 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&pipes)?);
         }
         Mode::Mcp => {
-            let session_ids = args.session_file.as_deref().and_then(cli::load_session);
-            let client = client::Client::lazy_with_selector_and_ids(
-                args.pipe.clone(),
-                selector,
-                session_ids,
-            );
+            let session_lock = args
+                .session_file
+                .as_deref()
+                .map(session::SessionLock::acquire)
+                .transpose()?;
+            let session_path = session_lock.as_ref().map(|lock| lock.path.as_path());
+            let saved = session_path
+                .map(session::load_session)
+                .transpose()?
+                .flatten();
+            let selector = match &saved {
+                Some(saved) => saved.browser.selector(&selector)?,
+                None => selector,
+            };
+            let session_ids = saved
+                .as_ref()
+                .map(|saved| (saved.session_id.clone(), saved.turn_id.clone()));
+            let client = match (&args.pipe, session_path) {
+                (Some(pipe), Some(_)) => client::Client::lazy_with_verified_endpoint_and_ids(
+                    pipe.clone(),
+                    selector,
+                    session_ids,
+                ),
+                _ => client::Client::lazy_with_selector_and_ids(
+                    args.pipe.clone(),
+                    selector,
+                    session_ids,
+                ),
+            };
+            if let Some(path) = session_path {
+                client.set_continuation_path(path);
+            }
             if let Some(base) = args
                 .upload_base
                 .clone()
-                .or_else(|| env_string("CODEX_BRIDGE_UPLOAD_BASE"))
+                .or_else(|| environment.upload_base.clone())
                 .or_else(|| config.upload_base.clone())
             {
                 std::env::set_var("CODEX_BRIDGE_UPLOAD_BASE", base);
             }
             if let Some(max_text_bytes) = args
                 .max_text_bytes
-                .or_else(|| env_usize("CODEX_BRIDGE_MAX_TEXT_BYTES"))
+                .or(environment.max_text_bytes)
                 .or(config.max_text_bytes)
             {
                 std::env::set_var("CODEX_BRIDGE_MAX_TEXT_BYTES", max_text_bytes.to_string());
             }
             if let Some(max_image_bytes) = args
                 .max_image_bytes
-                .or_else(|| env_usize("CODEX_BRIDGE_MAX_IMAGE_BYTES"))
+                .or(environment.max_image_bytes)
                 .or(config.max_image_bytes)
             {
                 std::env::set_var("CODEX_BRIDGE_MAX_IMAGE_BYTES", max_image_bytes.to_string());
             }
-            let profile = args.profile.or_else(profile_from_env).or_else(|| {
-                match config.profile.as_deref() {
+            let profile = args.profile.or_else(|| {
+                match environment.profile.as_deref().or(config.profile.as_deref()) {
                     Some("basic") => Some(Profile::Basic),
                     Some("network") => Some(Profile::Network),
                     Some("full") => Some(Profile::Full),
-                    Some(other) => {
-                        tracing::warn!(profile = other, "unknown profile in config file, ignoring");
-                        None
-                    }
-                    None => None,
+                    _ => None, // Config has already validated and normalized these values.
                 }
             });
             let server = match profile {
@@ -180,6 +210,7 @@ async fn main() -> anyhow::Result<()> {
                 ),
                 None => mcp::Server::new(client),
             };
+            server.set_browser_selection(browser_selection.clone());
             if let Some(command) = args.command {
                 let finalize = !args.keep_turn && (args.finalize || args.session_file.is_none());
                 run_until_interrupted(
@@ -188,11 +219,11 @@ async fn main() -> anyhow::Result<()> {
                         &server,
                         command,
                         args.max_output_bytes,
-                        args.session_file.as_deref(),
+                        session_path,
                         finalize,
                     ),
                     finalize,
-                    args.session_file.as_deref(),
+                    session_path,
                 )
                 .await?;
             } else {
@@ -223,33 +254,18 @@ async fn main() -> anyhow::Result<()> {
             result?;
         }
         Mode::Doctor => {
-            let result = doctor::run_diagnostics().await;
+            let mut result = serde_json::to_value(doctor::run_diagnostics().await)?;
+            result["browserSelection"] = serde_json::to_value(&browser_selection)?;
+            result["transportMode"] = serde_json::json!(if args.pipe.is_some() {
+                "explicit_endpoint"
+            } else {
+                "discovered_instance"
+            });
             println!("{}", serde_json::to_string_pretty(&result)?);
         }
     }
 
     Ok(())
-}
-
-fn env_string(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|value| !value.is_empty())
-}
-
-fn env_usize(name: &str) -> Option<usize> {
-    env_string(name).and_then(|value| value.parse().ok())
-}
-
-fn profile_from_env() -> Option<Profile> {
-    let value = env_string("CODEX_BRIDGE_PROFILE")?;
-    match value.to_ascii_lowercase().as_str() {
-        "basic" => Some(Profile::Basic),
-        "network" => Some(Profile::Network),
-        "full" => Some(Profile::Full),
-        other => {
-            tracing::warn!(profile = other, "unknown CODEX_BRIDGE_PROFILE, ignoring");
-            None
-        }
-    }
 }
 
 /// Run a command until it finishes or the process is asked to stop.

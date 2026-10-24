@@ -169,6 +169,12 @@ struct ClientInner {
     pending: Mutex<PendingMap>,
     next_id: AtomicU64,
     session: tokio::sync::RwLock<SessionTurn>,
+    browser_identity: StdMutex<Option<crate::session::BrowserIdentity>>,
+    continuation_path: StdMutex<Option<std::path::PathBuf>>,
+    persisted_continuation: StdMutex<Option<(crate::session::BrowserIdentity, String, String)>>,
+    /// Ownership may survive a lost pipe or an unacknowledged mutation. Only
+    /// confirmed turnEnded clears this, never connection health alone.
+    turn_may_own_tabs: AtomicBool,
     tab_locks: Mutex<HashMap<i64, Arc<Mutex<()>>>>,
     /// Per-tab sticky attach cache: tabs known to have an active CDP debugger session.
     /// Avoids detach+attach round-trips for repeated CDP calls on the same tab.
@@ -231,8 +237,10 @@ impl Client {
         let mut stream = factory().await?;
         let session_id = Uuid::new_v4().to_string();
         let turn_id = Uuid::new_v4().to_string();
-        verify_pipe_stream(&mut stream, &session_id, &turn_id).await?;
-        Self::from_stream_inner_with_ids(stream, factory, session_id, turn_id)
+        let info = verify_pipe_stream(&mut stream, &session_id, &turn_id).await?;
+        let client = Self::from_stream_inner_with_ids(stream, factory, session_id, turn_id)?;
+        client.record_browser_identity(info.get())?;
+        Ok(client)
     }
 
     pub fn lazy(pipe_name: Option<String>) -> Self {
@@ -258,11 +266,126 @@ impl Client {
         selector: BrowserSelector,
         ids: Option<(String, String)>,
     ) -> Self {
+        let identity = ids
+            .as_ref()
+            .and_then(|_| match (&selector.family, &selector.instance_id) {
+                (Some(family), Some(instance_id)) => Some(crate::session::BrowserIdentity {
+                    family: family.clone(),
+                    instance_id: instance_id.clone(),
+                }),
+                _ => None,
+            });
         let factory = selected_connection_factory(pipe_name, selector);
-        Self::from_lazy_inner_with_ids(factory, ids)
+        let client = Self::from_lazy_inner_with_ids(factory, ids);
+        *client.inner.browser_identity.lock().unwrap() = identity;
+        client
+    }
+
+    /// A persisted continuation on an explicit endpoint verifies identity with
+    /// throwaway IDs before sending the saved session/turn to that endpoint.
+    pub fn lazy_with_verified_endpoint_and_ids(
+        pipe_name: String,
+        selector: BrowserSelector,
+        ids: Option<(String, String)>,
+    ) -> Self {
+        let identity = match (&selector.family, &selector.instance_id) {
+            (Some(family), Some(instance_id)) => Some(crate::session::BrowserIdentity {
+                family: family.clone(),
+                instance_id: instance_id.clone(),
+            }),
+            _ => None,
+        };
+        let endpoint_identity = Arc::new(Mutex::new(identity.clone()));
+        let factory: ConnectionFactory = Arc::new(move || {
+            let pipe_name = pipe_name.clone();
+            let endpoint_identity = endpoint_identity.clone();
+            Box::pin(async move {
+                let mut stream = dial_transport(&discovery::pipe_path(&pipe_name)).await?;
+                let info = verify_pipe_stream(
+                    &mut stream,
+                    &Uuid::new_v4().to_string(),
+                    &Uuid::new_v4().to_string(),
+                )
+                .await?;
+                let info: Value = serde_json::from_str(info.get()).map_err(|_| {
+                    BridgeError::Protocol("invalid endpoint identity response".into())
+                })?;
+                let actual = crate::session::BrowserIdentity::from_info(&info).map_err(|_| BridgeError::User("session continuation requires extensionInstanceId; no saved IDs or mutation were sent".into()))?;
+                let mut pinned = endpoint_identity.lock().await;
+                if pinned.as_ref().is_some_and(|expected| *expected != actual) {
+                    return Err(BridgeError::Protocol(
+                        "endpoint browser identity changed; saved IDs were not sent".into(),
+                    ));
+                }
+                *pinned = Some(actual);
+                Ok(stream)
+            })
+        });
+        let client = Self::from_lazy_inner_with_ids(factory, ids);
+        *client.inner.browser_identity.lock().unwrap() = identity;
+        client
+    }
+
+    pub fn browser_identity(&self) -> Option<crate::session::BrowserIdentity> {
+        self.inner.browser_identity.lock().unwrap().clone()
+    }
+
+    pub fn set_continuation_path(&self, path: &std::path::Path) {
+        *self.inner.continuation_path.lock().unwrap() = Some(path.into());
+        *self.inner.persisted_continuation.lock().unwrap() = None;
+    }
+
+    pub(crate) fn continuation_path(&self) -> Option<std::path::PathBuf> {
+        self.inner.continuation_path.lock().unwrap().clone()
+    }
+
+    pub(crate) async fn persist_continuation(&self) -> Result<()> {
+        if let Some(path) = self.continuation_path() {
+            let identity = self.browser_identity().ok_or_else(|| {
+                BridgeError::User(
+                    "continuation requires extensionInstanceId; no mutation was sent".into(),
+                )
+            })?;
+            let (session_id, turn_id) = self.session_ids().await;
+            let key = (identity.clone(), session_id.clone(), turn_id.clone());
+            let mut persisted = self.inner.persisted_continuation.lock().unwrap();
+            if persisted.as_ref() == Some(&key) {
+                return Ok(());
+            }
+            crate::session::save_session(&path, identity, &session_id, &turn_id).map_err(|_| {
+                BridgeError::User("could not persist browser session file before operation".into())
+            })?;
+            *persisted = Some(key);
+        }
+        Ok(())
+    }
+
+    fn record_browser_identity(&self, raw: &str) -> Result<()> {
+        let info: Value = serde_json::from_str(raw)
+            .map_err(|_| BridgeError::Protocol("invalid browser identity response".into()))?;
+        let Ok(identity) = crate::session::BrowserIdentity::from_info(&info) else {
+            if self.browser_identity().is_some() {
+                return Err(BridgeError::Protocol(
+                    "connected browser omitted the pinned identity".into(),
+                ));
+            }
+            return Ok(()); // Explicit legacy endpoint; not eligible for continuation.
+        };
+        let mut pinned = self.inner.browser_identity.lock().unwrap();
+        if pinned
+            .as_ref()
+            .is_some_and(|expected| *expected != identity)
+        {
+            return Err(BridgeError::Protocol(
+                "connected browser identity differs from the saved instance".into(),
+            ));
+        }
+        *pinned = Some(identity);
+        Ok(())
     }
 
     fn from_lazy_inner_with_ids(factory: ConnectionFactory, ids: Option<(String, String)>) -> Self {
+        let resumed_turn = ids.is_some();
         let (session_id, turn_id) =
             ids.unwrap_or_else(|| (Uuid::new_v4().to_string(), Uuid::new_v4().to_string()));
         Self {
@@ -274,6 +397,10 @@ impl Client {
                     session_id,
                     turn_id,
                 }),
+                browser_identity: StdMutex::new(None),
+                continuation_path: StdMutex::new(None),
+                persisted_continuation: StdMutex::new(None),
+                turn_may_own_tabs: AtomicBool::new(resumed_turn),
                 tab_locks: Mutex::new(HashMap::new()),
                 attached_tabs: Mutex::new(HashMap::new()),
                 event_subs: Mutex::new(Vec::new()),
@@ -316,6 +443,10 @@ impl Client {
                     session_id,
                     turn_id,
                 }),
+                browser_identity: StdMutex::new(None),
+                continuation_path: StdMutex::new(None),
+                persisted_continuation: StdMutex::new(None),
+                turn_may_own_tabs: AtomicBool::new(false),
                 tab_locks: Mutex::new(HashMap::new()),
                 attached_tabs: Mutex::new(HashMap::new()),
                 event_subs: Mutex::new(Vec::new()),
@@ -405,6 +536,16 @@ impl Client {
             session.turn_id = Uuid::new_v4().to_string();
         }
         self.clear_tab_state().await;
+        self.inner.turn_may_own_tabs.store(false, Ordering::Release);
+        *self.inner.persisted_continuation.lock().unwrap() = None;
+        if let Some(path) = self.continuation_path() {
+            crate::session::clear_session(&path).map_err(|_| {
+                BridgeError::User(
+                    "browser turn cleanup was confirmed, but continuation file removal failed"
+                        .into(),
+                )
+            })?;
+        }
         Ok(true)
     }
 
@@ -469,6 +610,12 @@ impl Client {
         params: Option<Value>,
         request_timeout: Duration,
     ) -> Result<Box<RawValue>> {
+        if !matches!(
+            method,
+            "getInfo" | "getTabs" | "getUserTabs" | "getUserHistory" | "turnEnded" | "detach"
+        ) {
+            self.persist_continuation().await?;
+        }
         let id = self.inner.next_id.fetch_add(1, Ordering::SeqCst);
         let session = self.inner.session.read().await.clone();
         let params = protocol::with_session_params(&session.session_id, &session.turn_id, params);
@@ -479,7 +626,17 @@ impl Client {
         let write_result = {
             let mut writer_guard = self.inner.writer.lock().await;
             match writer_guard.as_mut() {
-                Some(w) => protocol::encode_frame(w, &req).await,
+                Some(w) => {
+                    if !matches!(
+                        method,
+                        "getInfo" | "getTabs" | "getUserTabs" | "getUserHistory"
+                    ) {
+                        // Mark before writing: an interrupted write/ACK can still
+                        // leave browser-side effects. Do not infer no ownership.
+                        self.inner.turn_may_own_tabs.store(true, Ordering::Release);
+                    }
+                    protocol::encode_frame(w, &req).await
+                }
                 None => Err(BridgeError::Connection(
                     "writer is none (connection dropped)".into(),
                 )),
@@ -515,6 +672,13 @@ impl Client {
 
     pub async fn has_live_connection(&self) -> bool {
         self.is_alive() && self.inner.writer.lock().await.is_some()
+    }
+
+    /// Whether this turn may still own browser tabs despite pipe health.
+    /// Resumed turns and requests with possible effects stay unresolved until
+    /// the extension acknowledges turnEnded.
+    pub fn has_unresolved_turn(&self) -> bool {
+        self.inner.turn_may_own_tabs.load(Ordering::Acquire)
     }
 
     /// Current session and turn identifiers, used by the shell to persist one
@@ -596,6 +760,10 @@ impl Client {
                         .await
                     {
                         Ok(info) => {
+                            if let Err(err) = self.record_browser_identity(info.get()) {
+                                last_err = Some(err);
+                                continue;
+                            }
                             tracing::debug!(
                                 attempt = attempt + 1,
                                 info = %truncate(info.get(), 120),
@@ -1582,6 +1750,112 @@ fn endpoint_connection_factory(pipe_name: String) -> ConnectionFactory {
     })
 }
 
+#[cfg(test)]
+mod continuation_tests {
+    use super::*;
+    use tokio::io::duplex;
+
+    #[tokio::test]
+    async fn mutation_persists_before_send_and_rotated_turn_is_saved_once() {
+        let (transport, mut peer) = duplex(64 * 1024);
+        let client = Client::from_stream(transport).unwrap();
+        client.record_browser_identity(r#"{"type":"extension","family":"edge","metadata":{"extensionInstanceId":"instance-a"}}"#).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("session.json");
+        client.set_continuation_path(&path);
+        let worker = client.clone();
+        let mutation = tokio::spawn(async move { worker.send_request("createTab", None).await });
+        let frame = timeout(Duration::from_secs(2), protocol::decode_frame(&mut peer))
+            .await
+            .unwrap()
+            .unwrap();
+        let request: Value = serde_json::from_slice(&frame).unwrap();
+        let saved = crate::session::load_session(&path).unwrap().unwrap();
+        assert_eq!(request["params"]["turn_id"], saved.turn_id);
+        protocol::encode_frame(&mut peer, &json!({"id":request["id"],"result":{"id":42}}))
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(2), mutation)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let worker = client.clone();
+        let cleanup = tokio::spawn(async move { worker.end_turn().await });
+        let frame = timeout(Duration::from_secs(2), protocol::decode_frame(&mut peer))
+            .await
+            .unwrap()
+            .unwrap();
+        let request: Value = serde_json::from_slice(&frame).unwrap();
+        assert_eq!(request["method"], "turnEnded");
+        protocol::encode_frame(&mut peer, &json!({"id":request["id"],"result":{}}))
+            .await
+            .unwrap();
+        assert!(timeout(Duration::from_secs(2), cleanup)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap());
+        assert!(!path.exists());
+        let worker = client.clone();
+        let mutation = tokio::spawn(async move { worker.send_request("createTab", None).await });
+        let frame = timeout(Duration::from_secs(2), protocol::decode_frame(&mut peer))
+            .await
+            .unwrap()
+            .unwrap();
+        let request: Value = serde_json::from_slice(&frame).unwrap();
+        let next = crate::session::load_session(&path).unwrap().unwrap();
+        assert_ne!(next.turn_id, saved.turn_id);
+        assert_eq!(request["params"]["turn_id"], next.turn_id);
+        protocol::encode_frame(&mut peer, &json!({"id":request["id"],"result":{"id":43}}))
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(2), mutation)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn save_failure_prevents_mutation_but_cleanup_and_removal_failure_are_truthful() {
+        let (transport, mut peer) = duplex(64 * 1024);
+        let client = Client::from_stream(transport).unwrap();
+        client.record_browser_identity(r#"{"type":"extension","family":"edge","metadata":{"extensionInstanceId":"instance-a"}}"#).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("directory-not-file");
+        std::fs::create_dir(&path).unwrap();
+        client.set_continuation_path(&path);
+        assert!(client.send_request("createTab", None).await.is_err());
+        assert!(
+            timeout(Duration::from_millis(40), protocol::decode_frame(&mut peer))
+                .await
+                .is_err()
+        );
+        let worker = client.clone();
+        let cleanup = tokio::spawn(async move { worker.end_turn().await });
+        let frame = timeout(Duration::from_secs(2), protocol::decode_frame(&mut peer))
+            .await
+            .unwrap()
+            .unwrap();
+        let request: Value = serde_json::from_slice(&frame).unwrap();
+        assert_eq!(request["method"], "turnEnded");
+        protocol::encode_frame(&mut peer, &json!({"id":request["id"],"result":{}}))
+            .await
+            .unwrap();
+        let error = timeout(Duration::from_secs(2), cleanup)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("cleanup was confirmed"));
+        assert!(!client.has_unresolved_turn());
+        assert!(path.is_dir());
+        client.shutdown().await;
+    }
+}
+
 fn selected_connection_factory(
     pipe_name: Option<String>,
     selector: BrowserSelector,
@@ -1601,7 +1875,7 @@ fn selected_connection_factory(
             }
 
             let inventory = registry::discover_browsers().await?;
-            let browser = registry::select_browser(&inventory.browsers, &selector)?;
+            let browser = registry::select_browser_from_inventory(&inventory, &selector)?;
             let mut stream = dial_transport(&browser.transport.path).await?;
             verify_selected_stream(&mut stream, Some(&browser.family), Some(&browser.id)).await?;
             *pinned = Some(browser.id.clone());
@@ -1620,7 +1894,7 @@ fn selected_connection_factory(
 async fn dial_browser_instance(instance_id: &str) -> Result<PipeStream> {
     let inventory = registry::discover_browsers().await?;
     let selector = BrowserSelector::new(None, Some(instance_id.to_string()));
-    let browser = registry::select_browser(&inventory.browsers, &selector)?;
+    let browser = registry::select_browser_from_inventory(&inventory, &selector)?;
     let mut stream = dial_transport(&browser.transport.path).await?;
     verify_selected_stream(&mut stream, Some(&browser.family), Some(instance_id)).await?;
     Ok(stream)
@@ -1862,6 +2136,53 @@ mod reconnect_tests {
     }
 
     #[tokio::test]
+    async fn selected_transport_identity_is_reverified_after_discovery() {
+        for (family, id, accepted) in [
+            ("EDGE", Some("expected"), true),
+            ("edge", Some("replacement"), false),
+            ("chrome", Some("expected"), false),
+            ("edge", None, false),
+        ] {
+            let (stream, mut peer) = duplex(4096);
+            let task = tokio::spawn(async move {
+                let mut stream: PipeStream = Box::new(stream);
+                verify_selected_stream(&mut stream, Some("edge"), Some("expected")).await
+            });
+            let request = next_request(&mut peer).await;
+            encode_frame(
+                &mut peer,
+                &json!({"id":request["id"], "result": {
+                    "type":"extension", "family":family, "metadata":{"extensionInstanceId":id}
+                }}),
+            )
+            .await
+            .unwrap();
+            let result = timeout(TEST_STATE_TIMEOUT, task).await.unwrap().unwrap();
+            assert_eq!(result.is_ok(), accepted, "family={family}, id={id:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn uncertain_mutation_survives_disconnect_until_confirmed_turn_end() {
+        let (client, mut peer) = test_client(4096).await;
+        assert!(!client.has_unresolved_turn());
+        let cloned = client.clone();
+        let task = tokio::spawn(async move { cloned.send_request("createTab", None).await });
+        let req = next_request(&mut peer).await;
+        assert_eq!(req["method"], "createTab");
+        assert!(client.has_unresolved_turn());
+        drop(peer);
+        assert!(timeout(TEST_STATE_TIMEOUT, task)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err());
+        assert!(client.has_unresolved_turn());
+        assert!(!client.end_turn().await.unwrap());
+        assert!(client.has_unresolved_turn());
+    }
+
+    #[tokio::test]
     async fn normal_roundtrip_tracks_pending() {
         let (client, mut server) = test_client(4096).await;
         let handle = tokio::spawn({
@@ -1956,12 +2277,14 @@ mod reconnect_tests {
 
         let ended = next_request(&mut server).await;
         assert_eq!(ended["method"], "turnEnded");
+        assert!(client.has_unresolved_turn());
         let session_id = ended["params"]["session_id"].as_str().unwrap().to_string();
         let old_turn_id = ended["params"]["turn_id"].as_str().unwrap().to_string();
         encode_frame(&mut server, &json!({"id": ended["id"], "result": {}}))
             .await
             .unwrap();
         task.await.unwrap().unwrap();
+        assert!(!client.has_unresolved_turn());
 
         let next = tokio::spawn({
             let client = client.clone();

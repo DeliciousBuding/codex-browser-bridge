@@ -241,6 +241,11 @@ MCP 客户端配置中也可以设置环境变量：
 
 `CODEX_BRIDGE_UPLOAD_BASE` 会启用 `codex_file_input`，并限制只能上传该目录下的文件。未显式设置时文件上传会被拒绝，因为不同 MCP 客户端启动 server 的工作目录不一定一致。
 
+只有默认配置文件不存在时可以使用默认值。显式文件缺失/不可读、坏 TOML、未知键、
+空 selector、错误工具 profile 和不在 1024..=8388608 字节范围内的响应上限都会报错。
+family 与 instance 按一个整体取 CLI > 环境 > 文件 > 默认值，不混用低优先级旧 instance。
+`--mode doctor` 返回有效 selector 与来源；`basic/network/full` 是工具集合，不是浏览器 profile。
+
 MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScript、CDP 或截图 payload：
 
 - `CODEX_BRIDGE_MAX_TEXT_BYTES` 限制每个 text content，默认 `1048576`。
@@ -281,7 +286,7 @@ browser download；完整边界见 [parity 契约](docs/official-parity.md)。
 | `codex_create_tab` | 创建空白标签 |
 | `codex_close_tab` | 关闭标签 |
 | `codex_user_tabs` | 列出浏览器所有标签（含未认领） |
-| `codex_claim_tab` | 认领已有标签 |
+| `codex_claim_tab` | 用最新枚举的标题/URL 快照认领已有标签 |
 | `codex_mark_tab` | 标记 deliverable 或跨 turn handoff |
 
 ### 导航 `[Navigation]`
@@ -402,6 +407,10 @@ JSONL
 因此不会留下属于已消失进程的未标记标签；`deliverable` 与 `handoff` 标记的标签会保留。
 `batch` 从 stdin 每行读取一个 `{name, arguments}` JSON，共用一个 turn，遇错即停。
 需要在多个独立命令之间共享同一 turn 时用 `--session-file <path>`；
+v2 文件绑定精确扩展实例，每次调用持有操作系统独占锁，并发使用立即失败，父目录必须存在。
+旧版/损坏文件不会当作新会话；保留文件并恢复、结束原 turn 后再新建续接。
+空 `.lock` sidecar 保留以避免删除锁文件的竞态，进程退出会释放锁，不是永久占用。
+同一个浏览器 profile 的 cookies/storage 仍共享。
 `--session-file` 只适用于 `call` / `batch`，MCP stdio 和交互式 CLI 会拒绝；
 `--keep-turn` 则显式保留 turn、不清理。Ctrl-C 与 SIGTERM 只在命令配置为 finalize
 时尝试清理；`--keep-turn` 和未 finalize 的 `--session-file` 会保留 turn。

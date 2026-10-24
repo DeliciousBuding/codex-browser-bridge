@@ -100,6 +100,10 @@ pub struct BrowserInventory {
     pub probed_pipe_count: usize,
     pub unprobed_pipe_count: usize,
     pub failed_pipe_count: usize,
+    /// Identified disconnected app-session routes, not unknown browser instances.
+    pub stale_pipe_count: usize,
+    /// App-private MCP Apps endpoints explicitly outside the extension inventory.
+    pub excluded_pipe_count: usize,
     pub browsers: Vec<BrowserDescriptor>,
 }
 
@@ -174,7 +178,7 @@ pub async fn discover_browsers() -> Result<BrowserInventory> {
         let permits = Arc::clone(&permits);
         tasks.spawn(async move {
             let Ok(_permit) = permits.acquire_owned().await else {
-                return None;
+                return ProbeOutcome::Unknown;
             };
             probe_pipe(pipe).await
         });
@@ -183,6 +187,8 @@ pub async fn discover_browsers() -> Result<BrowserInventory> {
     let mut browsers = Vec::new();
     let mut probed_pipe_count = 0;
     let mut failed_pipe_count = 0;
+    let mut stale_pipe_count = 0;
+    let mut excluded_pipe_count = 0;
 
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -195,12 +201,14 @@ pub async fn discover_browsers() -> Result<BrowserInventory> {
         };
         probed_pipe_count += 1;
         match joined {
-            Ok(Some(browser)) => {
+            Ok(ProbeOutcome::Browser(browser)) => {
                 // Keep duplicate instance ids. select_browser() treats them as
                 // an ambiguity instead of choosing whichever pipe replied first.
-                browsers.push(browser);
+                browsers.push(*browser);
             }
-            Ok(None) | Err(_) => failed_pipe_count += 1,
+            Ok(ProbeOutcome::Stale) => stale_pipe_count += 1,
+            Ok(ProbeOutcome::Excluded) => excluded_pipe_count += 1,
+            Ok(ProbeOutcome::Unknown) | Err(_) => failed_pipe_count += 1,
         }
     }
 
@@ -218,6 +226,8 @@ pub async fn discover_browsers() -> Result<BrowserInventory> {
         probed_pipe_count,
         unprobed_pipe_count,
         failed_pipe_count,
+        stale_pipe_count,
+        excluded_pipe_count,
         browsers,
     })
 }
@@ -283,25 +293,105 @@ pub fn select_browser<'a>(
     }
 }
 
-async fn probe_pipe(pipe: discovery::PipeInfo) -> Option<BrowserDescriptor> {
+/// An implicit choice is safe only after every discovered endpoint has been
+/// identified. A failed probe is unknown, not proof that no browser is there.
+/// Explicit instance selectors can proceed because dialing re-verifies that
+/// identity; they never fall back to another profile.
+pub fn select_browser_from_inventory<'a>(
+    inventory: &'a BrowserInventory,
+    selector: &BrowserSelector,
+) -> Result<&'a BrowserDescriptor> {
+    selector.validate()?;
+    if selector.instance_id.is_none()
+        && (inventory.unprobed_pipe_count != 0
+            || inventory.failed_pipe_count != 0
+            || inventory.probed_pipe_count != inventory.pipe_count)
+    {
+        return Err(BridgeError::User(format!(
+            "browser inventory is incomplete ({} unprobed, {} failed endpoints); retry discovery or select an explicit browser_id",
+            inventory.unprobed_pipe_count, inventory.failed_pipe_count
+        )));
+    }
+    select_browser(&inventory.browsers, selector)
+}
+
+enum ProbeOutcome {
+    Browser(Box<BrowserDescriptor>),
+    Stale,
+    Excluded,
+    Unknown,
+}
+
+fn stale_route_error(error: &BridgeError) -> bool {
+    match error {
+        BridgeError::Rpc { method, message } => {
+            method == "getInfo"
+                && message.starts_with(
+                    "json-rpc error 1: No ChatGPT browser route is available for browser session ",
+                )
+        }
+        BridgeError::PipeIo(error) => matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+        ),
+        _ => false,
+    }
+}
+
+fn excluded_backend_error(error: &BridgeError) -> bool {
+    matches!(error, BridgeError::Rpc { method, message } if method == "getInfo" && message == "json-rpc error 1: MCP Apps browser belongs to another task.")
+}
+
+async fn probe_pipe(pipe: discovery::PipeInfo) -> ProbeOutcome {
     let path = discovery::pipe_path(&pipe.name);
-    let mut stream = dial_transport(&path).await.ok()?;
+    let mut stream = match dial_transport(&path).await {
+        Ok(stream) => stream,
+        Err(error) if stale_route_error(&error) => return ProbeOutcome::Stale,
+        Err(_) => return ProbeOutcome::Unknown,
+    };
     let session_id = Uuid::new_v4().to_string();
     let turn_id = Uuid::new_v4().to_string();
-    let raw = timeout(
+    let raw = match timeout(
         GET_INFO_TIMEOUT,
         verify_pipe_stream(&mut stream, &session_id, &turn_id),
     )
     .await
-    .ok()?
-    .ok()?;
-    let info = serde_json::from_str::<Value>(raw.get()).ok()?;
-    BrowserDescriptor::from_info(&info, pipe).ok()
+    {
+        Ok(Ok(raw)) => raw,
+        Ok(Err(error)) if stale_route_error(&error) => return ProbeOutcome::Stale,
+        Ok(Err(error)) if excluded_backend_error(&error) => return ProbeOutcome::Excluded,
+        _ => return ProbeOutcome::Unknown,
+    };
+    match serde_json::from_str::<Value>(raw.get())
+        .ok()
+        .and_then(|info| BrowserDescriptor::from_info(&info, pipe).ok())
+    {
+        Some(browser) => ProbeOutcome::Browser(Box::new(browser)),
+        None => ProbeOutcome::Unknown,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_no_route_is_stale_but_timeout_and_denial_are_unknown() {
+        assert!(stale_route_error(&BridgeError::Rpc { method:"getInfo".into(), message:"json-rpc error 1: No ChatGPT browser route is available for browser session synthetic".into() }));
+        assert!(!stale_route_error(&BridgeError::Timeout("getInfo".into())));
+        assert!(!stale_route_error(&BridgeError::Rpc {
+            method: "getInfo".into(),
+            message: "json-rpc error 1: Permission denied".into()
+        }));
+        assert!(excluded_backend_error(&BridgeError::Rpc {
+            method: "getInfo".into(),
+            message: "json-rpc error 1: MCP Apps browser belongs to another task.".into()
+        }));
+        assert!(!excluded_backend_error(&BridgeError::Rpc {
+            method: "getInfo".into(),
+            message: "json-rpc error 1: Permission denied".into()
+        }));
+    }
 
     fn browser(id: &str, family: &str) -> BrowserDescriptor {
         BrowserDescriptor {

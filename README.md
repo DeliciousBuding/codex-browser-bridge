@@ -264,6 +264,13 @@ Configuration precedence is:
 
 The default config file is `.codex-browser-bridge.toml` in the current working directory. Set `CODEX_BRIDGE_CONFIG` to use an explicit path; when it is set, the bridge does not fall back to the working-directory config:
 
+Only an absent default file is optional. Explicit unreadable/missing files,
+malformed TOML, unknown keys, empty selectors, invalid tool profiles and response
+limits outside 1024..=8388608 bytes fail before browser work. Family and instance
+form one selector group: the highest-priority source specifying either replaces
+the whole lower-priority group. `--mode doctor` reports the effective selector
+and source. `basic/network/full` select tools, not browser user profiles.
+
 ```toml
 profile = "basic"                # recommended; basic | network | full
 browser_family = "edge"          # chrome | edge | brave | opera | vivaldi
@@ -343,7 +350,7 @@ downloads. See [parity contracts](docs/official-parity.md).
 | `codex_create_tab` | Create a new blank tab |
 | `codex_close_tab` | Close a tab by ID |
 | `codex_user_tabs` | List all browser tabs (including unclaimed) |
-| `codex_claim_tab` | Claim an existing user tab |
+| `codex_claim_tab` | Claim a user tab with expected title/URL from a fresh enumeration |
 | `codex_mark_tab` | Mark an owned tab as a deliverable or later-turn handoff |
 
 ### Navigation `[Navigation]`
@@ -471,7 +478,12 @@ longer exists; `deliverable` and `handoff` marks survive. `batch` reads one
 first error. Use `--session-file <path>` when several separate commands must
 share one turn, or `--keep-turn` to deliberately leave the turn open.
 `--session-file` is valid only with `call`/`batch`; MCP stdio and the interactive
-CLI reject it. Ctrl-C and SIGTERM attempt cleanup only when the command is configured to finalize;
+CLI reject it. The v2 file binds the turn to an exact extension instance and is
+locked for each invocation; concurrent use fails promptly. Its parent must exist.
+Legacy/corrupt files fail rather than create a new session. Preserve such files
+and recover/finalize the original turn before starting a new continuation.
+The empty `.lock` sidecar is retained to prevent inode races; process exit releases
+the OS lock. Same-profile cookies/storage are still shared. Ctrl-C and SIGTERM attempt cleanup only when the command is configured to finalize;
 `--keep-turn` and an unfinalized `--session-file` intentionally leave the turn
 open. CLI JSON results default to 16384 bytes
 each and summarize images without base64; this byte limit is separate from MCP
