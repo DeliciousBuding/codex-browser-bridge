@@ -70,7 +70,7 @@ None of these labels means every parameter or live browser build has passed.
 | `Tab.back`, `close`, `forward`, `goto`, `reload`, `title`, `url` | Native / CDP | Existing operations; navigation readiness/error semantics still differ from Playwright |
 | `Tab.markDeliverable`, `markHandoff` | Native | `markTab`, followed by authoritative `turnEnded`; latest mark wins |
 | `Tab.screenshot` | CDP partial | Viewport/full-page exist; official arbitrary `clip` still needs a bounded crop contract |
-| `Tab.getJsDialog`; dialog `accept`/`dismiss` | CDP partial | Handling exists; querying active dialog, opaque dialog ID and stale-dialog rejection require buffered Page dialog events |
+| `Tab.getJsDialog`; dialog `accept`/`dismiss` | CDP partial | Buffered dialog get and opaque IDs via opt-in observer; supplied IDs reject stale actions. Start before opening; legacy no-ID direct handling remains. |
 | `AlertDialog.type`, `BeforeUnloadDialog.type`, `ConfirmDialog.type`, `PromptDialog.type` | Properties | Discriminants, not functions |
 | `Tab.requestManualHandoff`, `requestUserTakeover` | Not extension baseline | Cloud/manual-control UI is app-private; extension handoff uses a marked user-visible tab |
 
@@ -93,21 +93,21 @@ matching remains normalized, case-insensitive substring matching unless exact.
 | `PlaywrightAPI.frameLocator`; all 7 `PlaywrightFrameLocator` members | CDP partial | Same-origin frame chains work; cross-origin/OOPIF routing, transformed-frame pointer geometry, and navigation epochs remain |
 | `PlaywrightLocator.locator`, `getByRole`, `getByText`, `getByLabel`, `getByPlaceholder`, `getByTestId` | CDP partial | `scopes` provides descendant chains; locator objects and cross-frame chains are not API-compatible |
 | `PlaywrightLocator.filter`, `first`, `last`, `nth` | CDP partial | `has_text`, `has_not_text`, `visible`, and nth exist; nested locator `has`/`hasNot`, regex matchers remain |
-| `PlaywrightLocator.and`, `or`, `all` | Implementable | Declarative intersection/union and stable list-of-locator results need explicit serialization, not JavaScript handle strings |
-| `PlaywrightLocator.count`, `getAttribute`, `isEnabled`, `isVisible` | CDP partial | Count/attribute/boolean reads exist; an absent target currently errors for single reads, while official `isVisible()` can return false |
+| `PlaywrightLocator.and`, `or`, `all` | Bridge-native | Bounded declarative intersection/union and serialized nth specs in current DOM order, not persistent Playwright objects. |
+| `PlaywrightLocator.count`, `getAttribute`, `isEnabled`, `isVisible` | CDP partial | Absent boolean reads return false; strict attribute reads fail. ARIA/name/visibility algorithms remain approximate. |
 | `PlaywrightLocator.innerText`, `textContent`, `allTextContents` | CDP partial | Rendered `inner_text`, raw `text_content` and `all_text_contents` are distinct; existing `text`/`all_text` are rendered-text aliases |
-| `PlaywrightLocator.click`, `dblclick` | CDP partial | Scroll, viewport clipping, shadow/frame hit tests, left/middle/right button and Alt/Control/Meta/Shift modifiers use trusted CDP dispatch; full actionability auto-wait, force and trial remain |
+| `PlaywrightLocator.click`, `dblclick` | CDP partial | Trusted pointer with bounded actionability/stability and force/trial; same-origin geometry only, not full Playwright frames. |
 | `PlaywrightLocator.fill` | CDP partial | Uses native input/textarea setters for controlled inputs, rejects hidden/disabled/readonly targets, emits input/change; not a complete browser editing algorithm |
-| `PlaywrightLocator.check`, `uncheck`, `setChecked` | CDP partial | `set_checked` uses native DOM click and verifies state instead of assigning `checked`; it is not a trusted CDP pointer event, and framework transitions may be asynchronous |
-| `PlaywrightLocator.selectOption` | CDP partial | Existing string value selection; descriptor `{value,label,index}`, multiple selection, missing-option failure and auto-wait remain |
-| `PlaywrightLocator.press`, `type`, `pressSequentially` | CDP partial / implementable | Focus exists; correct keyboard chords, character events and append semantics belong in the shared input dispatcher |
+| `PlaywrightLocator.check`, `uncheck`, `setChecked` | CDP partial | One trusted click and same-target async postcondition; replacement/detach fails without replay. |
+| `PlaywrightLocator.selectOption` | CDP partial | Exact value/label/index descriptors, multiple and missing-option wait; all descriptors validate before mutation. |
+| `PlaywrightLocator.press`, `type`, `pressSequentially` | CDP partial / implementable | Shared chord dispatcher and append semantics; Unicode insertText is not physical-key parity. |
 | `PlaywrightLocator.waitFor` | CDP partial | Attached/detached/visible/hidden probes respect nth/strict; visibility approximations and fixed polling differ from official auto-wait |
 | `PlaywrightLocator.evaluate`, `evaluateAll`; `PlaywrightAPI.evaluate` | Different contract | Current `codex_evaluate` runs unrestricted page JS and has no locator-scoped/read-only mode; it is not an official Playwright evaluate implementation |
 | `PlaywrightAPI.domSnapshot` | Implementable | Existing raw AX tree and depth-limited visible DOM are not the official iframe-expanded DOM text snapshot |
 | `PlaywrightAPI.elementInfo`, `elementScreenshot` | Implementable | CDP DOM hit testing, backend IDs, selector suggestions and annotated screenshot bounds |
-| `PlaywrightAPI.expectNavigation`, `waitForLoadState`, `waitForURL` | CDP partial | Existing readyState/URL polling; event-before-action, URL matching, commit/domcontentloaded/load/networkidle and redirects need shared navigation tracking. `Page.navigate` transport success is not navigation success: `errorText` and `chrome-error://` pages are surfaced as failures |
+| `PlaywrightAPI.expectNavigation`, `waitForLoadState`, `waitForURL` | CDP partial | Observer arms before action; loader-bound commit/domcontentloaded/load, redirects and exact URL. networkidle/full URL matcher remain. |
 | `PlaywrightAPI.waitForTimeout` | Client utility | Bounded delay, not browser capability coverage |
-| `PlaywrightAPI.waitForEvent`; `PlaywrightDownload.path`; `PlaywrightFileChooser.isMultiple`, `setFiles` | Implementable, transport-dependent | File chooser events/interception and DOM file input are available CDP paths; download completion/path needs extension support or a verified browser-level download path |
+| `PlaywrightAPI.waitForEvent`; `PlaywrightDownload.path`; `PlaywrightFileChooser.isMultiple`, `setFiles` | CDP partial / transport-dependent | Explicit chooser IDs/multiple and bounded colocated upload. Remote paths/OOPIF/completed downloads unsupported. |
 | `PlaywrightLocator.downloadMedia` | Implementable, transport-dependent | Resolve a current observed media/link target, apply download permissions and return the browser-visible saved path; a generic host HTTP fetch is not equivalent |
 
 The locator members share one resolver. Parameter coverage, frame scope,
@@ -124,7 +124,7 @@ implementation of an action does not establish full locator parity.
 | `DomCUAAPI.get_visible_dom`, `scroll`, `downloadMedia` | Implementable | Current visible DOM text has no actionable refs; add document/frame-bound refs, node-targeted scroll and media resolution |
 | `AXAPI.click`, `drag`, `get`, `write`, `paste`, `performSecondaryAction`, `pressKey`, `scroll`, `selectText`, `setValue`, `typeText` | Not extension baseline namespace | `Tab.ax` is excluded by default for extension. CDP AX snapshot/find/click are useful separate features; they do not reproduce AX index/diff state, secondary actions or the official model-display `write()` surface |
 | `TabClipboardAPI.read`, `readText`, `write`, `writeText` | Bridge-native partial | `codex_clipboard` stores bounded session-virtual MIME items and integrates Ctrl/Cmd+V paste. It never reads the OS clipboard or invents Ctrl/Cmd+C/X capture |
-| `TabDevAPI.logs` | CDP partial | Existing timed capture misses earlier logs and returns raw params; bounded persistent Runtime/Log event storage can provide rendered message, timestamp, level/filter/limit |
+| `TabDevAPI.logs` | CDP partial | Opt-in persistent Runtime/Log journal with rendered message and cursor; pre-start history incomplete and no full official filter API. |
 
 Keyboard correctness is shared work: `keys: ["Control", "c"]` means a held
 combination, not Control-down/up followed by c-down/up. Copy/cut/paste must use
@@ -140,7 +140,7 @@ silently mixing another profile or document.
 | Browser `viewport.set/reset` | Native | Positive dimensions, explicit temporary override/reset |
 | Browser `visibility.get/set` | Conditional native | Expose unsupported builds explicitly; method presence in official docs does not establish extension acceptance |
 | Browser/tab capability collection `list/get`, capability `documentation` | Implementable local routing | Return only implemented and usable bridge operations; retain backend-advertised metadata separately |
-| Tab `cdp.send/readEvents` | CDP partial | Diagnostic-only send allowlist exists; child target selectors, timeout and bounded sequence/cursor event history remain. Broader raw access requires its own origin/permission contract, not a prefix allowlist |
+| Tab `cdp.send/readEvents` | CDP partial | Diagnostic allowlist and bounded tab cursor journal; child routing and broader raw permission contract unsupported. |
 | Tab `pageAssets.list/bundle` | Bridge-native partial | `codex_page_assets` builds a document-bound inventory, caches bounded content, and atomically writes bundles/manifests through CDP. It is not a native capability passthrough; full official asset taxonomy and browser-visible download semantics remain |
 | Tab `webmcp.fetchTools`; returned tools `description/call` | Bridge-native partial | `codex_webmcp` uses `document.modelContext.getTools/executeTool`, document epochs, descriptor checks and stale-handle rejection for the top same-origin document. Isolated worlds, cross-frame tools and official policy remain |
 | Tab `browserAuth.request` | App-private exact flow | Secure elicitation, credential broker, protected targets and submission authority require host support. A future MCP client integration needs secure forms and must never return secrets to the model |
@@ -155,6 +155,57 @@ WebMCP, page-asset and local export implementations are useful but do not
 inherit those services, policy, file visibility, or UI behavior.
 
 ## Shared implementation priorities
+
+### Current implemented contracts
+
+`codex_observe` starts opt-in, bounded, exact-tab observation before an action.
+Its state includes the frame registry, document/navigation epoch and active
+dialog/chooser IDs. Events and rendered logs use generation/sequence cursors,
+explicit gap/truncation and byte/count limits. Reconnect, retire and turn cleanup
+invalidate cursors. Earlier logs are available only after start (including CDP
+enable replay), not a complete historical browser log. Child-session events are
+raw evidence, not implemented OOPIF routing. Navigation composites arm before
+the action and wait for commit, DOMContentLoaded or load; redirects may change
+the final URL. Exact-URL waiting is a separate optional observer condition.
+
+Locator composition now supports `and`, `or`, `has`, `has_not` and `all` with
+bounded declarative specs. Base predicates union with `or` branches; results are
+deduplicated in current DOM order, and nth applies to the final set. `all` returns
+reevaluated specs, not persistent Playwright objects. Absent visible/enabled
+reads return false. Select descriptors validate every option before changing
+selection. Trusted setChecked clicks once and checks the same element's async
+postcondition. Sequential ASCII alphanumeric/space input uses key events;
+punctuation/Unicode/control text uses insertText without physical-key parity.
+Regex is deliberately restricted: at most 256 bytes, unique imsu flags, one
+quantifier, no grouping/alternation/backreferences/counted repetition; strings,
+traversal and cumulative matching have budgets and fail on exhaustion.
+
+Actionability uses bounded preparation and geometry stability sampling. Trial
+may scroll a target but never dispatches input or fill/select/focus/clipboard
+mutations. Force skips pointer visibility/enabled/hit checks, not invalid box,
+viewport or unsupported frame geometry; setChecked retains editable checks.
+The timeout covers preparation/postcondition; input release finishes in its own
+bounded cleanup window. Full ARIA computation, cross-origin/OOPIF and transformed
+frame input remain unsupported, not completed parity.
+
+Exports and page assets share the controlled file-result layer: explicit existing
+non-root directory, no traversal/symlink/reparse, count/byte/deadline limits,
+staging, atomic no-overwrite publication and failure rollback. Results state
+`path_scope=bridge_host`, `browser_download=false`. Directory race checks are
+best-effort, not a malicious-filesystem sandbox. Unsupported atomic-filesystem
+operations fail; there is no destructive fallback.
+
+`codex_file_chooser` explicitly arms interception, returns document-bound IDs and
+multiple mode, disables interception after capture and consumes the ID after
+upload or abandonment. Upload requires a configured upload root and explicit
+`colocated_browser=true`; 32 files, 10 MiB each and 20 MiB total, with local
+canonical/regular-file checks. Remote browser-host paths, child/OOPIF chooser
+uploads and browser-level completed-download paths remain unsupported. The
+extension's file-access denial is surfaced, never bypassed through raw CDP.
+
+The matrix above retains remaining official boundaries; these contracts close
+its formerly implementable observation/composition/file-safety gaps without
+claiming the whole official interface.
 
 1. Complete the unified locator/input layer: semantic reads, bounded waits,
    native setters, reliable keyboard chords and frame routing. Use the same

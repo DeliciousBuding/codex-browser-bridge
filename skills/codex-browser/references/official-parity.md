@@ -24,6 +24,16 @@ backend; it does not select a different automation implementation.
 
 ## Newly aligned capabilities
 
+- `codex_observe` supplies opt-in persistent logs/events, frames, loader epochs
+  and dialog/chooser IDs; start before actions and preserve its cursor. Gaps
+  and reconnect/stale invalidation are explicit, not full pre-start history.
+- `codex_file_chooser` supports explicit interception and bounded colocated
+  uploads. Remote browser paths/OOPIF/download completion remain unsupported.
+- Locator and/or/has/has_not, limited safe regex, exact select descriptors,
+  trusted checked postconditions and sequential typing share the same resolver.
+  Trial skips input/DOM mutations, but may scroll; force cannot bypass invalid
+  frame geometry. Full ARIA/cross-origin/Playwright semantics remain gaps.
+
 - `codex_browser_history` maps `Browser.history` through `getUserHistory`.
 - `codex_browser_management` maps the official `management` capability:
   `windows`, `tabs`, `tabGroups`, and `bookmarks`; methods that remove or

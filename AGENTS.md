@@ -30,7 +30,7 @@ Claude 插件默认使用 `full` profile，因为 Claude Code 会通过 tool sea
 - `execute_cdp_generic()` 是显式低风险方法 allowlist 的 raw CDP 入口；不要用域名前缀放宽，高风险能力必须走专用受控工具
 
 ### 2. MCP 层（`src/mcp/` 目录）
-- `types.rs`：`ToolHandler` 枚举新增 variant（当前 64 个工具）
+- `types.rs`：`ToolHandler` 枚举新增 variant（当前 66 个工具）
 - `handlers.rs`：`handle_tool_call` 新增 match arm + `handle_*` 方法
 - `schema.rs`：`registered_tools()` 新增工具定义
 - `profiles.rs`：如需加入 profile，更新 `BASIC_TOOLS` / `NETWORK_TOOLS` 数组
@@ -46,12 +46,12 @@ Claude 插件默认使用 `full` profile，因为 Claude Code 会通过 tool sea
 - **Extractor 测试**（`src/mcp/types.rs`）：`required_str`、`required_string_vec` 等
 - **Schema 测试**（`src/mcp/schema.rs`）：验证工具 required 字段、name order、type=object
 - **集成测试**（`tests/browser_api.rs`）：公开 browser/helper 行为与安全边界
-- **Reconnect/mock 测试**（`src/client.rs`，`cfg(not(windows))`）：`tokio::io::duplex()` mock pipe
+- **Reconnect/mock 测试**（`src/client.rs`，`cfg(test)`）：跨平台 `tokio::io::duplex()` mock pipe
 - **Harness 计划**：新的真实/模拟 E2E 应放在 `tests/`，不要使用 `#[path]` 嵌入源码文件
 - Mock pipe / E2E harness 等待必须 bounded：正向 pipe read 和 spawned task join 用明确 timeout，负向“不得发 pipe 请求”断言用短 grace window；live E2E 的 doctor preflight 和 cleanup MCP 调用也必须有 timeout。
 
 ### 6. 工具数量
-- 当前：64 个 MCP 工具；profile 为 basic=45、network=63、full=64
+- 当前：66 个 MCP 工具；profile 为 basic=46、network=65、full=66
 - 新增工具命名：`codex_<domain>_<action>`，group tag 放描述开头
 
 ## 构建
@@ -90,7 +90,7 @@ src/
     lifecycle.rs MCP 版本协商 + 双纪元生命周期（legacy initialize / 2026-07-28 stateless、server/discover、resultType/缓存提示、-32022）
     types.rs    ToolHandler, Tool, ToolHints(annotations), Content, arg extractors, 响应构建
     schema.rs   registered_tools(), 工具注册
-    handlers.rs handle_tool_call + 64 个 handle_* 方法
+    handlers.rs handle_tool_call + 66 个工具 handler
     profiles.rs ToolProfile (basic/network/full)
   browser.rs    CDP + 浏览器操作（list_tabs, navigate, screenshot, click, etc.）
   client.rs     Named pipe 传输, sticky attach, execute_cdp

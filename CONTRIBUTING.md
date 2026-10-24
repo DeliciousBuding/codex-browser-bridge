@@ -61,8 +61,8 @@ claude plugin validate --strict .
 `.claude-plugin/` and `mcp.json` are the Claude Code plugin surface.
 Codex / ChatGPT desktop use native browser integration and do not install this
 bridge as a plugin. The Claude plugin and manual JSON examples default to the
-full 64-tool source profile. Clients without tool search can opt into `basic`
-(45 tools) or `network` (63 tools), with the corresponding capability reduction.
+full 66-tool source profile. Clients without tool search can opt into `basic`
+(46 tools) or `network` (65 tools), with the corresponding capability reduction.
 
 Keep method-level coverage in `docs/official-parity.md` accurate. Added tools or
 CLI entrypoints do not establish parity with official locator, session, or

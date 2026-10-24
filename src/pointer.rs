@@ -190,7 +190,13 @@ async fn released_once(
     click: ClickSpec,
     deadline: Instant,
 ) -> Result<()> {
-    dispatch_until(
+    // A release can synchronously open a JavaScript dialog or file chooser.
+    // Chrome then blocks the command ACK behind the modal even though the
+    // release already happened. Only a newly observed, same-generation modal
+    // is evidence of delivery; a pre-existing modal must not turn silence into
+    // success. Observation stays opt-in: never enable producers for a click.
+    let before = client.observation_snapshot(tab).ok();
+    let result = dispatch_until(
         client,
         tab,
         json!({
@@ -204,7 +210,39 @@ async fn released_once(
         }),
         deadline,
     )
-    .await
+    .await;
+    if matches!(result, Err(BridgeError::Timeout(_))) {
+        if let (Some(before), Ok(after)) = (before, client.observation_snapshot(tab)) {
+            let new_dialog = after.dialog.as_ref().is_some_and(|dialog| {
+                before
+                    .dialog
+                    .as_ref()
+                    .is_none_or(|prior| prior.id != dialog.id)
+            });
+            let new_chooser = after.file_chooser.as_ref().is_some_and(|chooser| {
+                before
+                    .file_chooser
+                    .as_ref()
+                    .is_none_or(|prior| prior.id != chooser.id)
+            });
+            if before.enabled
+                && after.enabled
+                && before.cursor.generation == after.cursor.generation
+                && before.document_epoch == after.document_epoch
+                && after.cursor.sequence > before.cursor.sequence
+                && (new_dialog || new_chooser)
+            {
+                tracing::debug!(
+                    tab,
+                    new_dialog,
+                    new_chooser,
+                    "observed modal confirms pointer release despite missing acknowledgement"
+                );
+                return Ok(());
+            }
+        }
+    }
+    result
 }
 
 async fn click_once_until(

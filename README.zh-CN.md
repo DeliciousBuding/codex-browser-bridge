@@ -6,7 +6,7 @@
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
     让 Claude Code 和其他 MCP Agent 通过 ChatGPT 桌面应用的浏览器扩展控制你现有的浏览器配置。
-    <br>64 个 MCP 工具。纯 Rust。单文件二进制。
+    <br>66 个 MCP 工具。纯 Rust。单文件二进制。
   </p>
 </p>
 
@@ -34,10 +34,9 @@
 
 无需复制浏览器配置。无需 WebDriver。无需远程配置。它发现本机已存在的
 `codex-browser-use` 本地传输，识别每个实时浏览器扩展实例，使用相同的
-JSON-RPC 协议，暴露 64 个 MCP 工具用于浏览器自动化。
+JSON-RPC 协议，暴露 66 个 MCP 工具用于浏览器自动化。
 
-本文描述 v1.12.0：64 个 MCP 工具，Windows 与 Linux GNU 包均由同一份带 tag 的
-源码构建。
+本文描述 v1.13.0 release candidate：66 个 MCP 工具；tag 发布流程和 npm 验收通过后才算已发布。
 
 项目目标是让非 Codex agent 获得完整浏览器能力。具体方法与语义覆盖见
 [能力对齐表](docs/official-parity.md)；工具数量或新增 CLI 入口都不代表已完整对齐。
@@ -94,10 +93,10 @@ npm i -g @delicious233/codex-browser-bridge
 | Brave / Opera / Vivaldi | 预计使用相同 Chromium/CDP 管线，但尚未实测 |
 | MCP `2024-11-05` … `2025-11-25` | 支持 Legacy 生命周期 |
 | MCP `2026-07-28` | 支持无状态生命周期与 discovery |
-| Windows x64 | v1.12.0 通过 18 项合成标签页 Edge 冒烟；这不等于完整能力面验证 |
+| Windows x64 | 当前源码通过合成标签页 Edge parity 冒烟；不等于完整能力面 |
 | Windows arm64 | 已发布二进制；本次发布未实测 |
 | Linux GNU x64 | Ubuntu 24.04 / glibc 2.39 上通过全量原生 Rust/Node 门禁、release 构建和无浏览器 doctor；未做扩展 live 验证 |
-| Linux GNU arm64 | arm64 QEMU 下通过 `cargo build --release --locked`；未做 arm64 运行时或扩展 live 验证 |
+| Linux GNU arm64 | 原生 Rust tests/clippy/release 和合成 Chrome 扩展 parity 冒烟通过；不等于完整能力面 |
 | macOS | Unix 代码可编译不代表运行时支持；无发布二进制或实测记录 |
 
 Bridge 不会安装第二套浏览器扩展，也不会复制浏览器配置。一个 MCP session
@@ -146,7 +145,7 @@ Claude Code 2.1.292 及以上支持一条命令添加 marketplace 并安装插�
 首次启动 MCP 时，`npx` 需要几秒钟填充缓存。之后会复用缓存包；如果 PATH 上已有
 全局安装的 `codex-browser-bridge`，也会直接复用。
 
-插件默认暴露完整 64 个工具，因为 Claude Code 默认启用 MCP tool search：
+插件默认暴露完整 66 个工具，因为 Claude Code 默认启用 MCP tool search：
 启动时只加载 server instructions 和工具名，具体 schema 按需发现；
 `codex_doctor` 是唯一标记 `alwaysLoad` 的 schema。随插件安装的 Skill 也只按
 任务读取一个参考文件，不再一次加载完整工具手册。
@@ -185,7 +184,7 @@ $bridge = Join-Path (npm prefix -g) "codex-browser-bridge.cmd"
 ```
 
 把输出里的 `install.suggested_mcp_config.mcpServers.codex-browser.command`
-填到客户端配置的 `command`。不支持 tool search 时可先用 45 个工具的 `basic` profile，需要时再切到 `network` 或 `full`。文件上传需要设置 `CODEX_BRIDGE_UPLOAD_BASE`；[examples/](examples/) 里有完整配置模板。
+填到客户端配置的 `command`。不支持 tool search 时可先用 46 个工具的 `basic` profile，需要时再切到 `network` 或 `full`。文件上传需要设置 `CODEX_BRIDGE_UPLOAD_BASE`；[examples/](examples/) 里有完整配置模板。
 
 Codex 和 ChatGPT 桌面应用本身已经能直接控制 ChatGPT 浏览器扩展，不要把
 这个 bridge 再安装成 Codex 插件；那会为同一个浏览器增加一条重复 MCP
@@ -250,9 +249,17 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 
 支持 MCP resources 的客户端可以读取 `codex://tabs`，它只返回当前 bridge session 拥有的标签页，不是所有 Chrome 标签页。支持 MCP prompts 的客户端还会看到 `login` 和 `extract-table` 两个提示模板。
 
-## 全部 64 个 MCP 工具
+## 全部 66 个 MCP 工具
 
 ### 浏览器选择 `[Browser]`
+
+`codex_observe` 在操作前启动有界 tab/document 观察，提供 frame、dialog ID、
+事件/日志游标及明确的 gap；导航组合操作先捕获后执行。
+`codex_file_chooser` 提供 chooser ID 与 multiple；上传需配置
+`CODEX_BRIDGE_UPLOAD_BASE` 并显式传 `colocated_browser=true`。远程浏览器主机上传
+与浏览器已完成下载路径不支持。导出标记 `path_scope=bridge_host`，不冒充
+browser download；完整边界见 [parity 契约](docs/official-parity.md)。
+
 | 工具 | 说明 |
 |------|------|
 | `codex_list_browsers` | 列出实时实例的 `browser_id`、family、profile、版本、能力和 pipe 信息 |
@@ -367,9 +374,9 @@ codex-browser-bridge --mode discover
 codex-browser-bridge --mode cli
 
 # 工具 profile
-codex-browser-bridge --mode mcp --profile basic     # 45 个工具
-codex-browser-bridge --mode mcp --profile network   # 63 个工具
-codex-browser-bridge --mode mcp --profile full      # 全部 64 个（默认）
+codex-browser-bridge --mode mcp --profile basic     # 46 个工具
+codex-browser-bridge --mode mcp --profile network   # 65 个工具
+codex-browser-bridge --mode mcp --profile full      # 全部 66 个（默认）
 
 # 限制大 MCP 输出
 codex-browser-bridge --mode mcp --max-text-bytes 1048576 --max-image-bytes 3145728
@@ -420,7 +427,7 @@ ChatGPT 桌面应用 → ChatGPT 扩展 → Chrome / Edge 标签页
 | Legacy | `2024-11-05` … `2025-11-25` | 经典 stdio 生命周期，`initialize` 版本协商（对旧客户端字节级兼容） |
 | Modern | `2026-07-28` | 无状态请求：版本通过每个请求的 `_meta` 携带、`server/discover` 探测、结果携带 `resultType` + 缓存提示（`ttlMs`/`cacheScope`）、不支持的版本返回 `UnsupportedProtocolVersionError` (-32022) |
 
-全部 64 个工具都携带行为注解（`readOnlyHint`、`destructiveHint`、`idempotentHint`、`openWorldHint`），供客户端审批 UX 使用。详见 [CHANGELOG.md](CHANGELOG.md)。
+全部 66 个工具都携带行为注解（`readOnlyHint`、`destructiveHint`、`idempotentHint`、`openWorldHint`），供客户端审批 UX 使用。详见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 维护策略
 

@@ -5,17 +5,19 @@
 //! (therefore retaining the browser's login state), and writes a generated
 //! file into an explicitly supplied, existing directory.
 
-use std::fs::{self, OpenOptions};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use serde_json::{json, Value};
+use tokio::time::{timeout, Duration};
 use uuid::Uuid;
 
-use crate::browser::{evaluate, list_tabs};
+use crate::browser::list_tabs;
 use crate::client::Client;
 use crate::error::{BridgeError, Result};
+use crate::file_results::{
+    validate_output_directory, FileBudget, FileLimits, PathScope, StagedFiles,
+};
 
 const MAX_EXPORT_BYTES: usize = 10 * 1024 * 1024;
 
@@ -66,7 +68,17 @@ fn runtime_string(raw: &serde_json::value::RawValue) -> Result<String> {
 }
 
 async fn page_read(client: &Client, tab_id: &str, expression: &str) -> Result<Value> {
-    let raw = evaluate(client, tab_id, expression).await?;
+    let raw = timeout(
+        Duration::from_secs(15),
+        client.execute_cdp_once_with_timeout(
+            tab_number(tab_id)?,
+            "Runtime.evaluate",
+            Some(json!({"expression":expression,"returnByValue":true,"awaitPromise":true})),
+            Duration::from_secs(15),
+        ),
+    )
+    .await
+    .map_err(|_| BridgeError::Timeout("page export read".into()))??;
     let text = runtime_string(&raw)?;
     serde_json::from_str(&text)
         .map_err(|e| BridgeError::Protocol(format!("decode page export response: {e}")))
@@ -149,15 +161,22 @@ fn google_export_url(page_url: &str, format: &str) -> Result<(String, ExportType
 
 fn page_fetch_script(url: &str, binary: bool) -> String {
     let url = serde_json::to_string(url).expect("URL serialization cannot fail");
-    if binary {
-        format!(
-            r#"(async()=>{{try{{const r=await fetch({url},{{credentials:'include'}});if(!r.ok)return JSON.stringify({{error:'HTTP '+r.status}});const b=new Uint8Array(await r.arrayBuffer());if(b.byteLength>{MAX_EXPORT_BYTES})return JSON.stringify({{error:'response exceeds 10 MiB'}});let s='';for(let i=0;i<b.length;i+=0x8000)s+=String.fromCharCode(...b.subarray(i,i+0x8000));return JSON.stringify({{base64:btoa(s)}})}}catch(e){{return JSON.stringify({{error:'page fetch failed'}})}}}})()"#
-        )
-    } else {
-        format!(
-            r#"(async()=>{{try{{const r=await fetch({url},{{credentials:'include'}});if(!r.ok)return JSON.stringify({{error:'HTTP '+r.status}});const t=await r.text();if(new TextEncoder().encode(t).length>{MAX_EXPORT_BYTES})return JSON.stringify({{error:'response exceeds 10 MiB'}});return JSON.stringify({{text:t}})}}catch(e){{return JSON.stringify({{error:'page fetch failed'}})}}}})()"#
-        )
-    }
+    format!(
+        r#"(async()=>{{
+const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),12000);
+try{{
+ const r=await fetch({url},{{credentials:'include',signal:abort.signal}});
+ if(!r.ok)return JSON.stringify({{error:'HTTP '+r.status}});
+ if(Number(r.headers.get('content-length'))>{MAX_EXPORT_BYTES})return JSON.stringify({{error:'response exceeds 10 MiB'}});
+ if(!r.body)return JSON.stringify({{error:'response has no body'}});
+ const reader=r.body.getReader(),chunks=[];let length=0;
+ try{{for(;;){{const x=await reader.read();if(x.done)break;length+=x.value.byteLength;if(length>{MAX_EXPORT_BYTES}){{await reader.cancel();return JSON.stringify({{error:'response exceeds 10 MiB'}})}}chunks.push(x.value)}}}}finally{{reader.releaseLock()}}
+ const b=new Uint8Array(length);let offset=0;for(const chunk of chunks){{b.set(chunk,offset);offset+=chunk.byteLength}}
+ if(!{binary})return JSON.stringify({{text:new TextDecoder().decode(b)}});
+ let s='';for(let i=0;i<b.length;i+=0x8000)s+=String.fromCharCode(...b.subarray(i,i+0x8000));return JSON.stringify({{base64:btoa(s)}})
+}}catch{{return JSON.stringify({{error:'page fetch failed or timed out'}})}}finally{{clearTimeout(timer)}}
+}})()"#
+    )
 }
 
 fn normalize_markdown(text: &str) -> String {
@@ -176,98 +195,55 @@ fn youtube_script() -> &'static str {
     // This follows the current official bridge strategy: ask the page's
     // player to load captions, observe the resulting timedtext request, then
     // fetch its json3 representation with the page's existing credentials.
-    r#"(async()=>{try{const id=new URL(location.href).searchParams.get('v');if(!id||!/^[A-Za-z0-9_-]{11}$/.test(id))return JSON.stringify({error:'unsupported YouTube watch URL'});const p=document.querySelector('ytd-player')||document.querySelector('#movie_player');const call=(o,k)=>{const f=o&&Reflect.get(o,k);return typeof f==='function'?Reflect.apply(f,o,[]):undefined};const data=call(p,'getVideoData');if(!p||!data||data.video_id!==id||!['getVideoData','isSubtitlesOn','toggleSubtitles','toggleSubtitlesOn'].every(k=>typeof Reflect.get(p,k)==='function'))return JSON.stringify({error:'YouTube transcript is unavailable'});let found=null;const obs=new PerformanceObserver(es=>{for(const e of es.getEntries()){try{const u=new URL(e.name);if(u.protocol==='https:'&&u.hostname==='www.youtube.com'&&u.pathname==='/api/timedtext'&&u.searchParams.get('v')===id)found=u}catch{}}});obs.observe({type:'resource',buffered:true});const was=!!call(p,'isSubtitlesOn');try{if(was)call(p,'toggleSubtitles');call(p,'toggleSubtitlesOn');const end=Date.now()+4000;while(!found&&Date.now()<end)await new Promise(r=>setTimeout(r,150))}finally{if(was&&!call(p,'isSubtitlesOn'))call(p,'toggleSubtitlesOn');if(!was&&call(p,'isSubtitlesOn'))call(p,'toggleSubtitles');obs.disconnect()}if(!found)return JSON.stringify({error:'YouTube transcript is unavailable'});found.searchParams.set('fmt','json3');const r=await fetch(found.toString(),{credentials:'include'});if(!r.ok)return JSON.stringify({error:'YouTube transcript request failed with HTTP '+r.status});const j=await r.json();const out=['YouTube transcript','Video ID: '+id,'Language: '+(found.searchParams.get('lang')||'unknown'),'Captions: '+(found.searchParams.get('kind')==='asr'?'auto-generated':'authored or unspecified'),''];for(const ev of (j.events||[])){if(!Array.isArray(ev.segs))continue;const text=ev.segs.map(s=>typeof s.utf8==='string'?s.utf8:'').join('').replace(/\s+/g,' ').trim();if(!text)continue;const sec=Math.floor((Number(ev.tStartMs)||0)/1000),h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;out.push('['+(h?h+':'+String(m).padStart(2,'0')+':':m)+String(s).padStart(2,'0')+'] '+text);if(out.join('\n').length>10485760){out.push('','[Transcript truncated]');break}}return out.length>5?JSON.stringify({text:out.join('\n')}):JSON.stringify({error:'YouTube transcript is unavailable'})}catch{return JSON.stringify({error:'YouTube transcript is unavailable'})}})()"#
-}
-
-fn validate_output_dir(output_dir: &Path) -> Result<PathBuf> {
-    if !output_dir.is_absolute() {
-        return Err(BridgeError::User(
-            "output_dir must be an existing absolute directory".into(),
-        ));
-    }
-    let meta = fs::symlink_metadata(output_dir)
-        .map_err(|_| BridgeError::User("output_dir must already exist".into()))?;
-    if !meta.is_dir() || meta.file_type().is_symlink() {
-        return Err(BridgeError::User(
-            "output_dir must be a real directory, not a symlink or file".into(),
-        ));
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if meta.file_attributes() & 0x400 != 0 {
-            return Err(BridgeError::User(
-                "output_dir reparse points are not allowed".into(),
-            ));
-        }
-    }
-    // Inspect every lexical component as well as the leaf.  Checking only
-    // the final directory would allow `safe\link\exports` to traverse a
-    // junction/symlink in an ancestor before canonicalization.
-    let mut component = output_dir.to_path_buf();
-    loop {
-        let component_meta = fs::symlink_metadata(&component)
-            .map_err(|_| BridgeError::User("cannot inspect output_dir components".into()))?;
-        if component_meta.file_type().is_symlink() {
-            return Err(BridgeError::User(
-                "output_dir path components may not be symlinks".into(),
-            ));
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt;
-            if component_meta.file_attributes() & 0x400 != 0 {
-                return Err(BridgeError::User(
-                    "output_dir path components may not be reparse points".into(),
-                ));
-            }
-        }
-        let Some(parent) = component.parent() else {
-            break;
-        };
-        if parent == component {
-            break;
-        }
-        component = parent.to_path_buf();
-    }
-    let canonical = fs::canonicalize(output_dir)
-        .map_err(|_| BridgeError::User("cannot resolve output_dir".into()))?;
-    let canonical_meta = fs::symlink_metadata(&canonical)
-        .map_err(|_| BridgeError::User("cannot inspect output_dir".into()))?;
-    if canonical_meta.file_type().is_symlink() {
-        return Err(BridgeError::User(
-            "output_dir symlink is not allowed".into(),
-        ));
-    }
-    Ok(canonical)
+    r#"(async()=>{
+const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),12000),max=10485760;
+try{
+ const id=new URL(location.href).searchParams.get('v');
+ if(!id||!/^[A-Za-z0-9_-]{11}$/.test(id))return JSON.stringify({error:'unsupported YouTube watch URL'});
+ const p=document.querySelector('ytd-player')||document.querySelector('#movie_player');
+ const call=(o,k)=>{const f=o&&Reflect.get(o,k);return typeof f==='function'?Reflect.apply(f,o,[]):undefined};
+ const data=call(p,'getVideoData');
+ if(!p||!data||data.video_id!==id||!['getVideoData','isSubtitlesOn','toggleSubtitles','toggleSubtitlesOn'].every(k=>typeof Reflect.get(p,k)==='function'))return JSON.stringify({error:'YouTube transcript is unavailable'});
+ let found=null;
+ const obs=new PerformanceObserver(es=>{for(const e of es.getEntries()){try{const u=new URL(e.name);if(u.protocol==='https:'&&u.hostname==='www.youtube.com'&&u.pathname==='/api/timedtext'&&u.searchParams.get('v')===id)found=u}catch{}}});
+ obs.observe({type:'resource',buffered:true});
+ const was=!!call(p,'isSubtitlesOn');
+ try{if(was)call(p,'toggleSubtitles');call(p,'toggleSubtitlesOn');const end=Date.now()+4000;while(!found&&Date.now()<end)await new Promise(r=>setTimeout(r,150))}
+ finally{if(was&&!call(p,'isSubtitlesOn'))call(p,'toggleSubtitlesOn');if(!was&&call(p,'isSubtitlesOn'))call(p,'toggleSubtitles');obs.disconnect()}
+ if(!found)return JSON.stringify({error:'YouTube transcript is unavailable'});
+ found.searchParams.set('fmt','json3');
+ const r=await fetch(found.toString(),{credentials:'include',signal:abort.signal});
+ if(!r.ok||!r.body)return JSON.stringify({error:'YouTube transcript request failed'});
+ const reader=r.body.getReader(),chunks=[];let length=0;
+ try{for(;;){const x=await reader.read();if(x.done)break;length+=x.value.byteLength;if(length>max){await reader.cancel();return JSON.stringify({error:'transcript response exceeds 10 MiB'})}chunks.push(x.value)}}finally{reader.releaseLock()}
+ const b=new Uint8Array(length);let offset=0;for(const chunk of chunks){b.set(chunk,offset);offset+=chunk.byteLength}
+ const j=JSON.parse(new TextDecoder().decode(b));
+ const out=['YouTube transcript','Video ID: '+id,'Language: '+(found.searchParams.get('lang')||'unknown'),'Captions: '+(found.searchParams.get('kind')==='asr'?'auto-generated':'authored or unspecified'),''];
+ let outputBytes=new TextEncoder().encode(out.join('\n')).length;
+ for(const ev of (Array.isArray(j.events)?j.events:[])){
+  if(!Array.isArray(ev.segs))continue;
+  const text=ev.segs.map(s=>typeof s.utf8==='string'?s.utf8:'').join('').replace(/\s+/g,' ').trim();if(!text)continue;
+  const sec=Math.floor((Number(ev.tStartMs)||0)/1000),h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;
+  const line='['+(h?h+':'+String(m).padStart(2,'0')+':':m)+String(s).padStart(2,'0')+'] '+text;
+  outputBytes+=new TextEncoder().encode(line).length+1;if(outputBytes>max)return JSON.stringify({error:'transcript output exceeds 10 MiB'});out.push(line);
+ }
+ return out.length>5?JSON.stringify({text:out.join('\n')}):JSON.stringify({error:'YouTube transcript is unavailable'});
+}catch{return JSON.stringify({error:'YouTube transcript is unavailable or timed out'})}finally{clearTimeout(timer)}
+})()"#
 }
 
 /// Validate an export destination without creating anything.  The directory
 /// must be an existing absolute real directory; symlinks and Windows reparse
 /// points are rejected to prevent writes escaping the user-selected folder.
 pub fn validate_export_directory(output_dir: &Path) -> Result<PathBuf> {
-    validate_output_dir(output_dir)
+    validate_output_directory(output_dir)
 }
 
-fn write_new(dir: &Path, ty: ExportType, bytes: &[u8]) -> Result<PathBuf> {
-    if bytes.len() > MAX_EXPORT_BYTES {
-        return Err(BridgeError::User("export exceeds 10 MiB".into()));
-    }
-    let path = dir.join(format!("codex-export-{}.{}", Uuid::new_v4(), ty.extension));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .map_err(|e| BridgeError::User(format!("create generated export failed: {e}")))?;
-    let result = (|| -> std::io::Result<()> {
-        file.write_all(bytes)?;
-        file.sync_all()
-    })();
-    if let Err(err) = result {
-        let _ = fs::remove_file(&path);
-        return Err(BridgeError::PipeIo(err));
-    }
-    Ok(path)
+fn write_new(dir: &Path, ty: ExportType, bytes: &[u8], budget: FileBudget) -> Result<PathBuf> {
+    let name = format!("codex-export-{}.{}", Uuid::new_v4(), ty.extension);
+    let mut files = StagedFiles::new(dir, budget)?;
+    files.write("content", bytes)?;
+    files.publish_file("content", &name)
 }
 
 /// Export the currently authorized tab to a newly-created file in `output_dir`.
@@ -279,7 +255,29 @@ pub async fn export(
     format: Option<&str>,
     output_dir: &Path,
 ) -> Result<Value> {
-    let dir = validate_output_dir(output_dir)?;
+    let dir = validate_output_directory(output_dir)?;
+    let budget = FileBudget::new(FileLimits {
+        max_files: 1,
+        max_file_bytes: MAX_EXPORT_BYTES,
+        max_total_bytes: MAX_EXPORT_BYTES,
+        max_duration: Duration::from_secs(30),
+    })?;
+    timeout(
+        Duration::from_secs(30),
+        export_inner(client, tab_id, kind, format, &dir, budget),
+    )
+    .await
+    .map_err(|_| BridgeError::Timeout("content export; no file published".into()))?
+}
+
+async fn export_inner(
+    client: &Client,
+    tab_id: &str,
+    kind: &str,
+    format: Option<&str>,
+    dir: &Path,
+    budget: FileBudget,
+) -> Result<Value> {
     let id = tab_number(tab_id)?;
     let tabs = list_tabs(client).await?;
     let listed = tabs
@@ -371,8 +369,8 @@ pub async fn export(
         return Err(BridgeError::User("export returned no content".into()));
     }
     let bytes_len = bytes.len();
-    let path = write_new(&dir, ty, &bytes)?;
+    let path = write_new(dir, ty, &bytes, budget)?;
     Ok(
-        json!({"path": path, "bytes": bytes_len, "format": ty.extension, "mime": ty.mime, "kind": kind}),
+        json!({"path": path, "path_scope": PathScope::BridgeHost, "browser_download": false, "bytes": bytes_len, "format": ty.extension, "mime": ty.mime, "kind": kind}),
     )
 }

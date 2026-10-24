@@ -71,7 +71,7 @@ or Chrome instances by pipe name.
 ## Profiles
 
 The plugin default is `full`: modern clients defer schemas through tool search.
-v1.12.0 counts are `basic` 45, `network` 63, and `full` 64. Clients
+Current source counts are `basic` 46, `network` 65, and `full` 66. Clients
 without tool search can set `CODEX_BRIDGE_PROFILE=basic` or `network` when a
 smaller surface is intentional.
 

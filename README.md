@@ -6,7 +6,7 @@
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
     Let Claude Code and other MCP agents control your existing browser profile through the ChatGPT desktop app's browser extension.
-    <br>64 MCP tools. Pure Rust. Single binary.
+    <br>66 MCP tools. Pure Rust. Single binary.
   </p>
 </p>
 
@@ -35,10 +35,10 @@
 No browser profile copying. No WebDriver. No remote setup. It discovers the
 `codex-browser-use` local transports that already exist on your machine, identifies
 each live browser-extension instance, speaks the same JSON-RPC protocol, and
-exposes 64 MCP tools for browser automation.
+exposes 66 MCP tools for browser automation.
 
-This README describes v1.12.0: 64 MCP tools, with Windows and Linux GNU
-packages built from the same tagged source.
+This README describes the v1.13.0 release candidate: 66 MCP tools; publication
+is confirmed only after the tagged release workflow and npm acceptance.
 
 The goal is complete browser capability access for non-Codex agents. Coverage
 is tracked by method and semantics in [the parity matrix](docs/official-parity.md);
@@ -97,10 +97,10 @@ package) `26.1016.8120.0` and Edge extension `1.26.1020.11845`.
 | Brave / Opera / Vivaldi | Expected to use the same Chromium/CDP pipeline, but not yet live-tested |
 | MCP `2024-11-05` … `2025-11-25` | Supported legacy lifecycle |
 | MCP `2026-07-28` | Supported stateless lifecycle and discovery |
-| Windows x64 | v1.12.0 passed the 18-check synthetic-tab Edge smoke; this is not full-surface parity |
+| Windows x64 | Current source passes the synthetic Edge parity smoke; not full-surface parity |
 | Windows arm64 | Published binary; not live-tested for this release |
 | Linux GNU x64 | Full native Rust/Node gates, release build, and no-browser doctor passed on Ubuntu 24.04 / glibc 2.39; extension not live-tested |
-| Linux GNU arm64 | `cargo build --release --locked` passed under arm64 QEMU; no arm64 runtime or extension live test |
+| Linux GNU arm64 | Native Rust tests/clippy/release and synthetic Chrome extension parity smoke passed; not full-surface parity |
 | macOS | Unix code compilation alone does not establish runtime support; no published binary or live verification |
 
 The bridge does not install a second browser extension or copy your browser
@@ -165,7 +165,7 @@ The first MCP start can take a few seconds while `npx` fills its cache. After
 that, the plugin reuses the cached package, or the globally installed command
 when one is already on `PATH`.
 
-The plugin defaults to the full 64-tool surface because Claude Code enables MCP
+The plugin defaults to the full 66-tool surface because Claude Code enables MCP
 tool search by default: only server instructions and tool names enter the
 initial context, and schemas are loaded on demand. `codex_doctor` is the only
 schema marked `alwaysLoad`. The companion skill then loads one reference file
@@ -207,7 +207,7 @@ $bridge = Join-Path (npm prefix -g) "codex-browser-bridge.cmd"
 ```
 
 Paste `install.suggested_mcp_config.mcpServers.codex-browser.command` into the
-client config. The suggested config starts with the 45-tool `basic` profile;
+client config. The suggested config starts with the 46-tool `basic` profile;
 switch to `network` or `full` only when needed. File upload requires
 `CODEX_BRIDGE_UPLOAD_BASE`; use the templates in [examples/](examples/) for a
 full config.
@@ -310,7 +310,7 @@ JavaScript, CDP, or screenshot payloads by accident:
 
 `codex://tabs` is available as an MCP resource for clients that support resources. It returns tabs owned by the current bridge session, not every Chrome tab. The prompt templates `login` and `extract-table` are also exposed for clients that support MCP prompts.
 
-## All 64 MCP Tools
+## All 66 MCP Tools
 
 ### Browser Selection `[Browser]`
 | Tool | Description |
@@ -323,6 +323,15 @@ JavaScript, CDP, or screenshot payloads by accident:
 | `codex_browser_visibility` | Query or set browser visibility when the extension advertises that capability |
 
 ### Tab Management `[Tabs]`
+
+`codex_observe` starts bounded tab/document observation before an action and
+returns frames, dialog IDs, event/log cursors and explicit gaps. Navigation
+composites arm before acting. `codex_file_chooser` captures chooser IDs/multiple;
+uploads require configured `CODEX_BRIDGE_UPLOAD_BASE` and explicit
+`colocated_browser=true`. Remote browser-host uploads and completed-download paths
+are unsupported. File exports report `path_scope=bridge_host`, not browser
+downloads. See [parity contracts](docs/official-parity.md).
+
 | Tool | Description |
 |------|-------------|
 | `codex_list_tabs` | List tabs owned by this session |
@@ -430,9 +439,9 @@ codex-browser-bridge --mode discover
 codex-browser-bridge --mode cli
 
 # With tool profiles
-codex-browser-bridge --mode mcp --profile basic     # 45 tools
-codex-browser-bridge --mode mcp --profile network   # 63 tools
-codex-browser-bridge --mode mcp --profile full      # all 64 (default)
+codex-browser-bridge --mode mcp --profile basic     # 46 tools
+codex-browser-bridge --mode mcp --profile network   # 65 tools
+codex-browser-bridge --mode mcp --profile full      # all 66 (default)
 
 # Bound large MCP outputs
 codex-browser-bridge --mode mcp --max-text-bytes 1048576 --max-image-bytes 3145728
@@ -488,7 +497,7 @@ The bridge is a **dual-era MCP server**:
 | Legacy | `2024-11-05` … `2025-11-25` | Classic stdio lifecycle with `initialize` version negotiation (byte-compatible with older clients) |
 | Modern | `2026-07-28` | Stateless requests: version carried per-request in `_meta`, `server/discover` probe, `resultType` + cache hints (`ttlMs`/`cacheScope`) on results, `UnsupportedProtocolVersionError` (-32022) |
 
-All 64 tools carry behavior annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) for client approval UX. See [CHANGELOG.md](CHANGELOG.md) for details.
+All 66 tools carry behavior annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) for client approval UX. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ## Maintenance
 
@@ -547,7 +556,7 @@ See [ROADMAP.md](ROADMAP.md). Highlights:
 
 - optional live E2E harness for the ChatGPT desktop app + Chrome/Edge (`scripts/live-e2e.ps1`)
 - typed tool result schemas
-- Linux Unix socket transport and GNU x64/arm64 packages ship in v1.12.0; live extension verification remains pending. macOS needs a real runtime test.
+- Linux Unix socket transport and GNU x64/arm64 packages ship in v1.12.0; Linux arm64 synthetic extension smoke is verified, not full-surface parity. macOS needs a real runtime test.
 
 The official capability matrix and drift baseline live in
 [docs/official-parity.md](docs/official-parity.md) and

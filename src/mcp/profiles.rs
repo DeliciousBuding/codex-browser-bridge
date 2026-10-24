@@ -40,6 +40,7 @@ impl ToolProfile {
 
 // Basic: essential browser selection, tab, navigation, DOM, and interaction.
 const BASIC_TOOLS: &[&str] = &[
+    "codex_observe",
     "codex_list_browsers",
     "codex_bind_browser",
     "codex_clipboard",
@@ -89,6 +90,8 @@ const BASIC_TOOLS: &[&str] = &[
 
 // Network: Basic plus cookies, CDP diagnostics, files, dialogs, storage, PDF, and emulation.
 const NETWORK_TOOLS: &[&str] = &[
+    "codex_observe",
+    "codex_file_chooser",
     "codex_list_browsers",
     "codex_bind_browser",
     "codex_clipboard",

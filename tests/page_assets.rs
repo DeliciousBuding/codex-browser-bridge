@@ -115,6 +115,11 @@ async fn list_and_bundle_use_cached_content_and_keep_bytes_out_of_agent_result()
         .unwrap()
         .unwrap();
     assert_eq!(result.assets.len(), 2);
+    assert_eq!(
+        result.path_scope,
+        codex_browser_bridge::file_results::PathScope::BridgeHost
+    );
+    assert!(!result.browser_download);
     assert!(result.manifest_path.is_file());
     assert_eq!(std::fs::read(&result.assets[0].path).unwrap(), b"abc");
     assert!(!serde_json::to_string(&result).unwrap().contains("YWJj"));

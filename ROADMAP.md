@@ -1,108 +1,43 @@
 # ROADMAP
 
-## Latest: v1.12.0 (2026-10-24)
+## Current direction
 
-The goal is complete browser capability access for non-Codex agents. v1.12.0
-registers 64 tools (`basic` 45 / `network` 63 / `full` 64). A tool count
-does not establish method or semantic parity; maintain the detailed status in
-[docs/official-parity.md](docs/official-parity.md).
+Expose reliable Chromium-extension outcomes to non-Codex MCP clients, without
+cloning app-private auth, Guardian, artifact libraries or policy. Tool counts
+are distribution facts, not parity. Source contracts and remaining differences:
+[official-parity.md](docs/official-parity.md). Release history:
+[CHANGELOG.md](CHANGELOG.md).
 
-This release includes exact browser-instance binding and pinned reconnect, official
-history/management/viewport/visibility capabilities, handoff/deliverable marks,
-full-page capture, backend-DOM-ID accessibility actions, strict locator operations,
-official CUA button/modifier/path fields, a shared non-replayed pointer dispatcher,
-session-virtual clipboard, WebMCP, page-asset bundles, and local content exports.
-Turn finalization uses official `turnEnded`;
-rebinding cannot silently abandon an owned turn. Shell `tools`/`call`/`batch`
-reuse the MCP implementation and add bounded output, not extra browser parity.
+## Implemented in current source
 
-v1.12.0 includes Linux Unix-socket transport and GNU x64/arm64 native
-CI/release packaging (glibc >= 2.39 for release binaries). It passed all native
-gates on Ubuntu 24.04/glibc 2.39 x64, an arm64 release compile under QEMU, and
-an 18-check synthetic-tab Edge smoke on Windows. That smoke is not the full
-surface, and no Linux extension live run is implied. macOS runtime support is
-unverified.
+- Exact browser binding, no-replay input/navigation/dialog mutations, bounded
+  turn/session cleanup and truthful failures.
+- Opt-in tab/document observation with frame/loader state, dialog/chooser IDs,
+  bounded persistent event/log cursors, explicit gaps and action-before-wait.
+- Shared declarative locator composition, trusted checked-state transitions,
+  exact option descriptors, bounded actionability/trial/force and typing.
+- One controlled bridge-host file-result boundary with atomic no-overwrite
+  publication; bounded colocated file chooser uploads, not remote-path guesses.
+- Windows and Linux GNU x64/arm64 packaging; existing pinned plugin/npm workflow.
 
-## Previous release: v1.11.4 (2026-10-22)
+## Remaining supported-path gaps
 
-52 MCP tools, dual-era MCP protocol support (`2024-11-05` … `2026-07-28`), tool behavior annotations, CDP event architecture, structured network monitoring, `--mode doctor` CLI, JPEG/WebP screenshots, a verified ChatGPT desktop app + browser-extension compatibility baseline, and one-command Claude Code plugin distribution. Codex / ChatGPT desktop use their native browser integration and do not install the bridge as a plugin. See [CHANGELOG.md](CHANGELOG.md) for the full release history.
+- Cross-origin/OOPIF and transformed-frame input routing; complete ARIA name
+  computation. Existing same-origin resolver is deliberately not Playwright.
+- Backend-authorized browser download completion/path and remote upload transfer.
+  Host/CDP cached resource export does not satisfy that contract.
+- Full official navigation URL matchers/networkidle, level-filtered log APIs,
+  unrestricted safe regex and persistent visible-DOM reference epochs.
+- Optional typed result schemas and performance traces, only when explicitly
+  justified by a client contract. Raw privileged CDP remains blocked.
+- Expand synthetic live acceptance beyond current tested tool families; native
+  compilation/CI does not establish runtime support for untested endpoints.
 
-**Upstream branding:** OpenAI documents the browser surface as the ChatGPT browser extension. The `codex-browser-use` pipe name and protocol are unchanged, so no bridge-side migration was needed.
+## Explicitly deferred
 
-### Completed releases
+- macOS until a real Darwin endpoint is available and tested.
+- winget/scoop: npm already delivers checksummed native binaries.
+- App-private secure auth, cloud takeover, telemetry and artifact library.
 
-- **v1.12.0** (2026-10-24): expanded to 64 MCP tools with exact browser-instance binding, strict locators, official CUA input fields, full-page capture, history/management/viewport/visibility, handoff marks, session-virtual clipboard, WebMCP, page assets, local content exports, Linux Unix transport, and Windows/Linux x64/arm64 release packaging.
-- **v1.11.4** (2026-10-22): made the Claude plugin's one-command marketplace install self-contained at the package-launch layer. `mcp.json` now starts a version-pinned npm package through `npx`, so a prior global npm install is optional; the plugin-surface check enforces the pin and the README install command.
-- **v1.11.3** (2026-10-21): corrected the distribution boundary. Claude Code keeps the progressive plugin; Codex / ChatGPT desktop remain native and no longer have a duplicate bridge plugin or marketplace. The 52-tool MCP server and live browser integration are unchanged.
-- **v1.11.2** (2026-10-21): compatibility maintenance plus distribution modernization: current branding, live compatibility matrix, plugin packaging for Claude Code / ChatGPT desktop / Codex, MCP tool-search metadata, progressive skill references, npm command-shim detection, current extension browser/version diagnostics, and routine GitHub Actions updates. No MCP tools were added or removed.
-- **v1.11.1** (2026-08-19): npm installer proxy support (`HTTPS_PROXY`/`NO_PROXY` via HTTP CONNECT) — fixes `npm i -g` behind proxies.
-- **v1.11.0** (2026-08-19): MCP `2026-07-28` dual-era server (`server/discover`, stateless `_meta`-versioned requests, `resultType` + `ttlMs`/`cacheScope` cache hints, `-32022` version errors) with byte-compatible legacy era; MCP tool annotations on all 52 tools; `initialize` version negotiation + `instructions`.
-- **v1.10.1** (2026-07-14): `codex_evaluate` awaits Promises and surfaces JS exceptions; docs for Promise/exception behavior.
-- **v1.10.0** (2026-07-10): engineering hardening — reconnect, supply-chain CI, benchmarks, release contract, bounded MCP surfaces.
-- **v1.9.1** (2026-06-21): 16 new tools → 52 total. CDP event subscription (`network_monitor`, `console_logs`). Background-tab fix (`bring_to_front` + sticky 20s timeout). JPEG/WebP screenshots, sessionStorage, `--mode doctor`, `performance_metrics`.
-- **v1.9.0** (2026-06-20): `src/mcp/` module split, 8 tools (file upload, dialog, locator layer, composite tools, profiles, doctor).
-- **v1.8.0** (2026-06-20): CDP error normalization, sticky attach, Go legacy purged, protocol/MCP stdio optimization.
-- **v1.7.x** (2026-06-20): CDP MCP tools, security hardening, Codecov, repo SEO.
-
----
-
-## Next — Distribution & protocol depth
-
-Prioritize the remaining method/semantic gaps in the parity matrix and verify
-them against the actual extension service. Runtime robustness, distribution and
-performance checks support that goal; none replaces functional parity.
-
-### P0 — Runtime robustness & supply chain
-
-- [x] **Pipe auto-reconnect.** ✅ Done. Request-driven passive reconnect: read_loop exit marks `alive=false` + drains pending; the next `send_request` runs `ensure_alive` → `reconnect_locked` (discover + dial, 3-attempt backoff 0/100/250ms, 5s cooldown on full failure) → swaps writer + restarts read_loop + clears `attached_tabs`. Injectable `ConnectionFactory` (boxed-future, no async_trait) — real discovery in prod, `duplex()` mocks in tests. New `BridgeError::Connection` distinguishes dead-connection errors. 4 reconnect tests run under `cfg(not(windows))` via a new ubuntu `test-lib` CI job.
-  - Effort: M · landed in `src/client.rs`, `src/error.rs`, `.github/workflows/ci.yml`
-- [x] **Supply-chain CI** (`cargo-deny`). ✅ Done. `deny.toml` (advisories · licenses · bans · sources, tight allow list), `supply-chain.yml` (cargo-deny-action on push/PR + weekly), dependabot for `Cargo.toml`. cargo-deny's advisories check queries the same RustSec DB as cargo-audit, so it is a strict superset — no separate cargo-audit job.
-  - Effort: S · landed in `deny.toml`, `.github/workflows/supply-chain.yml`, `.github/dependabot.yml`
-
-### P1 — Performance & test baselines
-
-- [x] **criterion benchmarks.** ✅ Done. `benches/protocol.rs` benchmarks frame encode/decode round-trip + `with_session_params` — the hot path every request traverses. `attach.rs` skipped: sticky-vs-full-attach is logic best covered by the reconnect tests, not a perf bench (would need a full CDP mock to be meaningful).
-  - Effort: S · landed in `benches/protocol.rs`, `Cargo.toml` (criterion dev-dep)
-- [x] **Restore e2e coverage the right way.** ✅ Done. Extracted the testable core of each flow as a pure function and unit-tested it (no `#[path]` source-tree embedding): `pair_network_events` (Network event pairing), `runtime_value_string` (storage value decode), `check_cdp_error` (CDP error envelope → `BridgeError::Cdp`, incl. newline sanitization). Client-layer integration (connect / reconnect / event routing) is covered by `reconnect_tests` under `cfg(not(windows))` via the ubuntu `test-lib` CI job. 9 new tests.
-  - Effort: M · landed in `src/browser.rs` (pair extract + 6 tests), `src/client.rs` (3 tests)
-
-### P2 — Distribution & protocol depth
-
-- [x] **Claude plugin distribution and progressive loading.** ✅ Done (v1.11.4). The Claude marketplace installs the 52-tool MCP server and progressive skill from one command; the pinned `npx` entry supplies the npm package and Windows binary on first use. Codex / ChatGPT desktop use native browser integration instead of a duplicate plugin. Claude tool search defers schemas except `codex_doctor`; the skill routes through four on-demand references. Manual MCP clients retain the `basic` profile fallback.
-  - Effort: M · landed in `mcp.json`, `.claude-plugin/`, `skills/codex-browser/`, and the plugin-surface CI check
-- [x] **winget + scoop manifests.** Decision (2026-08-19): **deferred — npm is sufficient.** The target audience (MCP clients: Claude Code / Cursor / agent users) all have Node installed, the npm channel already delivers checksummed binaries with provenance, and winget/scoop would add manifest-repo + per-release bump automation for marginal discoverability. Revisit if user demand materializes; cheapest path then is a winget `portable` manifest auto-PR from release tags.
-- [x] **Installer proxy support.** ✅ Done (v1.11.1). `install.js` honors `HTTPS_PROXY`/`NO_PROXY` via an HTTP CONNECT tunnel, so `npm i -g` works behind corporate/Clash-style proxies.
-- [x] **MCP resources/prompts.** ✅ Done. `resources/list` + `resources/read` expose `codex://tabs` (snapshot via getTabs). `prompts/list` + `prompts/get` ship `login` and `extract-table` workflow templates (each cites the concrete tools to call). `initialize` advertises `resources` + `prompts` capabilities. Subscribe / list-changes omitted — these are on-demand snapshots, not a live feed. 5 tests under `cfg(not(windows))`.
-  - Effort: M · landed in `src/mcp/mod.rs`
-- [x] **Config file** (`.codex-browser-bridge.toml`) for profile + upload_base. ✅ Done. `src/config.rs` reads `CODEX_BRIDGE_CONFIG` env path or `./.codex-browser-bridge.toml`; precedence CLI flags > env > config > default. Malformed file warns + is ignored (never bricks startup).
-  - Effort: S · landed in `src/config.rs`, `src/main.rs`, `Cargo.toml` (toml dep)
-- [x] **ARCHITECTURE.md** — design-decision record for contributors. ✅ Done.
-  - Effort: S · `ARCHITECTURE.md`
-
----
-
-## Platform verification and distribution
-
-- [x] Linux Unix transport, identity/permission checks, and transport diagnostics.
-- [x] Linux GNU x64/arm64 native CI/release jobs and npm platform selection.
-- [x] Release preflight, strict plugin validation, and v1.12.0 packaging from one tagged commit.
-- [ ] Complete full-surface Windows and Linux extension live tests. Windows x64 currently has an 18-check synthetic-tab Edge smoke; Linux x64 has native Rust/Node gates and no-browser doctor only; arm64 has compile-only evidence.
-- [ ] Research and test an actual macOS extension endpoint before claiming macOS support.
-
-WSL Linux processes use Linux sockets in their own environment. A Windows binary
-launched through WSL interop uses Windows pipes; these are separate transports,
-not automatic cross-OS discovery.
-
----
-
-## Backlog
-
-Feature-sized items not yet scoped into a release:
-
-- [ ] `codex_network_monitor` URL filter (reduce noise; the paired list is usable today)
-- [ ] `codex_performance_trace` — `Performance.enable` + trace export (the metrics tool already shipped)
-- [ ] `codex_execute_cdp` user-customizable allowlist (config/env)
-- [ ] Typed tool result schemas (structured agent consumption)
-- [ ] Screenshot clip/scale params (format + quality already shipped)
-- [ ] OpenGraph social share image
-- [ ] macOS socket-naming research + real Darwin test
+WSL sockets and Windows interop pipes are distinct transports; no automatic
+cross-OS discovery is claimed.

@@ -3,6 +3,7 @@ use crate::{
     browser::parse_tab_id,
     client::Client,
     error::{BridgeError, Result},
+    file_results::{validate_output_directory, FileBudget, FileLimits, PathScope, StagedFiles},
     security::validate_url,
 };
 use base64::Engine;
@@ -10,9 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::VecDeque,
-    fs::{self, OpenOptions},
-    io::Write,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 use tokio::{
     sync::Mutex,
@@ -99,6 +98,8 @@ pub struct BundleResult {
     pub manifest_path: PathBuf,
     pub assets: Vec<ExportedAsset>,
     pub partial_inventory: bool,
+    pub path_scope: PathScope,
+    pub browser_download: bool,
 }
 #[derive(Debug, Clone, Default)]
 pub struct DownloadMediaOptions {
@@ -253,6 +254,17 @@ impl PageAssetsRegistry {
     }
     pub async fn bundle(&self, c: &Client, tab_id: &str, o: BundleOptions) -> Result<BundleResult> {
         validate_output_dir(&o.output_dir)?;
+        let budget = bundle_budget(&o)?;
+        self.bundle_with_budget(c, tab_id, o, budget).await
+    }
+    async fn bundle_with_budget(
+        &self,
+        c: &Client,
+        tab_id: &str,
+        o: BundleOptions,
+        budget: FileBudget,
+    ) -> Result<BundleResult> {
+        let dir = validate_output_directory(&o.output_dir)?;
         let rc = cap(o.max_resource_bytes, MAX_RESOURCE)?;
         let tc = cap(o.max_total_bytes, MAX_TOTAL)?;
         timeout(BUDGET, async {
@@ -315,6 +327,7 @@ impl PageAssetsRegistry {
             let mut data = Vec::new();
             let mut total = 0usize;
             for a in selected.iter() {
+                budget.check_elapsed()?;
                 if a.size.is_some_and(|size| size > rc as u64) {
                     return Err(user("known resource size exceeds max_resource_bytes"));
                 }
@@ -338,13 +351,7 @@ impl PageAssetsRegistry {
             ) {
                 return Err(user("page changed during bundle; no output written"));
             }
-            validate_output_dir(&o.output_dir)?;
-            publish(
-                &o.output_dir
-                    .join(format!("codex-assets-{}", Uuid::new_v4())),
-                data,
-                inv.result.partial,
-            )
+            publish(&dir, data, inv.result.partial, budget)
         })
         .await
         .map_err(|_| BridgeError::Timeout("page assets bundle; no output published".into()))?
@@ -356,6 +363,23 @@ impl PageAssetsRegistry {
         o: DownloadMediaOptions,
     ) -> Result<BundleResult> {
         validate_output_dir(&o.output_dir)?;
+        timeout(BUDGET, self.download_media_inner(c, tab_id, o))
+            .await
+            .map_err(|_| {
+                BridgeError::Timeout("cached page media export; no output published".into())
+            })?
+    }
+    async fn download_media_inner(
+        &self,
+        c: &Client,
+        tab_id: &str,
+        o: DownloadMediaOptions,
+    ) -> Result<BundleResult> {
+        let budget = bundle_budget(&BundleOptions {
+            max_resource_bytes: o.max_bytes,
+            max_total_bytes: o.max_bytes,
+            ..Default::default()
+        })?;
         let tab = parse_tab_id("download_media", tab_id)?;
         let url = match (o.url, o.selector) {
             (Some(x), None) => validate_url(&x)?,
@@ -385,7 +409,7 @@ impl PageAssetsRegistry {
             .iter()
             .find(|a| a.url == url && a.kind.bundleable())
             .ok_or_else(|| user("media URL is not an observed resource"))?;
-        self.bundle(
+        self.bundle_with_budget(
             c,
             tab_id,
             BundleOptions {
@@ -396,6 +420,7 @@ impl PageAssetsRegistry {
                 max_resource_bytes: o.max_bytes,
                 max_total_bytes: o.max_bytes,
             },
+            budget,
         )
         .await
     }
@@ -514,6 +539,16 @@ fn cap(n: usize, m: usize) -> Result<usize> {
         Ok(if n == 0 { m } else { n })
     }
 }
+fn bundle_budget(options: &BundleOptions) -> Result<FileBudget> {
+    let resource = cap(options.max_resource_bytes, MAX_RESOURCE)?;
+    let total = cap(options.max_total_bytes, MAX_TOTAL)?;
+    FileBudget::new(FileLimits {
+        max_files: MAX_ASSETS + 1,
+        max_file_bytes: resource.max(MAX_META),
+        max_total_bytes: total + MAX_META,
+        max_duration: BUDGET,
+    })
+}
 fn bound(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
@@ -559,6 +594,9 @@ async fn read(c: &Client, t: i64, a: &PageAsset, cap: usize) -> Result<Vec<u8>> 
     .await?;
     let x: Content = serde_json::from_value(v).map_err(|e| proto(&e.to_string()))?;
     let b = if x.base64_encoded {
+        if x.content.len() > cap.div_ceil(3) * 4 {
+            return Err(user("encoded resource exceeds max_resource_bytes"));
+        }
         base64::engine::general_purpose::STANDARD
             .decode(x.content)
             .map_err(|_| proto("invalid resource base64"))?
@@ -572,71 +610,18 @@ async fn read(c: &Client, t: i64, a: &PageAsset, cap: usize) -> Result<Vec<u8>> 
     }
 }
 pub fn validate_output_dir(p: &Path) -> Result<()> {
-    if !p.is_absolute()
-        || p.parent().is_none()
-        || p.components()
-            .any(|x| matches!(x, Component::CurDir | Component::ParentDir))
-    {
-        return Err(user("output_dir must be explicit absolute path"));
-    }
-    let m = fs::symlink_metadata(p)?;
-    if !m.is_dir() || m.file_type().is_symlink() || reparse(&m) {
-        return Err(user("output_dir must be a real directory"));
-    }
-    for a in p.ancestors() {
-        let m = fs::symlink_metadata(a)?;
-        if !m.is_dir() || m.file_type().is_symlink() || reparse(&m) {
-            return Err(user("output_dir ancestor is unsafe"));
-        }
-    }
-    Ok(())
+    validate_output_directory(p).map(|_| ())
 }
-fn reparse(m: &fs::Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        m.file_attributes() & 0x400 != 0
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = m;
-        false
-    }
-}
-struct Guard {
-    path: PathBuf,
-    files: Vec<PathBuf>,
-    committed: bool,
-}
-impl Drop for Guard {
-    fn drop(&mut self) {
-        if !self.committed
-            && fs::symlink_metadata(&self.path)
-                .is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink() && !reparse(&m))
-        {
-            for file in &self.files {
-                let _ = fs::remove_file(file);
-            }
-            let _ = fs::remove_dir(&self.path);
-        }
-    }
-}
-impl Guard {
-    fn write(&mut self, path: &Path, bytes: &[u8]) -> Result<()> {
-        let mut file = OpenOptions::new().create_new(true).write(true).open(path)?;
-        self.files.push(path.to_owned());
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        Ok(())
-    }
-}
-fn publish(p: &Path, data: Vec<(PageAsset, Vec<u8>)>, partial: bool) -> Result<BundleResult> {
-    fs::create_dir(p)?;
-    let mut guard = Guard {
-        path: p.to_owned(),
-        files: Vec::new(),
-        committed: false,
-    };
+fn publish(
+    dir: &Path,
+    data: Vec<(PageAsset, Vec<u8>)>,
+    partial: bool,
+    budget: FileBudget,
+) -> Result<BundleResult> {
+    // Keep the acquisition deadline rather than resetting it before writing.
+    let name = format!("codex-assets-{}", Uuid::new_v4());
+    let mut files = StagedFiles::new(dir, budget)?;
+    let p = files.destination(&name)?;
     let mut assets = Vec::new();
     for (i, (a, b)) in data.into_iter().enumerate() {
         let ext = match a.mime_type.as_deref() {
@@ -653,8 +638,9 @@ fn publish(p: &Path, data: Vec<(PageAsset, Vec<u8>)>, partial: bool) -> Result<B
             Some("video/webm") => "webm",
             _ => "bin",
         };
-        let q = p.join(format!("asset-{i:04}.{ext}"));
-        guard.write(&q, &b)?;
+        let basename = format!("asset-{i:04}.{ext}");
+        let q = p.join(&basename);
+        files.write(&basename, &b)?;
         assets.push(ExportedAsset {
             id: a.id,
             kind: a.kind,
@@ -671,12 +657,15 @@ fn publish(p: &Path, data: Vec<(PageAsset, Vec<u8>)>, partial: bool) -> Result<B
         manifest_path: m.clone(),
         assets,
         partial_inventory: partial,
+        path_scope: PathScope::BridgeHost,
+        browser_download: false,
     };
-    guard.write(
-        &m,
-        &serde_json::to_vec_pretty(&out).map_err(|e| proto(&e.to_string()))?,
-    )?;
-    guard.committed = true;
+    let manifest = serde_json::to_vec_pretty(&out).map_err(|e| proto(&e.to_string()))?;
+    if manifest.len() > MAX_META {
+        return Err(user("asset manifest exceeds metadata limit"));
+    }
+    files.write("manifest.json", &manifest)?;
+    files.publish_bundle(&name)?;
     Ok(out)
 }
 const SCRIPT: &str = r#"(()=>{

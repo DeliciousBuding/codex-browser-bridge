@@ -46,10 +46,9 @@ function fixture() {
     owner.nodes.push(el);
     return el;
   }
+  const context = vm.createContext({document: doc, ...win});
   function run(spec) {
-    return JSON.parse(vm.runInNewContext(source.replace("__CODEX_LOCATOR_SPEC__", JSON.stringify(spec)), {
-      document: doc, ...win,
-    }, { timeout: 1000 }));
+    return JSON.parse(vm.runInContext(source.replace("__CODEX_LOCATOR_SPEC__", JSON.stringify(spec)), context, { timeout: 1000 }));
   }
   return { doc, document, element, run };
 }
@@ -109,15 +108,33 @@ test("fill and checked mutations reject disabled and readonly elements without c
   }
 });
 
-test("set_checked clicks only when needed and rejects a failed postcondition", () => {
+test("set_checked prepares trusted input and never performs an untrusted DOM click", () => {
   const f = fixture();
   const input = f.element("#box", { tagName: "INPUT", type: "checkbox", checked: false });
+  const result = f.run({ selector: "#box", action: "set_checked", checked: true });
+  assert.equal(result.value, false);
+  assert.equal(result.needs_click, true);
+  assert.deepEqual(result.rect, {x: 60, y: 20});
+  assert.equal(input.clicks, 0);
+  assert.equal(input.checked, false);
+  input.checked = true;
   assert.equal(f.run({ selector: "#box", action: "set_checked", checked: true }).value, true);
-  assert.equal(input.clicks, 1);
-  assert.equal(f.run({ selector: "#box", action: "set_checked", checked: true }).value, true);
-  assert.equal(input.clicks, 1);
-  input.click = () => {};
-  assert.match(f.run({ selector: "#box", action: "set_checked", checked: false }).error, /requested checked state/);
+  assert.equal(f.run({ selector: "#box", action: "set_checked", checked: true }).needs_click, false);
+  assert.equal(input.clicks, 0);
+});
+
+test("checked postconditions reject replacement targets and ephemeral target references are released", () => {
+  const f=fixture();
+  const input=f.element("#box",{tagName:"INPUT",type:"checkbox",checked:false});
+  const spec={selector:"#box",action:"set_checked",checked:true,target_token:"__test_target"};
+  assert.equal(f.run(spec).needs_click,true);
+  input.checked=true;
+  assert.equal(f.run({...spec,action:"checked_probe"}).value,true);
+  const replacement=f.element("#replacement",{tagName:"INPUT",type:"checkbox",checked:true});
+  replacement.selector="#box"; input.selector="#detached";
+  assert.match(f.run({...spec,action:"checked_probe"}).error,/detached or replaced/);
+  assert.equal(f.run({action:"release_target",target_token:"__test_target"}).ok,true);
+  assert.match(f.run({...spec,action:"checked_probe"}).error,/detached or replaced/);
 });
 
 test("descendant scopes, text filters, visibility, and last compose in the same resolver", () => {
@@ -166,9 +183,110 @@ test("select_option requires an exact existing option before dispatching changes
   assert.deepEqual(select.events, ["input", "change"]);
   select.events = [];
   assert.match(f.run({ selector: "select", action: "select_option", value: "missing" }).error,
-    /no option with value/);
+    /no option matching/);
   assert.equal(select.value, "b");
   assert.deepEqual(select.events, []);
+});
+
+test("absent visible and enabled return false but ordinary reads still fail", () => {
+  const f = fixture();
+  for (const action of ["visible", "enabled"]) {
+    assert.deepEqual(f.run({selector:".missing",action}), {ok:true,count:0,visible_count:0,value:false});
+  }
+  assert.equal(f.run({selector:".missing",action:"text"}).ok, false);
+});
+
+test("declarative has, has_not, intersections and unions share descendant and document order", () => {
+  const f = fixture();
+  const first = f.element("article", {innerText:"Alpha ready",textContent:"Alpha ready"});
+  const second = f.element("article", {innerText:"Beta pending",textContent:"Beta pending"});
+  const ready = f.element(".ready");
+  const pending = f.element(".pending");
+  first.children = [ready]; second.children = [pending];
+  assert.equal(f.run({selector:"article",has:{selector:".ready"},action:"count"}).count, 1);
+  assert.equal(f.run({selector:"article",has_not:{selector:".pending"},action:"text_content"}).value, "Alpha ready");
+  assert.equal(f.run({and:[{selector:"article"},{has:{selector:".ready"}}],action:"text_content"}).value,"Alpha ready");
+  const all = f.run({or:[{text:"Beta pending",exact:true},{text:"Alpha ready",exact:true}],action:"all"});
+  assert.deepEqual(all.values.map((value)=>value.element.text),["Alpha ready","Beta pending"]);
+  assert.deepEqual(all.values.map((value)=>value.locator.nth),[0,1]);
+  assert.equal(f.run({...all.values[1].locator,action:"text_content"}).value,"Beta pending");
+});
+
+test("regex matchers preserve raw whitespace, honor flags and reject unsafe patterns", () => {
+  const f = fixture();
+  f.element("button",{innerText:"Save\nFinal",textContent:"Save\nFinal"});
+  assert.equal(f.run({text:{regex:"^save\\s+Final$",flags:"i"},action:"count"}).count,1);
+  assert.equal(f.run({text:{regex:"^save",flags:""},action:"count"}).count,0);
+  assert.equal(f.run({has_text:{regex:"(a+)+$"},action:"count"}).ok,false);
+  assert.equal(f.run({text:{regex:".*.*"},action:"count"}).ok,false);
+  assert.equal(f.run({text:{regex:"["},action:"count"}).ok,false);
+});
+
+test("or unions base predicates with branches instead of intersecting the base selector", () => {
+  const f=fixture();
+  const button=f.element("button",{tagName:"BUTTON",innerText:"Save",textContent:"Save"});
+  const next=f.element("#next",{tagName:"A",innerText:"Next",textContent:"Next"});
+  f.element("#unrelated",{innerText:"Unrelated",textContent:"Unrelated"});
+  const spec={selector:"button",or:[{selector:"#next"},{selector:"button"}]};
+  assert.equal(f.run({...spec,action:"count"}).count,2);
+  assert.deepEqual(f.run({...spec,action:"all"}).values.map((entry)=>entry.element.text),["Save","Next"]);
+  assert.equal(f.run({...spec,nth:-1,action:"text_content"}).value,"Next");
+  assert.equal(f.run({or:[{selector:"#next"},{selector:"button"}],action:"count"}).count,2);
+  assert.equal(f.run({selector:"#missing",or:[{selector:"#next"}],action:"text_content"}).value,"Next");
+  assert.equal(f.run({and:[spec,{selector:"button"}],action:"text_content"}).value,"Save");
+  assert.equal(button.textContent,"Save"); assert.equal(next.textContent,"Next");
+});
+
+test("descriptor and multi-select selection validates every option before any mutation", () => {
+  const f = fixture();
+  const options=[{value:"a",label:"Alpha",selected:true},{value:"b",label:"Beta",selected:false},{value:"c",label:"Gamma",selected:false}];
+  const select=f.element("select",{tagName:"SELECT",multiple:true,options});
+  const selected=f.run({selector:"select",action:"select_option",options:[{label:"Beta",index:1},"c"]});
+  assert.deepEqual(selected.values,["b","c"]);
+  assert.deepEqual(options.map((option)=>option.selected),[false,true,true]);
+  select.events=[];
+  assert.equal(f.run({selector:"select",action:"select_option",options:["a",{label:"Missing"}]}).ok,false);
+  assert.deepEqual(options.map((option)=>option.selected),[false,true,true]);
+  assert.deepEqual(select.events,[]);
+  assert.deepEqual(f.run({selector:"select",action:"select_option",options:[]}).values,[]);
+  select.multiple=false;
+  assert.match(f.run({selector:"select",action:"select_option",options:["a","b"]}).error,/multiple select/);
+});
+
+test("force skips overlay hit checks while trial fill/select leave state and events untouched", () => {
+  const f=fixture();
+  const input=f.element("input",{tagName:"INPUT"});
+  f.doc.hit=f.element(".overlay");
+  assert.equal(f.run({selector:"input",action:"click"}).retryable,true);
+  assert.equal(f.run({selector:"input",action:"click",force:true}).ok,true);
+  assert.equal(f.run({selector:"input",action:"fill",value:"new",trial:true}).trial,true);
+  assert.equal(input.nativeValue,undefined);
+  assert.deepEqual(input.events,[]);
+  const select=f.element("select",{tagName:"SELECT",options:[{value:"a",selected:false}]});
+  assert.equal(f.run({selector:"select",action:"select_option",options:"a",trial:true}).trial,true);
+  assert.equal(select.options[0].selected,false);
+  assert.deepEqual(select.events,[]);
+});
+
+test("accessible-name fields do not misidentify placeholders/test IDs and use hidden referenced label text", () => {
+  const f=fixture();
+  f.element("input",{tagName:"INPUT",attrs:{placeholder:"Password","data-testid":"password"}});
+  f.element("label",{attrs:{id:"label"},innerText:"",textContent:"Account name"});
+  f.element("#named",{tagName:"INPUT",attrs:{"aria-labelledby":"label"}});
+  assert.equal(f.run({name:"Password",action:"count"}).count,0);
+  assert.equal(f.run({name:"Account name",selector:"#named",action:"count"}).count,1);
+  assert.equal(f.run({placeholder:"Password",action:"count"}).count,1);
+});
+
+test("opacity zero remains visible in locator terms and transformed frames fail explicitly", () => {
+  const f=fixture();
+  f.element("#transparent",{style:{display:"block",visibility:"visible",opacity:"0"}});
+  assert.equal(f.run({selector:"#transparent",action:"visible"}).value,true);
+  const child=f.document();
+  const frame=f.element("iframe",{tagName:"IFRAME",contentDocument:child,clientLeft:0,clientTop:0,offsetWidth:50,offsetHeight:20});
+  f.doc.hit=frame;
+  f.element("button",{tagName:"BUTTON"},child);
+  assert.match(f.run({frame_selectors:["iframe"],selector:"button",action:"click"}).error,/transformed frames/);
 });
 
 test("shadow root active element is used when checking focus", () => {

@@ -272,6 +272,11 @@ impl Server {
             "profile": profile.as_str(),
             "toolCount": tool_count,
             "uploadBaseConfigured": upload_base_configured,
+            "implementedCapabilities": {
+                "observation": {"cursor":true,"frames":true,"dialogIds":true,"preStartHistory":false,"oopifRouting":false},
+                "locator": {"composition":true,"trial":true,"force":true,"selectDescriptors":true,"fullAria":false,"crossOriginFrames":false},
+                "files": {"pathScope":"bridge_host","atomicNoOverwrite":true,"colocatedChooserUpload":true,"remoteUpload":false,"browserDownloadCompletion":false}
+            },
             "responseLimits": {
                 "maxTextBytes": limits.max_text_bytes,
                 "maxImageBytes": limits.max_image_bytes,
@@ -287,6 +292,11 @@ impl Server {
             id,
             json!({
                 "resources": [{
+                    "uri": "codex://guide",
+                    "name": "guide",
+                    "description": "Bridge-specific browser workflow and security boundaries",
+                    "mimeType": "text/markdown"
+                }, {
                     "uri": "codex://tabs",
                     "name": "tabs",
                     "description": "Currently open browser tabs (read-only snapshot via getTabs)",
@@ -302,6 +312,13 @@ impl Server {
             .and_then(|p| p.get("uri"))
             .and_then(|u| u.as_str())
             .unwrap_or("");
+        if uri == "codex://guide" {
+            return result_response(
+                id,
+                json!({"contents":[{"uri":uri,"mimeType":"text/markdown",
+                "text":bounded_text_for_mcp(include_str!("../../skills/codex-browser/SKILL.md").to_owned())}]}),
+            );
+        }
         if uri != "codex://tabs" {
             return error_response(Some(id), -32602, &format!("unknown resource uri: {uri}"));
         }

@@ -245,7 +245,12 @@ pub async fn navigate(client: &Client, tab_id: &str, url: &str) -> Result<()> {
     let url = validate_url(url)?;
     let id = parse_tab_id("navigate", tab_id)?;
     let raw = client
-        .execute_cdp(id, "Page.navigate", Some(json!({ "url": url })))
+        .execute_cdp_once_with_timeout(
+            id,
+            "Page.navigate",
+            Some(json!({ "url": url })),
+            Duration::from_secs(20),
+        )
         .await?;
     ensure_navigation_accepted(&raw, &url)
 }
@@ -277,10 +282,11 @@ pub async fn navigate_back(client: &Client, tab_id: &str) -> Result<()> {
         .await?;
     let entry_id = history_entry_id(&raw, HistoryDirection::Back)?;
     client
-        .execute_cdp(
+        .execute_cdp_once_with_timeout(
             id,
             "Page.navigateToHistoryEntry",
             Some(json!({ "entryId": entry_id })),
+            Duration::from_secs(20),
         )
         .await
         .map(|_| ())
@@ -293,10 +299,11 @@ pub async fn navigate_forward(client: &Client, tab_id: &str) -> Result<()> {
         .await?;
     let entry_id = history_entry_id(&raw, HistoryDirection::Forward)?;
     client
-        .execute_cdp(
+        .execute_cdp_once_with_timeout(
             id,
             "Page.navigateToHistoryEntry",
             Some(json!({ "entryId": entry_id })),
+            Duration::from_secs(20),
         )
         .await
         .map(|_| ())
@@ -305,7 +312,7 @@ pub async fn navigate_forward(client: &Client, tab_id: &str) -> Result<()> {
 pub async fn reload(client: &Client, tab_id: &str) -> Result<()> {
     let id = parse_tab_id("reload", tab_id)?;
     client
-        .execute_cdp(id, "Page.reload", None)
+        .execute_cdp_once_with_timeout(id, "Page.reload", None, Duration::from_secs(20))
         .await
         .map(|_| ())
 }
@@ -398,7 +405,31 @@ pub async fn screenshot(
     format: &str,
     quality: Option<u64>,
 ) -> Result<String> {
+    screenshot_with_clip(client, tab_id, full_page, format, quality, None).await
+}
+
+pub async fn screenshot_with_clip(
+    client: &Client,
+    tab_id: &str,
+    full_page: bool,
+    format: &str,
+    quality: Option<u64>,
+    clip: Option<Value>,
+) -> Result<String> {
     let id = parse_tab_id("screenshot", tab_id)?;
+    if !matches!(format, "png" | "jpeg" | "webp") {
+        return Err(BridgeError::User(
+            "format must be png, jpeg, or webp".into(),
+        ));
+    }
+    if full_page && clip.is_some() {
+        return Err(BridgeError::User(
+            "clip and full_page are mutually exclusive".into(),
+        ));
+    }
+    if let Some(clip) = &clip {
+        validate_screenshot_clip(clip)?;
+    }
     let mut params = serde_json::Map::new();
     params.insert("format".into(), json!(format));
     if format == "jpeg" {
@@ -421,6 +452,10 @@ pub async fn screenshot(
             }),
         );
     }
+    if let Some(clip) = clip {
+        params.insert("captureBeyondViewport".into(), json!(true));
+        params.insert("clip".into(), clip);
+    }
     let raw = client
         .execute_cdp(
             id,
@@ -429,6 +464,31 @@ pub async fn screenshot(
         )
         .await?;
     screenshot_data(&raw)
+}
+
+fn validate_screenshot_clip(clip: &Value) -> Result<()> {
+    let values: Vec<f64> = ["x", "y", "width", "height", "scale"]
+        .iter()
+        .map(|key| {
+            clip.get(*key)
+                .and_then(Value::as_f64)
+                .filter(|n| n.is_finite())
+                .ok_or_else(|| BridgeError::User(format!("clip.{key} must be finite")))
+        })
+        .collect::<Result<_>>()?;
+    let (x, y, width, height, scale) = (values[0], values[1], values[2], values[3], values[4]);
+    if x < 0.0
+        || y < 0.0
+        || width <= 0.0
+        || height <= 0.0
+        || !(0.1..=4.0).contains(&scale)
+        || width * height * scale * scale > 32_000_000.0
+        || x + width > 100_000.0
+        || y + height > 100_000.0
+    {
+        return Err(BridgeError::User("clip requires nonnegative coordinates, positive dimensions, scale 0.1..4 and at most 32 million pixels".into()));
+    }
+    Ok(())
 }
 
 fn content_size(raw: &RawValue) -> Result<(f64, f64)> {
@@ -951,7 +1011,9 @@ pub async fn network_monitor(client: &Client, tab_id: &str, duration_ms: u64) ->
         return Err(err);
     }
     tokio::time::sleep(Duration::from_millis(duration_ms)).await;
-    client.execute_cdp(id, "Network.disable", None).await.ok();
+    if client.observation_snapshot(id).is_err() {
+        client.execute_cdp(id, "Network.disable", None).await.ok();
+    }
     client.unsubscribe_events(sub_id).await;
 
     let captured = drain_events_with_byte_budget(&mut rx, MAX_CAPTURE_EVENT_BYTES, |event| {
@@ -1114,7 +1176,9 @@ pub async fn console_logs(client: &Client, tab_id: &str, duration_ms: u64) -> Re
         return Err(err);
     }
     tokio::time::sleep(Duration::from_millis(duration_ms)).await;
-    client.execute_cdp(id, "Runtime.disable", None).await.ok();
+    if client.observation_snapshot(id).is_err() {
+        client.execute_cdp(id, "Runtime.disable", None).await.ok();
+    }
     client.unsubscribe_events(sub_id).await;
     let captured = drain_events_with_byte_budget(&mut rx, MAX_CAPTURE_EVENT_BYTES, |_| true);
     let stats = stats.snapshot();
@@ -1556,34 +1620,7 @@ pub async fn click_ax_element(client: &Client, tab_id: &str, node_id: &str) -> R
 /// round trip. This is a result-level bridge for the official Playwright
 /// locator surface, not a second locator engine.
 pub async fn locator(client: &Client, tab_id: &str, spec: Value) -> Result<Value> {
-    let id = parse_tab_id("locator", tab_id)?;
-    let spec_json = serde_json::to_string(&spec)
-        .map_err(|err| BridgeError::Protocol(format!("encode locator spec: {err}")))?;
-    let expression = LOCATOR_SCRIPT.replace("__CODEX_LOCATOR_SPEC__", &spec_json);
-    let raw = client
-        .execute_cdp(
-            id,
-            "Runtime.evaluate",
-            Some(json!({ "expression": expression, "returnByValue": true })),
-        )
-        .await?;
-    if let Some(message) = evaluate_exception_message(&raw) {
-        return Err(BridgeError::User(format!(
-            "locator evaluation failed: {message}"
-        )));
-    }
-    let encoded = runtime_value_string(&raw)?
-        .ok_or_else(|| BridgeError::Protocol("locator returned no value".into()))?;
-    let result: Value = serde_json::from_str(&encoded)
-        .map_err(|err| BridgeError::Protocol(format!("decode locator result: {err}")))?;
-    if result.get("ok").and_then(Value::as_bool) == Some(false) {
-        let message = result
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("locator failed");
-        return Err(BridgeError::User(message.to_string()));
-    }
-    Ok(result)
+    crate::locator::run(client, tab_id, spec).await
 }
 
 async fn pointer_target(client: &Client, tab_id: &str, selector: &str) -> Result<(f64, f64)> {
@@ -1608,8 +1645,6 @@ async fn pointer_target(client: &Client, tab_id: &str, selector: &str) -> Result
         .ok_or_else(|| BridgeError::Protocol("pointer resolver omitted rect.y".into()))?;
     Ok((x, y))
 }
-
-const LOCATOR_SCRIPT: &str = include_str!("locator.js");
 
 // AX tree parsing — defensive: all fields optional
 
@@ -1661,9 +1696,15 @@ fn parse_ax_tree(raw: &str) -> Result<Vec<ParsedAxNode>> {
 
 /// Navigate to URL and wait for page load. Reduces 2 MCP calls to 1.
 pub async fn nav_and_wait(client: &Client, tab_id: &str, url: &str, timeout_ms: u64) -> Result<()> {
-    navigate(client, tab_id, url).await?;
-    wait_for_load(client, tab_id, timeout_ms).await?;
-    Ok(())
+    navigation_action_and_wait(
+        client,
+        tab_id,
+        Some(url),
+        None,
+        timeout_ms,
+        crate::observation::LoadState::Load,
+    )
+    .await
 }
 
 /// Click element by selector and wait for page load.
@@ -1673,8 +1714,54 @@ pub async fn click_and_wait(
     selector: &str,
     timeout_ms: u64,
 ) -> Result<()> {
-    click(client, tab_id, selector).await?;
-    wait_for_load(client, tab_id, timeout_ms).await?;
+    navigation_action_and_wait(
+        client,
+        tab_id,
+        None,
+        Some(selector),
+        timeout_ms,
+        crate::observation::LoadState::Load,
+    )
+    .await
+}
+
+pub async fn navigation_action_and_wait(
+    client: &Client,
+    tab_id: &str,
+    url: Option<&str>,
+    selector: Option<&str>,
+    timeout_ms: u64,
+    wait_until: crate::observation::LoadState,
+) -> Result<()> {
+    let id = parse_tab_id("navigation", tab_id)?;
+    let timeout_ms = bounded_duration_ms("timeout_ms", timeout_ms, 30_000, MAX_WAIT_MS)?;
+    let url = url.map(crate::security::validate_url).transpose()?;
+    let deadline = deadline_from_now(timeout_ms)?;
+    let armed = client
+        .start_observation(id, deadline.saturating_duration_since(Instant::now()))
+        .await?;
+    if let Some(url) = url {
+        tokio::time::timeout_at(deadline, navigate(client, tab_id, &url))
+            .await
+            .map_err(|_| BridgeError::Timeout("navigate action".into()))??;
+    } else if let Some(selector) = selector {
+        let (x, y) = tokio::time::timeout_at(deadline, pointer_target(client, tab_id, selector))
+            .await
+            .map_err(|_| BridgeError::Timeout("navigation click target".into()))??;
+        // Trusted input owns its release/cleanup; do not cancel it mid-chord.
+        crate::pointer::click(client, id, x, y, 1, 1, &[]).await?;
+    } else {
+        return Err(BridgeError::User("a navigation action is required".into()));
+    }
+    client
+        .wait_for_observed_navigation(
+            id,
+            &armed.cursor,
+            None,
+            wait_until,
+            deadline.saturating_duration_since(Instant::now()),
+        )
+        .await?;
     Ok(())
 }
 
@@ -1754,13 +1841,14 @@ pub async fn file_input(
 
     // 3. Set files on the resolved node
     client
-        .execute_cdp(
+        .execute_cdp_once_with_timeout(
             id,
             "DOM.setFileInputFiles",
             Some(json!({
                 "objectId": object_id,
                 "files": paths,
             })),
+            Duration::from_secs(20),
         )
         .await
         .map(|_| ())
@@ -1782,10 +1870,11 @@ pub async fn handle_dialog(
         params.insert("promptText".into(), json!(text));
     }
     client
-        .execute_cdp(
+        .execute_cdp_once_with_timeout(
             id,
             "Page.handleJavaScriptDialog",
             Some(serde_json::Value::Object(params)),
+            Duration::from_secs(10),
         )
         .await
         .map(|_| ())
@@ -2466,6 +2555,23 @@ mod tests {
 #[cfg(test)]
 mod navigation_and_management_tests {
     use super::*;
+
+    #[test]
+    fn screenshot_clip_rejects_unbounded_geometry() {
+        assert!(
+            validate_screenshot_clip(&json!({"x":0,"y":0,"width":100,"height":50,"scale":1}))
+                .is_ok()
+        );
+        for clip in [
+            json!({"x":-1,"y":0,"width":100,"height":50,"scale":1}),
+            json!({"x":0,"y":0,"width":0,"height":50,"scale":1}),
+            json!({"x":0,"y":0,"width":10000,"height":10000,"scale":4}),
+            json!({"x":0,"y":0,"width":100,"height":50,"scale":5}),
+            json!({"x":0,"y":0,"width":100,"height":50}),
+        ] {
+            assert!(validate_screenshot_clip(&clip).is_err());
+        }
+    }
 
     #[test]
     fn navigation_error_text_is_reported() {

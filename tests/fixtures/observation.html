@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Bridge observation fixture</title>
+<body>
+  <h1>Observation fixture</h1>
+  <button id="alert" onclick="alert('fixture dialog')">Open alert</button>
+  <input id="upload" type="file" multiple>
+  <a id="next" href="locator.html?from=observation">Next document</a>
+  <select id="multi" multiple><option value="red">Red</option><option value="green">Green</option></select>
+  <div id="shadow-host"></div>
+  <p id="status">idle</p>
+  <script>
+    document.querySelector('#upload').addEventListener('change', e => {
+      document.querySelector('#status').textContent = Array.from(e.target.files).map(f => f.name).join(',');
+    });
+    document.querySelector('#shadow-host').attachShadow({mode:'open'}).innerHTML = '<button>Shadow button</button>';
+    console.log('early-fixture-log');
+  </script>
+</body></html>

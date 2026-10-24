@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -13,6 +13,10 @@ use uuid::Uuid;
 
 use crate::discovery;
 use crate::error::{BridgeError, Result};
+use crate::observation::{
+    ChooserSnapshot, DialogSnapshot, EventBatch, LoadState, ObservationCursor, ObservationStore,
+    TabSnapshot,
+};
 use crate::pipe::{dial_transport, PipeStream, TransportIo};
 use crate::protocol::{self, Request, Response};
 use crate::registry::{self, BrowserSelector};
@@ -171,6 +175,9 @@ struct ClientInner {
     attached_tabs: Mutex<HashMap<i64, bool>>,
     /// Active CDP event subscriptions. Routed by read_loop for frames with a `method` and no `id`.
     event_subs: Mutex<Vec<EventSubscription>>,
+    observations: StdMutex<ObservationStore>,
+    observation_start_lock: Mutex<()>,
+    file_chooser_interceptions: Mutex<HashSet<i64>>,
     next_sub_id: AtomicU64,
     /// Monotonic generation for the active pipe. Read loops from stale
     /// generations must not tear down a newer reconnect.
@@ -270,6 +277,9 @@ impl Client {
                 tab_locks: Mutex::new(HashMap::new()),
                 attached_tabs: Mutex::new(HashMap::new()),
                 event_subs: Mutex::new(Vec::new()),
+                observations: StdMutex::new(ObservationStore::default()),
+                observation_start_lock: Mutex::new(()),
+                file_chooser_interceptions: Mutex::new(HashSet::new()),
                 next_sub_id: AtomicU64::new(1),
                 connection_epoch: AtomicU64::new(0),
                 #[cfg(test)]
@@ -309,6 +319,9 @@ impl Client {
                 tab_locks: Mutex::new(HashMap::new()),
                 attached_tabs: Mutex::new(HashMap::new()),
                 event_subs: Mutex::new(Vec::new()),
+                observations: StdMutex::new(ObservationStore::default()),
+                observation_start_lock: Mutex::new(()),
+                file_chooser_interceptions: Mutex::new(HashSet::new()),
                 next_sub_id: AtomicU64::new(1),
                 connection_epoch: AtomicU64::new(1),
                 #[cfg(test)]
@@ -328,6 +341,10 @@ impl Client {
     /// Stop reconnecting and close the active pipe read loop. Pending requests
     /// fail as `Connection` errors instead of hanging until their timeout.
     pub async fn shutdown(&self) {
+        if !self.inner.closed.load(Ordering::Acquire) && self.is_alive() {
+            self.cleanup_file_chooser_interceptions(Instant::now() + Duration::from_secs(2))
+                .await;
+        }
         if self.inner.closed.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -345,8 +362,10 @@ impl Client {
         self.inner.writer.lock().await.take();
         self.inner.pending.lock().await.clear();
         self.inner.event_subs.lock().await.clear();
+        self.inner.observations.lock().unwrap().clear();
         self.inner.tab_locks.lock().await.clear();
         self.inner.attached_tabs.lock().await.clear();
+        self.inner.file_chooser_interceptions.lock().await.clear();
         *self.inner.reconnect_cooldown_until.lock().await = None;
     }
 
@@ -362,6 +381,7 @@ impl Client {
         }
 
         let deadline = Instant::now() + TURN_END_TIMEOUT;
+        self.cleanup_file_chooser_interceptions(deadline).await;
         let attached_tabs: Vec<i64> = self
             .inner
             .attached_tabs
@@ -598,6 +618,7 @@ impl Client {
                     // New connection has no CDP debugger sessions — drop the cache so
                     // execute_cdp falls back to a full attach instead of trusting a stale entry.
                     self.inner.attached_tabs.lock().await.clear();
+                    self.inner.observations.lock().unwrap().clear();
                     *self.inner.reconnect_cooldown_until.lock().await = None;
                     self.inner.alive.store(true, Ordering::Release);
                     self.spawn_read_loop(reader, epoch);
@@ -637,6 +658,9 @@ impl Client {
                 let Some(inner) = Weak::upgrade(&inner) else {
                     return;
                 };
+                if inner.connection_epoch.load(Ordering::Acquire) != epoch {
+                    return;
+                }
                 let value: Value = match serde_json::from_slice(&frame) {
                     Ok(value) => value,
                     Err(_) => continue,
@@ -662,6 +686,7 @@ impl Client {
                         else {
                             continue;
                         };
+                        inner.observations.lock().unwrap().record(&event);
                         let event_bytes = serde_json::to_vec(&event)
                             .map(|encoded| encoded.len())
                             .unwrap_or(frame.len());
@@ -759,6 +784,7 @@ impl Client {
             // RecvError → Connection translation in send_request_once.
             inner.pending.lock().await.clear();
             inner.event_subs.lock().await.clear();
+            inner.observations.lock().unwrap().clear();
             // Reclaim the writer so any in-flight encode sees None instead of
             // writing into a broken pipe.
             *inner.writer.lock().await = None;
@@ -889,6 +915,273 @@ impl Client {
         self.inner.event_subs.lock().await.retain(|s| s.id != id);
     }
 
+    /// Start bounded persistent observation before enabling event producers.
+    /// Sticky attachment validates the owned tab; no untagged event is stored.
+    /// Logs before this call are unavailable except for CDP's own enable replay.
+    pub async fn start_observation(
+        &self,
+        tab_id: i64,
+        request_timeout: Duration,
+    ) -> Result<TabSnapshot> {
+        let deadline = Instant::now() + request_timeout;
+        let _start = timeout(request_timeout, self.inner.observation_start_lock.lock())
+            .await
+            .map_err(|_| BridgeError::Timeout("start observation".into()))?;
+        timeout(
+            remaining_before_write("start observation", deadline)?,
+            self.ensure_alive(),
+        )
+        .await
+        .map_err(|_| BridgeError::Timeout("start observation".into()))??;
+        let initial = self.inner.observations.lock().unwrap().register(tab_id)?;
+        if initial.enabled {
+            return Ok(initial);
+        }
+        let result = timeout(
+            remaining_before_write("start observation", deadline)?,
+            async {
+                for (method, params) in [
+                    ("Page.enable", None),
+                    (
+                        "Page.setLifecycleEventsEnabled",
+                        Some(json!({"enabled":true})),
+                    ),
+                    ("Runtime.enable", None),
+                    ("Log.enable", None),
+                    ("Network.enable", None),
+                ] {
+                    self.execute_cdp_with_timeout(
+                        tab_id,
+                        method,
+                        params,
+                        remaining_before_write("start observation", deadline)?,
+                    )
+                    .await?;
+                }
+                let raw = self
+                    .execute_cdp_with_timeout(
+                        tab_id,
+                        "Page.getFrameTree",
+                        None,
+                        remaining_before_write("start observation", deadline)?,
+                    )
+                    .await?;
+                let tree: Value = serde_json::from_str(raw.get()).map_err(|err| {
+                    BridgeError::Protocol(format!("parse observation frame tree: {err}"))
+                })?;
+                self.inner
+                    .observations
+                    .lock()
+                    .unwrap()
+                    .seed_frame_tree(tab_id, tree.get("frameTree").unwrap_or(&tree));
+                let before_ready = self.observation_snapshot(tab_id)?.cursor;
+                let raw = self
+                    .execute_cdp_with_timeout(
+                        tab_id,
+                        "Runtime.evaluate",
+                        Some(json!({"expression":"document.readyState", "returnByValue":true})),
+                        remaining_before_write("start observation", deadline)?,
+                    )
+                    .await?;
+                let ready: Value = serde_json::from_str(raw.get()).map_err(|err| {
+                    BridgeError::Protocol(format!("parse observation ready state: {err}"))
+                })?;
+                self.inner.observations.lock().unwrap().finish_start(
+                    tab_id,
+                    &before_ready,
+                    ready.pointer("/result/value").and_then(Value::as_str),
+                )
+            },
+        )
+        .await
+        .map_err(|_| BridgeError::Timeout("start observation".into()))
+        .and_then(|result| result);
+        if result.is_err() {
+            self.inner.observations.lock().unwrap().remove(tab_id);
+            // The overall deadline can cancel a request before its own timeout
+            // branch removes the sender. Do not leave cancelled waiters behind.
+            self.inner
+                .pending
+                .lock()
+                .await
+                .retain(|_, sender| !sender.is_closed());
+        }
+        result
+    }
+
+    /// Stop local storage. Domains remain enabled until the attachment ends;
+    /// disabling them here could disrupt another in-flight bounded observer.
+    pub fn stop_observation(&self, tab_id: i64) {
+        self.inner.observations.lock().unwrap().remove(tab_id);
+    }
+
+    pub fn observation_snapshot(&self, tab_id: i64) -> Result<TabSnapshot> {
+        self.inner.observations.lock().unwrap().snapshot(tab_id)
+    }
+
+    pub fn read_observed_events(
+        &self,
+        tab_id: i64,
+        cursor: Option<&ObservationCursor>,
+        methods: &[&str],
+        limit: usize,
+        max_bytes: usize,
+    ) -> Result<EventBatch> {
+        self.inner
+            .observations
+            .lock()
+            .unwrap()
+            .read(tab_id, cursor, methods, limit, max_bytes)
+    }
+
+    pub fn validate_dialog(&self, tab_id: i64, dialog_id: &str) -> Result<DialogSnapshot> {
+        self.inner
+            .observations
+            .lock()
+            .unwrap()
+            .dialog(tab_id, dialog_id)
+    }
+
+    /// Only clear the handled dialog; a newly opened dialog retains its own ID.
+    pub fn close_observed_dialog(&self, tab_id: i64, dialog_id: &str) {
+        self.inner
+            .observations
+            .lock()
+            .unwrap()
+            .close_dialog(tab_id, dialog_id);
+    }
+
+    pub fn validate_file_chooser(&self, tab_id: i64, chooser_id: &str) -> Result<ChooserSnapshot> {
+        self.inner
+            .observations
+            .lock()
+            .unwrap()
+            .chooser(tab_id, chooser_id)
+    }
+
+    pub fn close_observed_file_chooser(&self, tab_id: i64, chooser_id: &str) {
+        self.inner
+            .observations
+            .lock()
+            .unwrap()
+            .close_chooser(tab_id, chooser_id);
+    }
+
+    pub async fn start_file_chooser_interception(
+        &self,
+        tab_id: i64,
+        request_timeout: Duration,
+    ) -> Result<TabSnapshot> {
+        let deadline = Instant::now() + request_timeout;
+        self.start_observation(tab_id, request_timeout).await?;
+        self.inner
+            .observations
+            .lock()
+            .unwrap()
+            .clear_chooser(tab_id);
+        {
+            let mut armed = self.inner.file_chooser_interceptions.lock().await;
+            if !armed.contains(&tab_id) && armed.len() >= 16 {
+                return Err(BridgeError::User(
+                    "file chooser interception tab limit (16) reached; stop one first".into(),
+                ));
+            }
+            // Record before sending: a failed write/ACK can still have applied.
+            armed.insert(tab_id);
+        }
+        let remaining = remaining_before_write("start file chooser interception", deadline)?;
+        timeout(
+            remaining,
+            self.execute_cdp_once_with_timeout(
+                tab_id,
+                "Page.setInterceptFileChooserDialog",
+                Some(json!({"enabled":true})),
+                remaining,
+            ),
+        )
+        .await
+        .map_err(|_| BridgeError::Timeout("start file chooser interception".into()))??;
+        self.observation_snapshot(tab_id)
+    }
+
+    /// Disable interception without consuming the captured chooser handle.
+    /// The caller consumes that handle after setFiles (including ambiguous
+    /// mutation failures), or explicitly closes it when abandoning the chooser.
+    pub async fn stop_file_chooser_interception(
+        &self,
+        tab_id: i64,
+        request_timeout: Duration,
+    ) -> Result<()> {
+        if !self
+            .inner
+            .file_chooser_interceptions
+            .lock()
+            .await
+            .contains(&tab_id)
+        {
+            return Ok(());
+        }
+        timeout(
+            request_timeout,
+            self.execute_cdp_once_with_timeout(
+                tab_id,
+                "Page.setInterceptFileChooserDialog",
+                Some(json!({"enabled":false})),
+                request_timeout,
+            ),
+        )
+        .await
+        .map_err(|_| BridgeError::Timeout("stop file chooser interception".into()))??;
+        self.inner
+            .file_chooser_interceptions
+            .lock()
+            .await
+            .remove(&tab_id);
+        Ok(())
+    }
+
+    async fn cleanup_file_chooser_interceptions(&self, deadline: Instant) {
+        let tabs: Vec<i64> = self
+            .inner
+            .file_chooser_interceptions
+            .lock()
+            .await
+            .iter()
+            .copied()
+            .collect();
+        for tab in tabs {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() || !self.is_alive() {
+                break;
+            }
+            if let Err(err) = self
+                .stop_file_chooser_interception(tab, remaining.min(Duration::from_millis(500)))
+                .await
+            {
+                tracing::debug!(tab_id=tab, error=%err, "file chooser interception cleanup not confirmed");
+            }
+        }
+    }
+
+    pub async fn wait_for_observed_navigation(
+        &self,
+        tab_id: i64,
+        cursor: &ObservationCursor,
+        expected_url: Option<&str>,
+        wait_until: LoadState,
+        wait_timeout: Duration,
+    ) -> Result<TabSnapshot> {
+        crate::observation::wait_for_navigation(
+            &self.inner.observations,
+            tab_id,
+            cursor,
+            expected_url,
+            wait_until,
+            wait_timeout,
+        )
+        .await
+    }
+
     pub async fn execute_cdp(
         &self,
         tab_id: i64,
@@ -932,6 +1225,7 @@ impl Client {
                 Ok(raw) => return Ok(raw),
                 Err(err) if is_session_invalid_error(&err) => {
                     self.inner.attached_tabs.lock().await.remove(&tab_id);
+                    self.inner.observations.lock().unwrap().remove(tab_id);
                 }
                 Err(err) => {
                     // A silent sticky attempt usually means the extension dropped
@@ -946,6 +1240,7 @@ impl Client {
                     // dead debugger, so the attachment stays valid.
                     if sticky_failure_invalidates(&err, request_timeout) {
                         self.inner.attached_tabs.lock().await.remove(&tab_id);
+                        self.inner.observations.lock().unwrap().remove(tab_id);
                     }
                     return Err(err);
                 }
@@ -971,6 +1266,7 @@ impl Client {
             Ok(raw) => Ok(raw),
             Err(err) if is_session_invalid_error(&err) => {
                 self.inner.attached_tabs.lock().await.remove(&tab_id);
+                self.inner.observations.lock().unwrap().remove(tab_id);
                 self.detach_tab_until(tab_id, deadline).await.ok();
                 if let Err(err) = self.attach_tab_until(tab_id, deadline).await {
                     self.retire_current_tab_state(tab_id).await;
@@ -1031,6 +1327,7 @@ impl Client {
             Ok(raw) => Ok(raw),
             Err(err) if is_session_invalid_error(&err) => {
                 self.inner.attached_tabs.lock().await.remove(&tab_id);
+                self.inner.observations.lock().unwrap().remove(tab_id);
                 Err(BridgeError::Connection(format!(
                     "{method} may have reached the browser before its CDP session became invalid; outcome unknown, so it was not replayed: {err}"
                 )))
@@ -1046,12 +1343,19 @@ impl Client {
     /// Invalidate the sticky attach cache for a tab.
     pub async fn invalidate_attachment(&self, tab_id: i64) {
         self.inner.attached_tabs.lock().await.remove(&tab_id);
+        self.inner.observations.lock().unwrap().remove(tab_id);
     }
 
     /// Retire per-tab state after a tab closes. The lock is removed only when no
     /// other task already cloned it, preserving serialization for in-flight work.
     pub async fn retire_tab_state(&self, tab_id: i64) {
         self.inner.attached_tabs.lock().await.remove(&tab_id);
+        self.inner.observations.lock().unwrap().remove(tab_id);
+        self.inner
+            .file_chooser_interceptions
+            .lock()
+            .await
+            .remove(&tab_id);
         let mut locks = self.inner.tab_locks.lock().await;
         if let Some(lock) = locks.get(&tab_id) {
             if Arc::strong_count(lock) == 1 {
@@ -1062,6 +1366,7 @@ impl Client {
 
     async fn retire_current_tab_state(&self, tab_id: i64) {
         self.inner.attached_tabs.lock().await.remove(&tab_id);
+        self.inner.observations.lock().unwrap().remove(tab_id);
         let mut locks = self.inner.tab_locks.lock().await;
         if let Some(lock) = locks.get(&tab_id) {
             // The current execute_cdp call still owns one Arc while holding the
@@ -1080,6 +1385,8 @@ impl Client {
     /// Clear all per-tab state (call on session finalize).
     pub async fn clear_tab_state(&self) {
         self.inner.attached_tabs.lock().await.clear();
+        self.inner.observations.lock().unwrap().clear();
+        self.inner.file_chooser_interceptions.lock().await.clear();
         self.inner
             .tab_locks
             .lock()
