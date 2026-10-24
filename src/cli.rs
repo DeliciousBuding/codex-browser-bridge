@@ -404,6 +404,7 @@ pub async fn run_cli(client: Client) -> anyhow::Result<()> {
     println!("          snapshot <id>, screenshot <id>, info, ping, try <method>, quit");
 
     let stdin = io::stdin();
+    let mut user_tab_snapshots = Vec::<browser::UserTab>::new();
     loop {
         print!("> ");
         io::stdout().flush()?;
@@ -464,21 +465,33 @@ pub async fn run_cli(client: Client) -> anyhow::Result<()> {
             }
             "user-tabs" => match browser::list_user_tabs(&client).await {
                 Ok(tabs) => {
-                    for tab in tabs {
+                    for tab in &tabs {
                         println!(
                             "  [{}] {} - {} (group: {})",
                             tab.id, tab.title, tab.url, tab.tab_group
                         );
                     }
+                    user_tab_snapshots = tabs;
                 }
-                Err(err) => println!("Error: {err}"),
+                Err(err) => {
+                    user_tab_snapshots.clear();
+                    println!("Error: {err}");
+                }
             },
             "claim" => {
                 if args.len() < 2 {
                     println!("Usage: claim <tab_id>");
                     continue;
                 }
-                match browser::claim_user_tab(&client, &args[1]).await {
+                let Some(snapshot) = user_tab_snapshots.iter().find(|tab| tab.id == args[1]) else {
+                    println!("Run user-tabs first and choose a tab from that snapshot");
+                    continue;
+                };
+                let result =
+                    browser::claim_user_tab(&client, &snapshot.id, &snapshot.title, &snapshot.url)
+                        .await;
+                user_tab_snapshots.clear();
+                match result {
                     Ok(tab) => println!("Claimed: [{}] {} - {}", tab.id, tab.title, tab.url),
                     Err(err) => println!("Error: {err}"),
                 }

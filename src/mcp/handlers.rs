@@ -596,7 +596,19 @@ impl super::Server {
 
     async fn handle_claim_tab(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
-        let tab = browser::claim_user_tab(&self.client_snapshot(), tab_id).await?;
+        let expected_title = required_string_value(&args, "expected_title").map_err(|_| {
+            anyhow::anyhow!("codex_claim_tab requires expected_title and expected_url from codex_user_tabs; numeric-only claims are no longer accepted")
+        })?;
+        let expected_url = required_string_value(&args, "expected_url").map_err(|_| {
+            anyhow::anyhow!("codex_claim_tab requires expected_title and expected_url from codex_user_tabs; numeric-only claims are no longer accepted")
+        })?;
+        let tab = browser::claim_user_tab(
+            &self.client_snapshot(),
+            tab_id,
+            expected_title,
+            expected_url,
+        )
+        .await?;
         Ok(vec![Content::text(serde_json::to_string(&tab)?)])
     }
 
