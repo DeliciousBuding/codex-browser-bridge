@@ -283,6 +283,28 @@ pub fn select_browser<'a>(
     }
 }
 
+/// An implicit choice is safe only after every discovered endpoint has been
+/// identified. A failed probe is unknown, not proof that no browser is there.
+/// Explicit instance selectors can proceed because dialing re-verifies that
+/// identity; they never fall back to another profile.
+pub fn select_browser_from_inventory<'a>(
+    inventory: &'a BrowserInventory,
+    selector: &BrowserSelector,
+) -> Result<&'a BrowserDescriptor> {
+    selector.validate()?;
+    if selector.instance_id.is_none()
+        && (inventory.unprobed_pipe_count != 0
+            || inventory.failed_pipe_count != 0
+            || inventory.probed_pipe_count != inventory.pipe_count)
+    {
+        return Err(BridgeError::User(format!(
+            "browser inventory is incomplete ({} unprobed, {} failed endpoints); retry discovery or select an explicit browser_id",
+            inventory.unprobed_pipe_count, inventory.failed_pipe_count
+        )));
+    }
+    select_browser(&inventory.browsers, selector)
+}
+
 async fn probe_pipe(pipe: discovery::PipeInfo) -> Option<BrowserDescriptor> {
     let path = discovery::pipe_path(&pipe.name);
     let mut stream = dial_transport(&path).await.ok()?;

@@ -50,6 +50,9 @@ pub async fn shutdown_client(client: &Client) -> bool {
 #[derive(Clone)]
 pub struct Server {
     pub(crate) client: Arc<RwLock<Client>>,
+    /// Tool operations keep their binding stable while rebinding has exclusive
+    /// access. This also serializes concurrent bind requests.
+    pub(crate) binding_lock: Arc<tokio::sync::RwLock<()>>,
     pub(crate) clipboard: Arc<tokio::sync::Mutex<crate::clipboard::VirtualClipboard>>,
     pub(crate) webmcp: Arc<crate::webmcp::WebMcpRegistry>,
     pub(crate) page_assets: crate::page_assets::PageAssetsRegistry,
@@ -68,6 +71,7 @@ impl Server {
             .collect();
         Self {
             client: Arc::new(RwLock::new(client)),
+            binding_lock: Arc::new(tokio::sync::RwLock::new(())),
             clipboard: Arc::new(tokio::sync::Mutex::new(
                 crate::clipboard::VirtualClipboard::default(),
             )),
@@ -86,6 +90,7 @@ impl Server {
             .collect();
         Self {
             client: Arc::new(RwLock::new(client)),
+            binding_lock: Arc::new(tokio::sync::RwLock::new(())),
             clipboard: Arc::new(tokio::sync::Mutex::new(
                 crate::clipboard::VirtualClipboard::default(),
             )),
@@ -146,6 +151,7 @@ impl Server {
     /// by a dead session makes them impossible to attach or close later. This
     /// never fails the caller and never blocks for long.
     pub async fn shutdown_turn(&self) -> bool {
+        let _binding = self.binding_lock.write().await;
         shutdown_client(&self.client_snapshot()).await
     }
 
@@ -322,6 +328,7 @@ impl Server {
         if uri != "codex://tabs" {
             return error_response(Some(id), -32602, &format!("unknown resource uri: {uri}"));
         }
+        let _binding = self.binding_lock.read().await;
         let client = self.client_snapshot();
         match crate::browser::list_tabs(&client).await {
             Ok(tabs) => {

@@ -169,6 +169,9 @@ struct ClientInner {
     pending: Mutex<PendingMap>,
     next_id: AtomicU64,
     session: tokio::sync::RwLock<SessionTurn>,
+    /// Ownership may survive a lost pipe or an unacknowledged mutation. Only
+    /// confirmed turnEnded clears this, never connection health alone.
+    turn_may_own_tabs: AtomicBool,
     tab_locks: Mutex<HashMap<i64, Arc<Mutex<()>>>>,
     /// Per-tab sticky attach cache: tabs known to have an active CDP debugger session.
     /// Avoids detach+attach round-trips for repeated CDP calls on the same tab.
@@ -263,6 +266,7 @@ impl Client {
     }
 
     fn from_lazy_inner_with_ids(factory: ConnectionFactory, ids: Option<(String, String)>) -> Self {
+        let resumed_turn = ids.is_some();
         let (session_id, turn_id) =
             ids.unwrap_or_else(|| (Uuid::new_v4().to_string(), Uuid::new_v4().to_string()));
         Self {
@@ -274,6 +278,7 @@ impl Client {
                     session_id,
                     turn_id,
                 }),
+                turn_may_own_tabs: AtomicBool::new(resumed_turn),
                 tab_locks: Mutex::new(HashMap::new()),
                 attached_tabs: Mutex::new(HashMap::new()),
                 event_subs: Mutex::new(Vec::new()),
@@ -316,6 +321,7 @@ impl Client {
                     session_id,
                     turn_id,
                 }),
+                turn_may_own_tabs: AtomicBool::new(false),
                 tab_locks: Mutex::new(HashMap::new()),
                 attached_tabs: Mutex::new(HashMap::new()),
                 event_subs: Mutex::new(Vec::new()),
@@ -405,6 +411,7 @@ impl Client {
             session.turn_id = Uuid::new_v4().to_string();
         }
         self.clear_tab_state().await;
+        self.inner.turn_may_own_tabs.store(false, Ordering::Release);
         Ok(true)
     }
 
@@ -479,7 +486,17 @@ impl Client {
         let write_result = {
             let mut writer_guard = self.inner.writer.lock().await;
             match writer_guard.as_mut() {
-                Some(w) => protocol::encode_frame(w, &req).await,
+                Some(w) => {
+                    if !matches!(
+                        method,
+                        "getInfo" | "getTabs" | "getUserTabs" | "getUserHistory"
+                    ) {
+                        // Mark before writing: an interrupted write/ACK can still
+                        // leave browser-side effects. Do not infer no ownership.
+                        self.inner.turn_may_own_tabs.store(true, Ordering::Release);
+                    }
+                    protocol::encode_frame(w, &req).await
+                }
                 None => Err(BridgeError::Connection(
                     "writer is none (connection dropped)".into(),
                 )),
@@ -515,6 +532,13 @@ impl Client {
 
     pub async fn has_live_connection(&self) -> bool {
         self.is_alive() && self.inner.writer.lock().await.is_some()
+    }
+
+    /// Whether this turn may still own browser tabs despite pipe health.
+    /// Resumed turns and requests with possible effects stay unresolved until
+    /// the extension acknowledges turnEnded.
+    pub fn has_unresolved_turn(&self) -> bool {
+        self.inner.turn_may_own_tabs.load(Ordering::Acquire)
     }
 
     /// Current session and turn identifiers, used by the shell to persist one
@@ -1601,7 +1625,7 @@ fn selected_connection_factory(
             }
 
             let inventory = registry::discover_browsers().await?;
-            let browser = registry::select_browser(&inventory.browsers, &selector)?;
+            let browser = registry::select_browser_from_inventory(&inventory, &selector)?;
             let mut stream = dial_transport(&browser.transport.path).await?;
             verify_selected_stream(&mut stream, Some(&browser.family), Some(&browser.id)).await?;
             *pinned = Some(browser.id.clone());
@@ -1620,7 +1644,7 @@ fn selected_connection_factory(
 async fn dial_browser_instance(instance_id: &str) -> Result<PipeStream> {
     let inventory = registry::discover_browsers().await?;
     let selector = BrowserSelector::new(None, Some(instance_id.to_string()));
-    let browser = registry::select_browser(&inventory.browsers, &selector)?;
+    let browser = registry::select_browser_from_inventory(&inventory, &selector)?;
     let mut stream = dial_transport(&browser.transport.path).await?;
     verify_selected_stream(&mut stream, Some(&browser.family), Some(instance_id)).await?;
     Ok(stream)
@@ -1862,6 +1886,53 @@ mod reconnect_tests {
     }
 
     #[tokio::test]
+    async fn selected_transport_identity_is_reverified_after_discovery() {
+        for (family, id, accepted) in [
+            ("EDGE", Some("expected"), true),
+            ("edge", Some("replacement"), false),
+            ("chrome", Some("expected"), false),
+            ("edge", None, false),
+        ] {
+            let (stream, mut peer) = duplex(4096);
+            let task = tokio::spawn(async move {
+                let mut stream: PipeStream = Box::new(stream);
+                verify_selected_stream(&mut stream, Some("edge"), Some("expected")).await
+            });
+            let request = next_request(&mut peer).await;
+            encode_frame(
+                &mut peer,
+                &json!({"id":request["id"], "result": {
+                    "type":"extension", "family":family, "metadata":{"extensionInstanceId":id}
+                }}),
+            )
+            .await
+            .unwrap();
+            let result = timeout(TEST_STATE_TIMEOUT, task).await.unwrap().unwrap();
+            assert_eq!(result.is_ok(), accepted, "family={family}, id={id:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn uncertain_mutation_survives_disconnect_until_confirmed_turn_end() {
+        let (client, mut peer) = test_client(4096).await;
+        assert!(!client.has_unresolved_turn());
+        let cloned = client.clone();
+        let task = tokio::spawn(async move { cloned.send_request("createTab", None).await });
+        let req = next_request(&mut peer).await;
+        assert_eq!(req["method"], "createTab");
+        assert!(client.has_unresolved_turn());
+        drop(peer);
+        assert!(timeout(TEST_STATE_TIMEOUT, task)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err());
+        assert!(client.has_unresolved_turn());
+        assert!(!client.end_turn().await.unwrap());
+        assert!(client.has_unresolved_turn());
+    }
+
+    #[tokio::test]
     async fn normal_roundtrip_tracks_pending() {
         let (client, mut server) = test_client(4096).await;
         let handle = tokio::spawn({
@@ -1956,12 +2027,14 @@ mod reconnect_tests {
 
         let ended = next_request(&mut server).await;
         assert_eq!(ended["method"], "turnEnded");
+        assert!(client.has_unresolved_turn());
         let session_id = ended["params"]["session_id"].as_str().unwrap().to_string();
         let old_turn_id = ended["params"]["turn_id"].as_str().unwrap().to_string();
         encode_frame(&mut server, &json!({"id": ended["id"], "result": {}}))
             .await
             .unwrap();
         task.await.unwrap().unwrap();
+        assert!(!client.has_unresolved_turn());
 
         let next = tokio::spawn({
             let client = client.clone();
