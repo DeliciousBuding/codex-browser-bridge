@@ -37,8 +37,8 @@ No browser profile copying. No WebDriver. No remote setup. It discovers the
 each live browser-extension instance, speaks the same JSON-RPC protocol, and
 exposes 66 MCP tools for browser automation.
 
-This README describes the v1.13.0 release candidate: 66 MCP tools; publication
-is confirmed only after the tagged release workflow and npm acceptance.
+This README describes v1.13.0: 66 MCP tools (`basic` 46 / `network` 65 /
+`full` 66), distributed as Windows and Linux GNU packages.
 
 The goal is complete browser capability access for non-Codex agents. Coverage
 is tracked by method and semantics in [the parity matrix](docs/official-parity.md);
@@ -101,6 +101,11 @@ package) `26.1016.8120.0` and Edge extension `1.26.1020.11845`.
 | Windows arm64 | Published binary; not live-tested for this release |
 | Linux GNU x64 | Full native Rust/Node gates, release build, and no-browser doctor passed on Ubuntu 24.04 / glibc 2.39; extension not live-tested |
 | Linux GNU arm64 | Native Rust tests/clippy/release and synthetic Chrome extension parity smoke passed; not full-surface parity |
+
+The 2026-10-24 Windows Edge and Linux arm64 Chrome runs passed the 20-check
+parity smoke and the 9-check observation/locator/file-result smoke. File chooser
+capture and permission-denial cleanup passed; successful file upload requires
+the extension's file-access permission and was not accepted in these runs.
 | macOS | Unix code compilation alone does not establish runtime support; no published binary or live verification |
 
 The bridge does not install a second browser extension or copy your browser
