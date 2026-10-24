@@ -4,6 +4,7 @@ import argparse
 import functools
 import http.server
 import json
+import os
 from pathlib import Path
 import re
 import tempfile
@@ -20,7 +21,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bridge", type=Path, required=True)
     parser.add_argument("--browser-instance", required=True)
+    parser.add_argument("--allow-upload-denied", action="store_true", help="Verify explicit extension file-access denial without claiming uploaded files")
     args = parser.parse_args()
+    upload_root = tempfile.TemporaryDirectory(prefix="bridge-upload-smoke-")
+    upload_file = Path(upload_root.name) / "synthetic.txt"
+    upload_file.write_text("synthetic browser bridge upload\n", encoding="utf-8")
+    previous_upload = os.environ.get("CODEX_BRIDGE_UPLOAD_BASE")
+    os.environ["CODEX_BRIDGE_UPLOAD_BASE"] = upload_root.name
     fixture = Path(__file__).resolve().parents[1] / "tests" / "fixtures"
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(parity.QuietHandler, directory=str(fixture)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -64,6 +71,17 @@ def main():
         assert chooser and chooser["mode"] == "selectMultiple"
         denied = bridge.tool("codex_file_chooser", {"tab_id":tab,"action":"set_files","chooser_id":chooser["id"],"files":["/not-authorized"]}, True)
         assert denied.get("isError")
+        upload = bridge.tool("codex_file_chooser", {"tab_id":tab,"action":"set_files","chooser_id":chooser["id"],"files":[str(upload_file)],"colocated_browser":True}, True)
+        if upload.get("isError"):
+            assert args.allow_upload_denied and "Not allowed" in upload["content"][0]["text"], upload["content"]
+            checks.append("upload-permission-denial-surfaced")
+        else:
+            uploaded = json.loads(upload["content"][0]["text"])
+            assert uploaded["uploaded"] == 1 and uploaded["path_scope"] == "browser_host"
+            assert locator("text", selector="#status")["value"] == "synthetic.txt"
+            checks.append("upload-browser-files-confirmed")
+        stale_chooser = bridge.tool("codex_file_chooser", {"tab_id":tab,"action":"set_files","chooser_id":chooser["id"],"files":[str(upload_file)],"colocated_browser":True}, True)
+        assert stale_chooser.get("isError")
         bridge.tool("codex_file_chooser", {"tab_id":tab,"action":"stop"})
         checks.append("file-chooser-mode-authority-cleanup")
         before_nav = observe("state")
@@ -80,9 +98,10 @@ def main():
         checks.append("unicode-sequential-append")
         with tempfile.TemporaryDirectory(prefix="bridge-file-smoke-") as output:
             inventory = bridge.value("codex_page_assets", {"tab_id":tab,"action":"list"})
-            # Empty selection still emits a bounded manifest through one atomic bundle.
-            bundle = bridge.value("codex_page_assets", {"tab_id":tab,"action":"bundle","inventory_id":inventory["id"],"output_dir":output,"asset_ids":[]})
+            # This fixture has no bundleable external resources: still emit its bounded manifest.
+            bundle = bridge.value("codex_page_assets", {"tab_id":tab,"action":"bundle","inventory_id":inventory["id"],"output_dir":output})
             assert bundle["path_scope"] == "bridge_host" and bundle["browser_download"] is False
+            assert Path(bundle["manifest_path"]).is_file()
             checks.append("atomic-file-result-path-scope")
         bridge.tool("codex_finalize")
         tab = None
@@ -96,6 +115,11 @@ def main():
         bridge.close()
         server.shutdown()
         server.server_close()
+        upload_root.cleanup()
+        if previous_upload is None:
+            os.environ.pop("CODEX_BRIDGE_UPLOAD_BASE", None)
+        else:
+            os.environ["CODEX_BRIDGE_UPLOAD_BASE"] = previous_upload
 
 
 if __name__ == "__main__":

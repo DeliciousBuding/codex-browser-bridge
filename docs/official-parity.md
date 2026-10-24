@@ -174,7 +174,8 @@ deduplicated in current DOM order, and nth applies to the final set. `all` retur
 reevaluated specs, not persistent Playwright objects. Absent visible/enabled
 reads return false. Select descriptors validate every option before changing
 selection. Trusted setChecked clicks once and checks the same element's async
-postcondition. Sequential ASCII input uses key events; Unicode uses insertText.
+postcondition. Sequential ASCII alphanumeric/space input uses key events;
+punctuation/Unicode/control text uses insertText without physical-key parity.
 Regex is deliberately restricted: at most 256 bytes, unique imsu flags, one
 quantifier, no grouping/alternation/backreferences/counted repetition; strings,
 traversal and cumulative matching have budgets and fail on exhaustion.
