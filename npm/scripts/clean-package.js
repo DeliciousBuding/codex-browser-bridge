@@ -7,7 +7,7 @@ const packageRoot = path.resolve(__dirname, "..");
 const packageJsonPath = path.join(packageRoot, "package.json");
 const packageJsonBackupPath = path.join(packageRoot, ".package.json.dev-backup");
 
-for (const entry of ["README.md", "LICENSE", "examples", "skills"]) {
+for (const entry of ["README.md", "LICENSE", "examples", "skills", "docs"]) {
   fs.rmSync(path.join(packageRoot, entry), { recursive: true, force: true });
 }
 

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-25
+
+See [the upgrade guide](docs/upgrade-v2.md) for existing claims, configuration
+and continuation files. Tool names and counts remain unchanged.
+
 ### Changed
 
 - CLI continuation files use v2, bind exact extension identity and reject legacy

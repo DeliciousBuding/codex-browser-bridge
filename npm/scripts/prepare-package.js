@@ -40,6 +40,8 @@ function stagePackageJson(options = {}) {
 function main() {
   copyFile("README.md", "README.md");
   copyFile("LICENSE", "LICENSE");
+  fs.mkdirSync(path.join(packageRoot, "docs"), { recursive: true });
+  copyFile("docs/upgrade-v2.md", "docs/upgrade-v2.md");
 
   const skillTarget = path.join(packageRoot, "skills");
   fs.rmSync(skillTarget, { recursive: true, force: true });

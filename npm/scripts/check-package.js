@@ -10,6 +10,7 @@ function requiredFilesForEnv(env = process.env) {
     "package.json",
     "README.md",
     "LICENSE",
+    "docs/upgrade-v2.md",
     "scripts/install.js",
     "bin/codex-browser-bridge.js",
     "examples/README.md",

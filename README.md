@@ -37,8 +37,11 @@ No browser profile copying. No WebDriver. No remote setup. It discovers the
 each live browser-extension instance, speaks the same JSON-RPC protocol, and
 exposes 66 MCP tools for browser automation.
 
-This README describes v1.13.0: 66 MCP tools (`basic` 46 / `network` 65 /
+This README describes v2.0.0: 66 MCP tools (`basic` 46 / `network` 65 /
 `full` 66), distributed as Windows and Linux GNU packages.
+
+Upgrading from 1.x? Read [the upgrade guide](docs/upgrade-v2.md) before updating
+an installation that uses saved continuation files or numeric-only tab claims.
 
 The goal is complete browser capability access for non-Codex agents. Coverage
 is tracked by method and semantics in [the parity matrix](docs/official-parity.md);

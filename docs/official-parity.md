@@ -111,7 +111,7 @@ matching remains normalized, case-insensitive substring matching unless exact.
 | `PlaywrightAPI.locator`, `getByRole`, `getByText`, `getByLabel`, `getByPlaceholder`, `getByTestId` | CDP partial | One declarative locator spec covers these outcomes; accessible-name and implicit-role algorithms are approximations, not the complete ARIA algorithms |
 | `PlaywrightAPI.frameLocator`; all 7 `PlaywrightFrameLocator` members | CDP partial | Same-origin frame chains work; cross-origin/OOPIF routing, transformed-frame pointer geometry, and navigation epochs remain |
 | `PlaywrightLocator.locator`, `getByRole`, `getByText`, `getByLabel`, `getByPlaceholder`, `getByTestId` | CDP partial | `scopes` provides descendant chains; locator objects and cross-frame chains are not API-compatible |
-| `PlaywrightLocator.filter`, `first`, `last`, `nth` | CDP partial | `has_text`, `has_not_text`, `visible`, and nth exist; nested locator `has`/`hasNot`, regex matchers remain |
+| `PlaywrightLocator.filter`, `first`, `last`, `nth` | CDP partial | `has_text`, `has_not_text`, `visible`, nth and bounded nested `has`/`has_not` exist; regex syntax is deliberately limited, not unrestricted Playwright matching |
 | `PlaywrightLocator.and`, `or`, `all` | Bridge-native | Bounded declarative intersection/union and serialized nth specs in current DOM order, not persistent Playwright objects. |
 | `PlaywrightLocator.count`, `getAttribute`, `isEnabled`, `isVisible` | CDP partial | Absent boolean reads return false; strict attribute reads fail. ARIA/name/visibility algorithms remain approximate. |
 | `PlaywrightLocator.innerText`, `textContent`, `allTextContents` | CDP partial | Rendered `inner_text`, raw `text_content` and `all_text_contents` are distinct; existing `text`/`all_text` are rendered-text aliases |
@@ -226,22 +226,9 @@ The matrix above retains remaining official boundaries; these contracts close
 its formerly implementable observation/composition/file-safety gaps without
 claiming the whole official interface.
 
-1. Complete the unified locator/input layer: semantic reads, bounded waits,
-   native setters, reliable keyboard chords and frame routing. Use the same
-   input code for CUA, DOM, locator and future AX actions.
-2. Add tab/document-scoped observation state: frame registry, bounded event
-   cursor, dialog state, logs and navigation epochs. It supports multiple
-   missing interfaces without one polling implementation per tool.
-3. Add one controlled file-result layer for page-asset bundles, GSuite and
-   transcript exports, then verified downloads/file-chooser integration.
-   Enforce roots, byte/count/time limits and browser-versus-bridge host paths.
-4. Add virtual clipboard and WebMCP as grouped operations, with MIME limits
-   and registration-generation checks. Keep capability discovery truthful.
-
-These are implementation directions, not completed parity claims. Cross-origin
-frames, complete ARIA name computation, Playwright actionability/retry behavior,
-read-only evaluate and secure auth remain explicit gaps until their contracts
-and tests exist.
+Future work should extend these shared layers rather than add parallel polling,
+input or file-output implementations. Remaining supported-path differences are
+tracked in [ROADMAP](../ROADMAP.md); app-private services are a separate boundary.
 
 ## Bridge-specific implementations and alignment decisions
 

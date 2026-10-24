@@ -1,6 +1,6 @@
 {
   "name": "@delicious233/codex-browser-bridge",
-  "version": "1.13.0",
+  "version": "2.0.0",
   "private": false,
   "description": "MCP server that exposes the ChatGPT desktop app's browser-extension bridge for Claude Code and other agents.",
   "bin": {
@@ -16,6 +16,7 @@
   "files": [
     "README.md",
     "LICENSE",
+    "docs/upgrade-v2.md",
     "bin/codex-browser-bridge.js",
     "checksums.json",
     "scripts/install.js",
