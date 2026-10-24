@@ -298,7 +298,12 @@ async fn dom_mutation_unknown_outcome_is_never_retried() {
         .await
     });
     let request = next(&mut peer).await;
-    protocol::encode_frame(&mut peer,&json!({"id":request["id"],"error":{"code":-32000,"message":"session not found"}})).await.unwrap();
+    protocol::encode_frame(
+        &mut peer,
+        &json!({"id":request["id"],"error":{"code":-32000,"message":"session not found"}}),
+    )
+    .await
+    .unwrap();
     assert!(timeout(Duration::from_secs(2), task)
         .await
         .unwrap()
