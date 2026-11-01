@@ -40,7 +40,7 @@ jobs:
       - name: Install cargo-llvm-cov
         # Prebuilt binary via taiki-e — avoids `cargo install` compiling the
         # latest cargo-llvm-cov (0.8.7+ needs rustc 1.87, but our MSRV is 1.85).
-        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2
+        uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
         with:
           tool: cargo-llvm-cov
       - name: Coverage
