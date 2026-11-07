@@ -165,14 +165,11 @@ pub async fn claim_user_tab(
                 .into(),
         ));
     }
-    client
-        .send_request("attach", Some(json!({ "tabId": id })))
-        .await
-        .map_err(|err| {
-            BridgeError::Protocol(format!(
-                "tab was claimed but attach failed: {err}; inspect codex_list_tabs before proceeding"
-            ))
-        })?;
+    client.attach_tab(id).await.map_err(|err| {
+        BridgeError::Protocol(format!(
+            "tab was claimed but attach failed: {err}; inspect codex_list_tabs before proceeding"
+        ))
+    })?;
     // Mark as attached only after attach succeeds so subsequent CDP calls can
     // safely skip the detach+attach cycle.
     client.mark_attached(id).await;

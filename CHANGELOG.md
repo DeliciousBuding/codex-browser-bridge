@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Send an explicit empty network-policy constraint list on debugger attach,
+  including user-tab claims. Recent browser extensions require this object;
+  omitting it fails with `Cannot read properties of undefined (reading 'timeoutMs')`.
+  Empty constraints preserve unrestricted networking without installing rules.
+
 ## [2.0.0] - 2026-10-25
 
 See [the upgrade guide](docs/upgrade-v2.md) for existing claims, configuration

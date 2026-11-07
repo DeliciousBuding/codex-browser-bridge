@@ -1570,10 +1570,18 @@ impl Client {
             .clone()
     }
 
+    pub(crate) async fn attach_tab(&self, tab_id: i64) -> Result<()> {
+        self.attach_tab_until(tab_id, Instant::now() + DEFAULT_REQUEST_TIMEOUT)
+            .await
+    }
+
     async fn attach_tab_until(&self, tab_id: i64, deadline: Instant) -> Result<()> {
         self.send_request_with_timeout(
             "attach",
-            Some(json!({ "tabId": tab_id })),
+            // Recent extensions require an explicit policy. Empty constraints
+            // preserve the bridge's unrestricted networking without installing
+            // rules; the extension still rejects a conflicting attached policy.
+            Some(json!({ "tabId": tab_id, "networkPolicy": { "constraints": [] } })),
             remaining_before_write("attach", deadline)?,
         )
         .await
@@ -2304,6 +2312,46 @@ mod reconnect_tests {
     }
 
     #[tokio::test]
+    async fn claim_user_tab_attaches_with_explicit_unrestricted_network_policy() {
+        let (client, mut server) = test_client(4096).await;
+        let task = tokio::spawn({
+            let client = client.clone();
+            async move {
+                crate::browser::claim_user_tab(&client, "7", "Example", "https://example.com/")
+                    .await
+            }
+        });
+        let snapshot = json!({"id":7,"title":"Example","url":"https://example.com/"});
+        let list = next_request(&mut server).await;
+        assert_eq!(list["method"], "getUserTabs");
+        encode_frame(
+            &mut server,
+            &json!({"id":list["id"],"result":[snapshot.clone()]}),
+        )
+        .await
+        .unwrap();
+        let claim = next_request(&mut server).await;
+        assert_eq!(claim["method"], "claimUserTab");
+        encode_frame(&mut server, &json!({"id":claim["id"],"result":snapshot}))
+            .await
+            .unwrap();
+        let attach = reply_ok_and_return_request(&mut server).await;
+        assert_eq!(attach["method"], "attach");
+        assert_eq!(attach["params"]["tabId"], 7);
+        assert_eq!(
+            attach["params"]["networkPolicy"],
+            json!({"constraints": []})
+        );
+        timeout(TEST_STATE_TIMEOUT, task)
+            .await
+            .expect("claim task timed out")
+            .unwrap()
+            .unwrap();
+        assert_eq!(client.inner.attached_tabs.lock().await.get(&7), Some(&true));
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn execute_cdp_timeout_cleans_pending() {
         let (client, mut server) = test_client(4096).await;
         let handle = tokio::spawn({
@@ -2324,6 +2372,10 @@ mod reconnect_tests {
         assert_eq!(detach["method"], "detach");
         let attach = reply_ok_and_return_request(&mut server).await;
         assert_eq!(attach["method"], "attach");
+        assert_eq!(
+            attach["params"]["networkPolicy"],
+            json!({"constraints": []})
+        );
 
         let req = next_request(&mut server).await;
         assert_eq!(req["method"], "executeCdp");
