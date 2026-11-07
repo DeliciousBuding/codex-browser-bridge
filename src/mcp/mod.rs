@@ -872,6 +872,10 @@ mod tools_call_tests {
         let attach = next_request(server).await;
         assert_eq!(attach["method"], "attach");
         assert_eq!(attach["params"]["tabId"], tab_id);
+        assert_eq!(
+            attach["params"]["networkPolicy"],
+            json!({"constraints": []})
+        );
         reply_result(server, &attach, json!({})).await;
     }
 
