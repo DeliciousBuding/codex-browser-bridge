@@ -40,6 +40,14 @@ struct Args {
     #[arg(long)]
     max_image_bytes: Option<usize>,
 
+    /// Browser Use network policy JSON applied to every tab attach.
+    ///
+    /// Shape is the extension's own: {"timeout_ms":1..30000,"constraints":[
+    /// {"kind":"domains"|"origins","mode":"allowlist"|"denylist","patterns":[]}]}.
+    /// Omit for the documented empty policy (allow all, no rules installed).
+    #[arg(long = "network-policy")]
+    network_policy: Option<String>,
+
     /// Maximum JSON bytes per command result (not a token count).
     #[arg(long, global = true, default_value = "16384", value_parser = cli::parse_output_budget)]
     max_output_bytes: usize,
@@ -104,6 +112,9 @@ async fn main() -> anyhow::Result<()> {
     if let Some(limit) = args.max_image_bytes {
         config::validate_content_bytes("--max-image-bytes", limit)?;
     }
+    if let Some(policy) = args.network_policy.as_deref() {
+        codex_browser_bridge::network_policy::NetworkPolicy::from_json(policy)?;
+    }
     if args
         .upload_base
         .as_ref()
@@ -121,6 +132,16 @@ async fn main() -> anyhow::Result<()> {
     if args.pipe.is_some() && !selector.is_empty() {
         anyhow::bail!("--pipe cannot be combined with a browser family or instance selector");
     }
+
+    // Resolve once, before any connection: an invalid policy must fail here
+    // rather than on the first attach, which already detached the debugger.
+    let network_policy = args
+        .network_policy
+        .clone()
+        .or_else(|| environment.network_policy.clone())
+        .or_else(|| config.network_policy.clone())
+        .map(|text| codex_browser_bridge::network_policy::NetworkPolicy::from_json(&text))
+        .transpose()?;
 
     match args.mode {
         Mode::Discover => {
@@ -187,6 +208,9 @@ async fn main() -> anyhow::Result<()> {
             {
                 std::env::set_var("CODEX_BRIDGE_MAX_IMAGE_BYTES", max_image_bytes.to_string());
             }
+            if let Some(policy) = network_policy.clone() {
+                client.set_network_policy(policy);
+            }
             let profile = args.profile.or_else(|| {
                 match environment.profile.as_deref().or(config.profile.as_deref()) {
                     Some("basic") => Some(Profile::Basic),
@@ -243,6 +267,9 @@ async fn main() -> anyhow::Result<()> {
             let client = client::Client::connect_with_selector(args.pipe.as_deref(), selector)
                 .await
                 .context("failed to connect to the ChatGPT browser-extension pipe")?;
+            if let Some(policy) = network_policy.clone() {
+                client.set_network_policy(policy);
+            }
             let result = tokio::select! {
                 result = cli::run_cli(client.clone()) => result,
                 _ = shutdown_signal() => {
