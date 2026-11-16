@@ -5,12 +5,21 @@ Browser plugin, exposed to Claude Code and other MCP clients. Complete parity
 requires matching inputs, results, lifecycle, and failure behavior. Tool counts
 do not measure that coverage.
 
-The pinned official plugin is `26.1016.61520`. Its `docs/api.json` contains
-148 interface members: 129 callable member names and 19 properties. Overloads
-share one member name. Optional capability methods appear in capability docs
-and types, outside that 148-member count. The files and counts are pinned in
-`official-surface-baseline.json`; `node scripts/check-official-drift.js` checks
-the installed developer reference without redistributing it.
+The pinned official plugin is `26.1111.21308`. Its `docs/api.json` contains
+153 interface members across 23 interfaces: 128 callable member names and 25
+properties. Overloads share one member name. Optional capability methods appear
+in capability docs and types, outside that 153-member count. The files and
+counts are pinned in `official-surface-baseline.json`;
+`node scripts/check-official-drift.js` checks the installed developer reference
+without redistributing it.
+
+The drift check counts two packaging styles: older builds register commands in a
+literal table (`var ng={};H(ng,{...})` plus `X=L("name")`), while 26.1111 packs
+per-command modules with `commandType:()=>X` and reaches the extension through
+`this.api.sendSessionRequest("name")`. The reported `specialCommands` and
+`nativeCommandTypes` numbers are therefore comparable per style only; a repack
+changing both counters is a packaging change to review, not automatically a
+surface regression.
 
 This inventory is a source/protocol audit. Synthetic locator tests run without
 a browser. Source support, a mock wire test, and live extension acceptance are
@@ -29,7 +38,12 @@ The official stack has three layers: the agent API, the app-side browser service
 and the extension's framed native transport. The bridge uses the native layer.
 Existing native request methods include `getInfo`, `getTabs`, `getUserTabs`,
 `getUserHistory`, `createTab`, `claimUserTab`, `markTab`, `nameSession`,
-`turnEnded`, and `executeCdp`.
+`turnEnded`, and `executeCdp`. `attach` carries a `networkPolicy` object whose
+`constraints` list is the Browser Use policy the extension installs with
+declarativeNetRequest; an empty list means "no policy installed". The official
+client always sends `{constraints: []}` by default, and extension 1.26+ reads
+`networkPolicy.timeoutMs` unconditionally, so an attach without the field fails
+with `Cannot read properties of undefined (reading 'timeoutMs')`.
 
 `executeUnhandledCommand` is not a general router for the app-side registry.
 The existing direct path covers management and viewport; visibility depends on
