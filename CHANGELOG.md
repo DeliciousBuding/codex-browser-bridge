@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-11-16
+
+### Fixed
+
+- Attach to the ChatGPT browser extension 1.26+ no longer fails with
+  `Cannot read properties of undefined (reading 'timeoutMs')`. The extension now
+  reads `params.networkPolicy` on every attach; the bridge sends the same
+  `{constraints: []}` default the official client uses, which installs no rules.
+  Every CDP tool was unusable without it.
+
+### Added
+
+- `--network-policy`, `CODEX_BRIDGE_NETWORK_POLICY`, and the `network_policy`
+  TOML key set the Browser Use network policy installed with each attach. Values
+  are the extension's own JSON shape and are validated against its budgets
+  (128 constraints, 4096 patterns, 64 KiB pattern text, timeout 1..30000 ms)
+  before the debugger is detached, so an invalid policy fails without first
+  breaking an attached tab.
+
+### Changed
+
+- The pinned official plugin baseline moves to `26.1111.21308` (23 interfaces,
+  153 members). `check-official-drift.js` now counts both command-registration
+  packing styles instead of reporting zero for current builds.
+
 ## [2.0.0] - 2026-10-25
 
 See [the upgrade guide](docs/upgrade-v2.md) for existing claims, configuration
