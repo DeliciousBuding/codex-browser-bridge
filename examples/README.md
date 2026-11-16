@@ -32,6 +32,7 @@ clients that need to reuse the same browser session.
 | Client | Config | Typical config location | After editing |
 |--------|--------|-------------------------|---------------|
 | Claude Code | plugin, or [claude-code.json](claude-code.json) fallback | Managed by `claude plugin` | Restart Claude Code and approve in `/mcp` |
+| Google Antigravity | [antigravity.json](antigravity.json) | `~/.gemini/config/mcp_config.json` | Restart Antigravity session / reload window |
 | Cursor | [cursor.json](cursor.json) | Cursor MCP settings / project MCP config | Reload Cursor window |
 | OpenClaw | [openclaw.json](openclaw.json) | OpenClaw MCP server config | Restart or reconnect MCP servers |
 | Hermes Agent | [hermes-agent.json](hermes-agent.json) | Hermes Agent MCP server config | Restart or reconnect MCP servers |
