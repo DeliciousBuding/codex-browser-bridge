@@ -166,7 +166,7 @@ pub async fn claim_user_tab(
         ));
     }
     client
-        .send_request("attach", Some(json!({ "tabId": id })))
+        .send_request("attach", Some(client.attach_params(id)))
         .await
         .map_err(|err| {
             BridgeError::Protocol(format!(

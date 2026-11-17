@@ -205,6 +205,9 @@ struct ClientInner {
     reconnect_cooldown_until: Mutex<Option<Instant>>,
     /// How to obtain a fresh connection on reconnect.
     connection_factory: ConnectionFactory,
+    /// Browser Use network policy carried on every `attach`. Extension 1.26+
+    /// reads it unconditionally; the default is the documented empty policy.
+    network_policy: StdMutex<crate::network_policy::NetworkPolicy>,
 }
 
 impl Drop for ClientInner {
@@ -417,6 +420,7 @@ impl Client {
                 reconnect_lock: Mutex::new(()),
                 reconnect_cooldown_until: Mutex::new(None),
                 connection_factory: factory,
+                network_policy: StdMutex::new(Default::default()),
             }),
         }
     }
@@ -463,6 +467,7 @@ impl Client {
                 reconnect_lock: Mutex::new(()),
                 reconnect_cooldown_until: Mutex::new(None),
                 connection_factory: factory,
+                network_policy: StdMutex::new(Default::default()),
             }),
         };
         client.spawn_read_loop(reader, 1);
@@ -1573,11 +1578,32 @@ impl Client {
     async fn attach_tab_until(&self, tab_id: i64, deadline: Instant) -> Result<()> {
         self.send_request_with_timeout(
             "attach",
-            Some(json!({ "tabId": tab_id })),
+            Some(self.attach_params(tab_id)),
             remaining_before_write("attach", deadline)?,
         )
         .await
         .map(|_| ())
+    }
+
+    /// Replace the Browser Use network policy sent with every attach. The
+    /// policy applies to attaches made after this call; tabs already attached
+    /// keep their installed rules until they detach.
+    pub fn set_network_policy(&self, policy: crate::network_policy::NetworkPolicy) {
+        *self.inner.network_policy.lock().unwrap() = policy;
+    }
+
+    pub fn network_policy(&self) -> crate::network_policy::NetworkPolicy {
+        self.inner.network_policy.lock().unwrap().clone()
+    }
+
+    /// The exact `attach` params. The extension reads `networkPolicy.timeoutMs`
+    /// unconditionally on 1.26+, so the field is always present; an empty
+    /// `constraints` list is its documented "no policy installed" form.
+    pub fn attach_params(&self, tab_id: i64) -> Value {
+        json!({
+            "tabId": tab_id,
+            "networkPolicy": self.network_policy().to_payload(),
+        })
     }
 
     async fn detach_tab_until(&self, tab_id: i64, deadline: Instant) -> Result<()> {

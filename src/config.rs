@@ -29,6 +29,9 @@ pub struct Config {
     pub max_text_bytes: Option<usize>,
     /// Maximum bytes per MCP base64 image content item (1024..=8 MiB).
     pub max_image_bytes: Option<usize>,
+    /// Browser Use network policy applied to every tab attach. Inline JSON with
+    /// the extension's own shape: {"timeout_ms":1..30000,"constraints":[...]}.
+    pub network_policy: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -96,6 +99,7 @@ impl Config {
             upload_base: env_string("CODEX_BRIDGE_UPLOAD_BASE")?,
             max_text_bytes: env_usize("CODEX_BRIDGE_MAX_TEXT_BYTES")?,
             max_image_bytes: env_usize("CODEX_BRIDGE_MAX_IMAGE_BYTES")?,
+            network_policy: env_string("CODEX_BRIDGE_NETWORK_POLICY")?,
         };
         config
             .normalize_and_validate()
@@ -127,6 +131,11 @@ impl Config {
         }
         if let Some(limit) = self.max_image_bytes {
             validate_content_bytes("max_image_bytes", limit)?;
+        }
+        if let Some(policy) = self.network_policy.as_ref() {
+            // Fail at configuration time, not mid-attach after the debugger
+            // has already been detached.
+            crate::network_policy::NetworkPolicy::from_json(policy)?;
         }
         Ok(())
     }

@@ -6,6 +6,7 @@ const path = require("path");
 const repoRoot = path.resolve(__dirname, "..");
 const expectedExamples = [
   "claude-code.json",
+  "antigravity.json",
   "cursor.json",
   "hermes-agent.json",
   "openclaw.json",

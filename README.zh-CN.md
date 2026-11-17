@@ -254,7 +254,13 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 - `CODEX_BRIDGE_MAX_TEXT_BYTES` 限制每个 text content，默认 `1048576`。
 - `CODEX_BRIDGE_MAX_IMAGE_BYTES` 限制每个 base64 image content，默认 `3145728`。
 - 两者都有 8 MiB 硬上限。文本截断会带原始字节数标记；超大图片返回文本摘要，不返回无效的半截 base64。
-- 也可以在 `.codex-browser-bridge.toml` 中使用 `max_text_bytes` / `max_image_bytes`，或用 CLI 参数 `--max-text-bytes` / `--max-image-bytes`。
+- 也可以在 `.codex-browser-bridge.toml` 中使用 `max_text_bytes` / `max_image_bytes`，或用 CLI 参数 `--max-text-bytes` / `--max-image-bytes`；网络策略对应 TOML 键 `network_policy`。
+- `CODEX_BRIDGE_NETWORK_POLICY`（或 `--network-policy`）设置每次 attach 携带的
+  Browser Use 网络策略。取值是扩展自身形状的内联 JSON：
+  `{"timeout_ms":1..30000,"constraints":[{"kind":"domains"|"origins","mode":"allowlist"|"denylist","patterns":[...]}]}`。
+  不设置即文档化的空策略（全放行、不安装规则）。策略在启动时校验，并在每次 attach
+  前再校验一次：扩展拒收的策略会让 attach 在调试器已被 detach 之后失败。
+  策略按已 attach 的标签页安装，修改只影响之后的 attach，不影响已 attach 的标签页。
 - `CODEX_BRIDGE_SOCKET_DIR` 可以覆盖 Unix socket 发现目录；未设置时先尝试
   `$XDG_RUNTIME_DIR/codex-browser-use`，再回退到 `/tmp/codex-browser-use`。
 - `CODEX_BRIDGE_NO_AUTO_FOREGROUND=1` 会关闭合成输入前的自动隐藏标签页激活；
@@ -508,7 +514,7 @@ src/
 
 ## 相关资源
 
-- [examples/](examples/) — MCP 配置示例（Claude Code, Cursor, OpenClaw, Hermes Agent）
+- [examples/](examples/) — MCP 配置示例（Claude Code, Antigravity, Cursor, OpenClaw, Hermes Agent）
 - [.claude-plugin/](.claude-plugin/plugin.json) — Claude Code 插件与 marketplace 元数据
 - [skills/codex-browser/](skills/codex-browser/SKILL.md) — Agent skill（LLM 使用指南）
 - [ROADMAP.md](ROADMAP.md) — 已发布版本与未完成项
