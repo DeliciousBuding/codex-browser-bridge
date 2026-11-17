@@ -54,18 +54,33 @@ function countSurface(pluginDir) {
   for (const value of Object.values(api.interfaces || {})) methods += Object.keys(value).length;
 
   const service = fs.readFileSync(path.join(pluginDir, "scripts", "browser-service.mjs"), "utf8");
+  // Two packing styles are pinned: older builds register special commands in a
+  // literal table (`var ng={};H(ng,{...})`, `X=L("name")`), newer builds declare
+  // `commandType:()=>X` per command module and reach the extension through
+  // `sendSessionRequest("name")`. Count both so a repack alone is not read as a
+  // surface change, and a real rename still is.
   const specialBlock = service.match(/var ng=\{\};H\(ng,\{([\s\S]*?)\}\);/)?.[1] || "";
-  const nativeTypes = new Set(
+  const legacyNativeTypes = new Set(
     [...service.matchAll(/(?:var|const|let) ([A-Za-z_$][\w$]*)=L\("([^"]+)"/g)].map(
       (match) => match[2],
+    ),
+  );
+  const commandTypeRegistry = new Set(
+    [...service.matchAll(/commandType:\(\)=>([A-Za-z_$][\w$]*)/g)].map((match) => match[1]),
+  );
+  const sessionRequestMethods = new Set(
+    [...service.matchAll(/sendSessionRequest\("([^"]+)"|this\.api\.sendSessionRequest\("([^"]+)"/g)].map(
+      (match) => match[1] || match[2],
     ),
   );
 
   return {
     interfaces: Object.keys(api.interfaces || {}).length,
     methods,
-    specialCommands: (specialBlock.match(/=>/g) || []).length,
-    nativeCommandTypes: nativeTypes.size,
+    specialCommands: specialBlock
+      ? (specialBlock.match(/=>/g) || []).length
+      : commandTypeRegistry.size,
+    nativeCommandTypes: legacyNativeTypes.size || sessionRequestMethods.size,
   };
 }
 

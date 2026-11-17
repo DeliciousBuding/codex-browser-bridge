@@ -107,6 +107,8 @@ async fn matching_bare_and_wrapped_snapshots_claim_and_attach_exact_id() {
         let r = request(&mut peer).await;
         assert_eq!(r["method"], "attach");
         assert_eq!(r["params"]["tabId"], 7);
+        // Extension 1.26+ reads params.networkPolicy.timeoutMs on every attach.
+        assert_eq!(r["params"]["networkPolicy"], json!({"constraints": []}));
         respond(&mut peer, &r, Value::Null).await;
         let tab = timeout(BOUND, task).await.unwrap().unwrap().unwrap();
         assert_eq!(tab.id, "7");
@@ -253,5 +255,44 @@ async fn attach_denial_reports_completed_claim_without_replaying() {
         .to_string()
         .contains("tab was claimed but attach failed"));
     no_request(&mut peer).await;
+    client.shutdown().await;
+}
+
+/// Regression: extension 1.26+ read `params.networkPolicy.timeoutMs` on every
+/// attach and threw `Cannot read properties of undefined` when the field was
+/// missing, which made every CDP call fail before the page was touched.
+#[tokio::test]
+async fn attach_always_carries_the_network_policy_field() {
+    let (client, mut peer) = setup();
+    client.set_network_policy(
+        codex_browser_bridge::network_policy::NetworkPolicy::from_json(
+            r#"{"timeout_ms":4000,"constraints":[{"kind":"domains","mode":"denylist","patterns":["tracker.example"]}]}"#,
+        )
+        .unwrap(),
+    );
+    let worker = client.clone();
+    let task =
+        tokio::spawn(async move { codex_browser_bridge::browser::get_title(&worker, "7").await });
+    let detach = request(&mut peer).await;
+    assert_eq!(detach["method"], "detach");
+    respond(&mut peer, &detach, json!({})).await;
+    let attach = request(&mut peer).await;
+    assert_eq!(attach["method"], "attach");
+    assert_eq!(attach["params"]["tabId"], 7);
+    assert_eq!(attach["params"]["networkPolicy"]["timeoutMs"], 4000);
+    assert_eq!(
+        attach["params"]["networkPolicy"]["constraints"],
+        json!([{"kind":"domains","mode":"denylist","patterns":["tracker.example"]}])
+    );
+    respond(&mut peer, &attach, Value::Null).await;
+    let evaluate = request(&mut peer).await;
+    assert_eq!(evaluate["method"], "executeCdp");
+    respond(
+        &mut peer,
+        &evaluate,
+        json!({"result": {"result": {"type": "string", "value": "ok"}}}),
+    )
+    .await;
+    timeout(BOUND, task).await.unwrap().unwrap().unwrap();
     client.shutdown().await;
 }

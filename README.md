@@ -145,9 +145,12 @@ Use:
 2. `codex_bind_browser` with an exact `browser_id` when more than one instance
    is live.
 
-The initial connection is fail-closed: if exactly one live instance exists it
-is selected automatically; if several exist, browser tools return an ambiguity
-error until the session is bound. Reconnects stay pinned to the selected
+The initial connection requires a complete inventory for automatic and
+family-only selection. Known disconnected sockets and app-private IAB/MCP Apps
+routes are ignored. If a probe times out or an endpoint remains unidentified,
+retry discovery or bind an exact `browser_id`: a single response does not
+prove only one browser is running. A complete inventory with multiple matching
+instances also requires an exact ID. Reconnects stay pinned to the selected
 `extensionInstanceId`; they never rotate silently to another browser/profile.
 
 For process-level pinning, use `--browser-family` plus
@@ -225,7 +228,7 @@ directly. Do not install this bridge as a Codex plugin: it would add a duplicate
 MCP path to the same browser. The bridge exists for Claude Code and other
 non-Codex MCP clients that need to reuse that existing browser session.
 
-For Cursor, OpenClaw, Hermes Agent — see [examples/](examples/). The npm
+For Antigravity, Cursor, OpenClaw, Hermes Agent — see [examples/](examples/). The npm
 package also ships these examples under `examples/`.
 
 ### Install the agent skill only (fallback)
@@ -316,7 +319,16 @@ JavaScript, CDP, or screenshot payloads by accident:
   summary instead of invalid partial base64.
 - The same limits can be set in `.codex-browser-bridge.toml` as
   `max_text_bytes` and `max_image_bytes`, or via CLI flags
-  `--max-text-bytes` and `--max-image-bytes`.
+  `--max-text-bytes` and `--max-image-bytes`. `network_policy` is the TOML key
+  for the attach-time network policy below.
+- `CODEX_BRIDGE_NETWORK_POLICY` (or `--network-policy`) sets the Browser Use
+  network policy sent with every tab attach. The value is inline JSON in the
+  extension's own shape: `{"timeout_ms":1..30000,"constraints":[{"kind":"domains"|"origins","mode":"allowlist"|"denylist","patterns":[...]}]}`.
+  Omit it for the documented empty policy (allow-all, no rules installed). It is
+  validated at startup and again before each attach, because a policy the
+  extension rejects fails the attach after the debugger was already detached.
+  The policy is installed per attached tab; changing it applies to attaches made
+  after the change, not to tabs already attached.
 - `CODEX_BRIDGE_SOCKET_DIR` overrides Unix socket discovery. Without it,
   `$XDG_RUNTIME_DIR/codex-browser-use` is tried before `/tmp/codex-browser-use`.
 - `CODEX_BRIDGE_NO_AUTO_FOREGROUND=1` disables the automatic hidden-tab
@@ -584,7 +596,7 @@ The official capability matrix and drift baseline live in
 
 ## Related
 
-- [examples/](examples/) — MCP configs for Claude Code, Cursor, OpenClaw, Hermes Agent
+- [examples/](examples/) — MCP configs for Claude Code, Antigravity, Cursor, OpenClaw, Hermes Agent
 - [.claude-plugin/](.claude-plugin/plugin.json) — Claude Code plugin and marketplace metadata
 - [skills/codex-browser/](skills/codex-browser/SKILL.md) — Agent skill (LLM usage guide)
 - [ROADMAP.md](ROADMAP.md) — Release history and roadmap
