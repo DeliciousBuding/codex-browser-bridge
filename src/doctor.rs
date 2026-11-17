@@ -2,22 +2,18 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::discovery;
+use crate::registry::{classify_probe_failure, probe_extension, ProbeFailure};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::{timeout, Duration, Instant};
-use uuid::Uuid;
-
-use crate::client::verify_pipe_stream;
-use crate::discovery;
-use crate::registry::BrowserDescriptor;
 
 const COMMAND_NAME: &str = "codex-browser-bridge";
 const MAX_REPORTED_PIPES: usize = 24;
 const MAX_CONCURRENT_PIPE_PROBES: usize = 16;
 const DOCTOR_PROBE_BUDGET: Duration = Duration::from_secs(10);
-const GET_INFO_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PipeDiagnostic {
@@ -25,6 +21,8 @@ pub struct PipeDiagnostic {
     pub path: String,
     pub transport_kind: &'static str,
     pub connected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure: Option<ProbeFailure>,
     pub latency_ms: Option<u64>,
     pub browser: Option<String>,
     pub family: Option<String>,
@@ -53,6 +51,8 @@ pub struct DiagnosticResult {
     pub unprobed_pipe_count: usize,
     pub connected_pipe_count: usize,
     pub failed_pipe_count: usize,
+    pub stale_pipe_count: usize,
+    pub excluded_pipe_count: usize,
     pub omitted_pipe_count: usize,
     pub pipes_truncated: bool,
     pub pipes: Vec<PipeDiagnostic>,
@@ -84,7 +84,10 @@ pub async fn run_diagnostics() -> DiagnosticResult {
 
     let probed_pipe_count = pipes.len();
     let connected_count = pipes.iter().filter(|p| p.connected).count();
-    let failed_count = probed_pipe_count.saturating_sub(connected_count);
+    let count_failure = |failure| pipes.iter().filter(|p| p.failure == Some(failure)).count();
+    let stale_count = count_failure(ProbeFailure::Stale);
+    let excluded_count = count_failure(ProbeFailure::Excluded);
+    let failed_count = count_failure(ProbeFailure::Unknown);
     if pipe_count == 0 {
         warnings.push(
             "No browser-extension pipes found. Start the ChatGPT desktop app, a supported Chromium browser, and the ChatGPT browser extension."
@@ -104,14 +107,14 @@ pub async fn run_diagnostics() -> DiagnosticResult {
             );
         }
     }
-    if connected_count > 0 && failed_count > 0 {
+    if stale_count > 0 || excluded_count > 0 {
         notes.push(format!(
-            "{failed_count} pipe name(s) did not answer. They are stale transport entries, not live browsers."
+            "Ignored {stale_count} disconnected routes and {excluded_count} app-private routes."
         ));
     }
-    if unprobed_pipe_count > 0 {
+    if failed_count > 0 || unprobed_pipe_count > 0 {
         notes.push(format!(
-            "{unprobed_pipe_count} pipe name(s) were not probed before the deadline; they are not known browser instances."
+            "Browser inventory is incomplete ({failed_count} unknown, {unprobed_pipe_count} unprobed endpoints). Retry discovery or select an explicit browser_id."
         ));
     }
     let mut instance_ids: Vec<_> = pipes
@@ -151,6 +154,8 @@ pub async fn run_diagnostics() -> DiagnosticResult {
         unprobed_pipe_count,
         connected_pipe_count: connected_count,
         failed_pipe_count: failed_count,
+        stale_pipe_count: stale_count,
+        excluded_pipe_count: excluded_count,
         omitted_pipe_count,
         pipes_truncated: omitted_pipe_count > 0,
         healthy: connected_count > 0 && warnings.is_empty(),
@@ -205,53 +210,32 @@ async fn probe_discovered_pipes(discovered: Vec<discovery::PipeInfo>) -> ProbeRe
 async fn probe_pipe(pipe: discovery::PipeInfo) -> PipeDiagnostic {
     let start = Instant::now();
     let path = discovery::pipe_path(&pipe.name);
-    let (connected, browser, family, instance_id, extension_id, profile_name) =
-        match crate::pipe::dial_transport(&path).await {
-            Ok(mut stream) => {
-                let session_id = Uuid::new_v4().to_string();
-                let turn_id = Uuid::new_v4().to_string();
-                match timeout(
-                    GET_INFO_TIMEOUT,
-                    verify_pipe_stream(&mut stream, &session_id, &turn_id),
-                )
-                .await
-                {
-                    Ok(Ok(raw)) => match serde_json::from_str::<Value>(raw.get()) {
-                        Ok(info) => match BrowserDescriptor::from_info(&info, pipe.clone()) {
-                            Ok(descriptor) => (
-                                true,
-                                browser_label_from_info(&info),
-                                Some(descriptor.family),
-                                Some(descriptor.id),
-                                descriptor.extension_id,
-                                descriptor.profile_name,
-                            ),
-                            Err(_) => (false, None, None, None, None, None),
-                        },
-                        Err(_) => (false, None, None, None, None, None),
-                    },
-                    _ => (false, None, None, None, None, None),
-                }
-            }
-            Err(_) => (false, None, None, None, None, None),
-        };
-    let latency_ms = if connected {
-        Some(start.elapsed().as_millis() as u64)
-    } else {
-        None
-    };
-    PipeDiagnostic {
-        name: pipe.name,
+    let mut result = PipeDiagnostic {
+        name: pipe.name.clone(),
         path,
         transport_kind: discovery::transport_kind(),
-        connected,
-        latency_ms,
-        browser,
-        family,
-        instance_id,
-        extension_id,
-        profile_name,
+        connected: false,
+        failure: None,
+        latency_ms: None,
+        browser: None,
+        family: None,
+        instance_id: None,
+        extension_id: None,
+        profile_name: None,
+    };
+    match probe_extension(pipe).await {
+        Ok((descriptor, info)) => {
+            result.connected = true;
+            result.latency_ms = Some(start.elapsed().as_millis() as u64);
+            result.browser = browser_label_from_info(&info);
+            result.family = Some(descriptor.family);
+            result.instance_id = Some(descriptor.id);
+            result.extension_id = descriptor.extension_id;
+            result.profile_name = descriptor.profile_name;
+        }
+        Err(error) => result.failure = Some(classify_probe_failure(&error)),
     }
+    result
 }
 
 fn reported_pipes(
@@ -448,6 +432,7 @@ mod tests {
             path: discovery::transport_path(name),
             transport_kind: discovery::transport_kind(),
             connected,
+            failure: (!connected).then_some(ProbeFailure::Unknown),
             latency_ms: connected.then_some(1),
             browser: None,
             family: None,

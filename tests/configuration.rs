@@ -116,6 +116,11 @@ fn file_values_are_validated_and_normalized() {
     assert_eq!(config.browser_instance.as_deref(), Some("exact-id"));
     assert_eq!(config.max_text_bytes, Some(MIN_CONTENT_BYTES));
     assert_eq!(config.max_image_bytes, Some(MAX_CONTENT_BYTES));
+    let policy = Config::parse(
+        r#"network_policy = '{"timeout_ms":9000,"constraints":[{"kind":"origins","mode":"denylist","patterns":["https://ads.example"]}]}'"#,
+    )
+    .unwrap();
+    assert!(policy.network_policy.is_some());
     for text in [
         "browser_instance = ' '",
         "browser_family = ''",
@@ -127,6 +132,11 @@ fn file_values_are_validated_and_normalized() {
         "max_text_bytes = 1023",
         "max_image_bytes = 8388609",
         "max_image_bytes = -1",
+        r#"network_policy = '{not json}'"#,
+        r#"network_policy = '{"constraints":[{"kind":"hosts","mode":"allowlist","patterns":[]}]}'"#,
+        r#"network_policy = '{"timeout_ms":0,"constraints":[]}'"#,
+        r#"network_policy = '{"timeout_ms":30001,"constraints":[]}'"#,
+        r#"network_policy = '{"constraints":[],"unexpected":true}'"#,
     ] {
         assert!(Config::parse(text).is_err(), "accepted {text}");
     }
@@ -143,6 +153,11 @@ fn invalid_environment_values_fail_before_tool_execution() {
         ("CODEX_BRIDGE_MAX_TEXT_BYTES", "not-a-number"),
         ("CODEX_BRIDGE_MAX_TEXT_BYTES", "0"),
         ("CODEX_BRIDGE_MAX_IMAGE_BYTES", "8388609"),
+        ("CODEX_BRIDGE_NETWORK_POLICY", "not json"),
+        (
+            "CODEX_BRIDGE_NETWORK_POLICY",
+            r#"{"timeout_ms":31000,"constraints":[]}"#,
+        ),
     ] {
         bridge(directory.path())
             .env(variable, value)
