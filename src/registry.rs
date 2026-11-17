@@ -293,26 +293,47 @@ pub fn select_browser<'a>(
     }
 }
 
-/// An implicit choice is safe only after every discovered endpoint has been
-/// identified. A failed probe is unknown, not proof that no browser is there.
-/// Explicit instance selectors can proceed because dialing re-verifies that
-/// identity; they never fall back to another profile.
+/// Select a browser from a discovered inventory.
+///
+/// Unreachable or non-extension endpoints (such as ChatGPT Desktop's own
+/// `codex-browser-use-*` pipes) must not block selecting a unique live browser
+/// extension; when no matching browser is found and some endpoints failed or
+/// were not probed, report the incomplete inventory so callers know discovery
+/// was partial.
 pub fn select_browser_from_inventory<'a>(
     inventory: &'a BrowserInventory,
     selector: &BrowserSelector,
 ) -> Result<&'a BrowserDescriptor> {
     selector.validate()?;
-    if selector.instance_id.is_none()
-        && (inventory.unprobed_pipe_count != 0
-            || inventory.failed_pipe_count != 0
-            || inventory.probed_pipe_count != inventory.pipe_count)
-    {
-        return Err(BridgeError::User(format!(
-            "browser inventory is incomplete ({} unprobed, {} failed endpoints); retry discovery or select an explicit browser_id",
-            inventory.unprobed_pipe_count, inventory.failed_pipe_count
-        )));
+    let incomplete = inventory.unprobed_pipe_count != 0
+        || inventory.failed_pipe_count != 0
+        || inventory.probed_pipe_count != inventory.pipe_count;
+
+    match select_browser(&inventory.browsers, selector) {
+        Ok(browser) => {
+            if selector.instance_id.is_none() && incomplete {
+                tracing::warn!(
+                    unprobed_pipe_count = inventory.unprobed_pipe_count,
+                    failed_pipe_count = inventory.failed_pipe_count,
+                    probed_pipe_count = inventory.probed_pipe_count,
+                    pipe_count = inventory.pipe_count,
+                    browser_id = %browser.id,
+                    family = %browser.family,
+                    "selecting unique live browser despite incomplete pipe inventory"
+                );
+            }
+            Ok(browser)
+        }
+        Err(err) => {
+            if incomplete && inventory.browsers.is_empty() {
+                return Err(BridgeError::User(format!(
+                    "browser inventory is incomplete ({} unprobed, {} failed endpoints) and no live browser was found; retry discovery or select an explicit browser_id",
+                    inventory.unprobed_pipe_count, inventory.failed_pipe_count
+                )));
+            }
+            Err(err)
+        }
     }
-    select_browser(&inventory.browsers, selector)
 }
 
 enum ProbeOutcome {
