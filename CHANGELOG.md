@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-11-17
+
+### Fixed
+
+- Allow `select_browser_from_inventory` to select a unique matching live
+  browser extension even when other discovered `codex-browser-use` pipes or
+  sockets fail `getInfo` or time out (`failed_pipe_count` / `unprobed_pipe_count`
+  non-zero). Previously, ChatGPT Desktop's own `codex-browser-use-<uuid>` pipes
+  on Windows or stale `.sock` files on Linux caused auto-discovery and
+  `--browser-family` selection to fail with `browser inventory is incomplete`
+  even when a healthy Edge or Chrome extension host was live. The bridge now
+  logs a warning and proceeds when a unique live browser matches, still fails
+  closed on multiple live matches, and still reports `incomplete` when no live
+  browser is found.
+
 ## [2.0.1] - 2026-11-16
 
 ### Fixed
