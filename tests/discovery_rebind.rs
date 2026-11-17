@@ -34,55 +34,58 @@ fn inventory(unprobed: usize, failed: usize) -> BrowserInventory {
 }
 
 #[test]
-fn partial_inventory_allows_unique_browser_but_reports_incomplete_when_empty() {
+fn partial_inventory_requires_exact_browser_identity() {
     for partial in [inventory(1, 0), inventory(0, 1), inventory(2, 3)] {
         for selector in [
             BrowserSelector::default(),
             BrowserSelector::new(Some("edge".into()), None),
-            BrowserSelector::new(None, Some("exact-id".into())),
+            BrowserSelector::new(Some("chrome".into()), None),
         ] {
-            assert_eq!(
-                select_browser_from_inventory(&partial, &selector)
-                    .unwrap()
-                    .id,
-                "exact-id"
-            );
-        }
-
-        let mut empty = inventory(0, 1);
-        empty.pipe_count = partial.unprobed_pipe_count + partial.failed_pipe_count;
-        empty.probed_pipe_count = partial.failed_pipe_count;
-        empty.unprobed_pipe_count = partial.unprobed_pipe_count;
-        empty.failed_pipe_count = partial.failed_pipe_count;
-        empty.browsers.clear();
-        for selector in [
-            BrowserSelector::default(),
-            BrowserSelector::new(Some("edge".into()), None),
-        ] {
-            assert!(select_browser_from_inventory(&empty, &selector)
+            assert!(select_browser_from_inventory(&partial, &selector)
                 .unwrap_err()
                 .to_string()
                 .contains("incomplete"));
         }
+        let exact = BrowserSelector::new(None, Some("exact-id".into()));
+        assert_eq!(
+            select_browser_from_inventory(&partial, &exact).unwrap().id,
+            "exact-id"
+        );
     }
+}
 
-    let mut ambiguous = inventory(0, 2);
+#[test]
+fn complete_inventory_ignores_known_stale_and_app_private_routes_only() {
+    let mut complete = inventory(0, 0);
+    complete.pipe_count += 2;
+    complete.probed_pipe_count += 2;
+    complete.stale_pipe_count = 1;
+    complete.excluded_pipe_count = 1;
+    let default = BrowserSelector::default();
+    assert_eq!(
+        select_browser_from_inventory(&complete, &default)
+            .unwrap()
+            .id,
+        "exact-id"
+    );
+    let family = BrowserSelector::new(Some("edge".into()), None);
+    assert_eq!(
+        select_browser_from_inventory(&complete, &family)
+            .unwrap()
+            .id,
+        "exact-id"
+    );
+
+    let mut ambiguous = complete;
     let mut second = ambiguous.browsers[0].clone();
     second.id = "second-id".into();
     ambiguous.browsers.push(second);
-    assert!(
-        select_browser_from_inventory(&ambiguous, &BrowserSelector::default())
-            .unwrap_err()
-            .to_string()
-            .contains("2 connected browser instances")
-    );
-
-    assert!(select_browser_from_inventory(&inventory(0, 0), &BrowserSelector::default()).is_ok());
-    let mut stale = inventory(0, 0);
-    stale.pipe_count += 2;
-    stale.probed_pipe_count += 2;
-    stale.stale_pipe_count = 2;
-    assert!(select_browser_from_inventory(&stale, &BrowserSelector::default()).is_ok());
+    ambiguous.pipe_count += 1;
+    ambiguous.probed_pipe_count += 1;
+    assert!(select_browser_from_inventory(&ambiguous, &default)
+        .unwrap_err()
+        .to_string()
+        .contains("2 connected browser instances"));
 }
 
 #[test]

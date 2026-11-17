@@ -295,11 +295,9 @@ pub fn select_browser<'a>(
 
 /// Select a browser from a discovered inventory.
 ///
-/// Unreachable or non-extension endpoints (such as ChatGPT Desktop's own
-/// `codex-browser-use-*` pipes) must not block selecting a unique live browser
-/// extension; when no matching browser is found and some endpoints failed or
-/// were not probed, report the incomplete inventory so callers know discovery
-/// was partial.
+/// Known stale and app-private endpoints cannot be browser candidates. An
+/// unknown or unprobed endpoint can still be another browser, so only an
+/// explicit instance ID may be selected from a partial inventory.
 pub fn select_browser_from_inventory<'a>(
     inventory: &'a BrowserInventory,
     selector: &BrowserSelector,
@@ -309,31 +307,13 @@ pub fn select_browser_from_inventory<'a>(
         || inventory.failed_pipe_count != 0
         || inventory.probed_pipe_count != inventory.pipe_count;
 
-    match select_browser(&inventory.browsers, selector) {
-        Ok(browser) => {
-            if selector.instance_id.is_none() && incomplete {
-                tracing::warn!(
-                    unprobed_pipe_count = inventory.unprobed_pipe_count,
-                    failed_pipe_count = inventory.failed_pipe_count,
-                    probed_pipe_count = inventory.probed_pipe_count,
-                    pipe_count = inventory.pipe_count,
-                    browser_id = %browser.id,
-                    family = %browser.family,
-                    "selecting unique live browser despite incomplete pipe inventory"
-                );
-            }
-            Ok(browser)
-        }
-        Err(err) => {
-            if incomplete && inventory.browsers.is_empty() {
-                return Err(BridgeError::User(format!(
-                    "browser inventory is incomplete ({} unprobed, {} failed endpoints) and no live browser was found; retry discovery or select an explicit browser_id",
-                    inventory.unprobed_pipe_count, inventory.failed_pipe_count
-                )));
-            }
-            Err(err)
-        }
+    if incomplete && selector.instance_id.is_none() {
+        return Err(BridgeError::User(format!(
+            "browser inventory is incomplete ({} unprobed, {} unknown endpoints); retry discovery or select an explicit browser_id",
+            inventory.unprobed_pipe_count, inventory.failed_pipe_count
+        )));
     }
+    select_browser(&inventory.browsers, selector)
 }
 
 enum ProbeOutcome {
@@ -360,36 +340,62 @@ fn stale_route_error(error: &BridgeError) -> bool {
 }
 
 fn excluded_backend_error(error: &BridgeError) -> bool {
-    matches!(error, BridgeError::Rpc { method, message } if method == "getInfo" && message == "json-rpc error 1: MCP Apps browser belongs to another task.")
+    matches!(
+        error,
+        BridgeError::Rpc { method, message } if method == "getInfo" && matches!(
+            message.as_str(),
+            "json-rpc error 1: IAB browser belongs to another task."
+                | "json-rpc error 1: MCP Apps browser belongs to another task."
+        )
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ProbeFailure {
+    Stale,
+    Excluded,
+    Unknown,
+}
+
+pub(crate) fn classify_probe_failure(error: &BridgeError) -> ProbeFailure {
+    if stale_route_error(error) {
+        ProbeFailure::Stale
+    } else if excluded_backend_error(error) {
+        ProbeFailure::Excluded
+    } else {
+        ProbeFailure::Unknown
+    }
 }
 
 async fn probe_pipe(pipe: discovery::PipeInfo) -> ProbeOutcome {
+    match probe_extension(pipe).await {
+        Ok((browser, _)) => ProbeOutcome::Browser(Box::new(browser)),
+        Err(error) => match classify_probe_failure(&error) {
+            ProbeFailure::Stale => ProbeOutcome::Stale,
+            ProbeFailure::Excluded => ProbeOutcome::Excluded,
+            ProbeFailure::Unknown => ProbeOutcome::Unknown,
+        },
+    }
+}
+
+pub(crate) async fn probe_extension(
+    pipe: discovery::PipeInfo,
+) -> Result<(BrowserDescriptor, Value)> {
     let path = discovery::pipe_path(&pipe.name);
-    let mut stream = match dial_transport(&path).await {
-        Ok(stream) => stream,
-        Err(error) if stale_route_error(&error) => return ProbeOutcome::Stale,
-        Err(_) => return ProbeOutcome::Unknown,
-    };
+    let mut stream = dial_transport(&path).await?;
     let session_id = Uuid::new_v4().to_string();
     let turn_id = Uuid::new_v4().to_string();
-    let raw = match timeout(
+    let raw = timeout(
         GET_INFO_TIMEOUT,
         verify_pipe_stream(&mut stream, &session_id, &turn_id),
     )
     .await
-    {
-        Ok(Ok(raw)) => raw,
-        Ok(Err(error)) if stale_route_error(&error) => return ProbeOutcome::Stale,
-        Ok(Err(error)) if excluded_backend_error(&error) => return ProbeOutcome::Excluded,
-        _ => return ProbeOutcome::Unknown,
-    };
-    match serde_json::from_str::<Value>(raw.get())
-        .ok()
-        .and_then(|info| BrowserDescriptor::from_info(&info, pipe).ok())
-    {
-        Some(browser) => ProbeOutcome::Browser(Box::new(browser)),
-        None => ProbeOutcome::Unknown,
-    }
+    .map_err(|_| BridgeError::Timeout("getInfo".into()))??;
+    let info = serde_json::from_str(raw.get()).map_err(|error| {
+        BridgeError::Protocol(format!("invalid getInfo identity response: {error}"))
+    })?;
+    Ok((BrowserDescriptor::from_info(&info, pipe)?, info))
 }
 
 #[cfg(test)]
@@ -408,6 +414,13 @@ mod tests {
             method: "getInfo".into(),
             message: "json-rpc error 1: MCP Apps browser belongs to another task.".into()
         }));
+        assert_eq!(
+            classify_probe_failure(&BridgeError::Rpc {
+                method: "getInfo".into(),
+                message: "json-rpc error 1: IAB browser belongs to another task.".into(),
+            }),
+            ProbeFailure::Excluded
+        );
         assert!(!excluded_backend_error(&BridgeError::Rpc {
             method: "getInfo".into(),
             message: "json-rpc error 1: Permission denied".into()

@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-11-17
+
+### Fixed
+
+- Require complete discovery for automatic and family-only browser selection.
+  An unknown or unprobed endpoint can be another profile, so the bridge now
+  requires an exact `browser_id` when it cannot prove uniqueness.
+- Ignore disconnected transports and the explicit app-private IAB/MCP Apps
+  replies without treating ordinary timeouts or permission failures as stale.
+  Doctor distinguishes these cases in its endpoint status and counts.
+
 ## [2.0.2] - 2026-11-17
 
 ### Fixed

@@ -145,9 +145,12 @@ Use:
 2. `codex_bind_browser` with an exact `browser_id` when more than one instance
    is live.
 
-The initial connection is fail-closed: if exactly one live instance exists it
-is selected automatically; if several exist, browser tools return an ambiguity
-error until the session is bound. Reconnects stay pinned to the selected
+The initial connection requires a complete inventory for automatic and
+family-only selection. Known disconnected sockets and app-private IAB/MCP Apps
+routes are ignored. If a probe times out or an endpoint remains unidentified,
+retry discovery or bind an exact `browser_id`: a single response does not
+prove only one browser is running. A complete inventory with multiple matching
+instances also requires an exact ID. Reconnects stay pinned to the selected
 `extensionInstanceId`; they never rotate silently to another browser/profile.
 
 For process-level pinning, use `--browser-family` plus
