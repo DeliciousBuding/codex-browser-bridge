@@ -4,6 +4,57 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-11-17
+
+### Fixed
+
+- Require complete discovery for automatic and family-only browser selection.
+  An unknown or unprobed endpoint can be another profile, so the bridge now
+  requires an exact `browser_id` when it cannot prove uniqueness.
+- Ignore disconnected transports and the explicit app-private IAB/MCP Apps
+  replies without treating ordinary timeouts or permission failures as stale.
+  Doctor distinguishes these cases in its endpoint status and counts.
+
+## [2.0.2] - 2026-11-17
+
+### Fixed
+
+- Allow `select_browser_from_inventory` to select a unique matching live
+  browser extension even when other discovered `codex-browser-use` pipes or
+  sockets fail `getInfo` or time out (`failed_pipe_count` / `unprobed_pipe_count`
+  non-zero). Previously, ChatGPT Desktop's own `codex-browser-use-<uuid>` pipes
+  on Windows or stale `.sock` files on Linux caused auto-discovery and
+  `--browser-family` selection to fail with `browser inventory is incomplete`
+  even when a healthy Edge or Chrome extension host was live. The bridge now
+  logs a warning and proceeds when a unique live browser matches, still fails
+  closed on multiple live matches, and still reports `incomplete` when no live
+  browser is found.
+
+## [2.0.1] - 2026-11-16
+
+### Fixed
+
+- Attach to the ChatGPT browser extension 1.26+ no longer fails with
+  `Cannot read properties of undefined (reading 'timeoutMs')`. The extension now
+  reads `params.networkPolicy` on every attach; the bridge sends the same
+  `{constraints: []}` default the official client uses, which installs no rules.
+  Every CDP tool was unusable without it.
+
+### Added
+
+- `--network-policy`, `CODEX_BRIDGE_NETWORK_POLICY`, and the `network_policy`
+  TOML key set the Browser Use network policy installed with each attach. Values
+  are the extension's own JSON shape and are validated against its budgets
+  (128 constraints, 4096 patterns, 64 KiB pattern text, timeout 1..30000 ms)
+  before the debugger is detached, so an invalid policy fails without first
+  breaking an attached tab.
+
+### Changed
+
+- The pinned official plugin baseline moves to `26.1111.21308` (23 interfaces,
+  153 members). `check-official-drift.js` now counts both command-registration
+  packing styles instead of reporting zero for current builds.
+
 ## [2.0.0] - 2026-10-25
 
 See [the upgrade guide](docs/upgrade-v2.md) for existing claims, configuration
