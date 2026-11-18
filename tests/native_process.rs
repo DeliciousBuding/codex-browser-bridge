@@ -164,6 +164,7 @@ fn mcp_eof(launcher_exits: bool) {
     command
         .args(["--mode", "mcp"])
         .env("RUST_LOG", "codex_browser_bridge::native=debug")
+        .env("NO_COLOR", "1")
         .stderr(Stdio::from(std::fs::File::create(&diagnostic).unwrap()));
     if launcher_exits {
         command.env("BRIDGE_NATIVE_FIXTURE_EXIT_ON_EOF", "1");

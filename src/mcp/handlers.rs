@@ -1494,8 +1494,7 @@ impl super::Server {
         let tab_id = required_str(&args, "tab_id")?;
         let base64_len = browser::print_pdf(&self.client_snapshot(), tab_id).await?;
         Ok(vec![Content::text(format!(
-            "PDF generated for tab {tab_id} ({} bytes base64). Content is streamed and not embedded in the MCP response.",
-            base64_len
+            "PDF generated for tab {tab_id} ({base64_len} bytes base64). Content is streamed and not embedded in the MCP response."
         ))])
     }
 

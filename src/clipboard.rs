@@ -287,8 +287,7 @@ fn validate_items(items: Vec<ClipboardItem>, op: &str) -> Result<(Vec<ClipboardI
             }
             if total > MAX_CLIPBOARD_BYTES {
                 return Err(BridgeError::User(format!(
-                    "{op} exceeds {} byte limit",
-                    MAX_CLIPBOARD_BYTES
+                    "{op} exceeds {MAX_CLIPBOARD_BYTES} byte limit"
                 )));
             }
         }

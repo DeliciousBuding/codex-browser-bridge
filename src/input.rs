@@ -262,7 +262,7 @@ fn normalize(name: &str) -> Result<KeySpec> {
             let c = l.as_bytes()[2] as char;
             (c.to_string(), format!("Numpad{c}"), 96 + (c as i64 - '0' as i64), Some(c.to_string()), Some(c.to_string()))
         }
-        _ => return Err(BridgeError::User(format!("unsupported key {:?}", name))),
+        _ => return Err(BridgeError::User(format!("unsupported key {name:?}"))),
     };
     Ok(KeySpec {
         key,

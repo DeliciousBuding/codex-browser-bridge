@@ -134,6 +134,9 @@ jobs:
     # or add a macOS release asset.
     runs-on: macos-15
     timeout-minutes: 20
+    env:
+      # Use a real canonical path for fixtures exercising symlink rejection.
+      TMPDIR: /private/tmp
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master (toolchain: 1.88.0)

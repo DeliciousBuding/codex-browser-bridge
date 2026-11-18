@@ -20,10 +20,7 @@ impl ToolProfile {
             Some("network") => ToolProfile::Network,
             Some("full") | None => ToolProfile::Full,
             Some(other) => {
-                eprintln!(
-                    "Warning: unknown CODEX_BRIDGE_PROFILE '{}', using 'full'",
-                    other
-                );
+                eprintln!("Warning: unknown CODEX_BRIDGE_PROFILE '{other}', using 'full'");
                 ToolProfile::Full
             }
         }
