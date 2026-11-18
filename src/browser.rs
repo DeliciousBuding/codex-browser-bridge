@@ -165,17 +165,11 @@ pub async fn claim_user_tab(
                 .into(),
         ));
     }
-    client
-        .send_request("attach", Some(client.attach_params(id)))
-        .await
-        .map_err(|err| {
-            BridgeError::Protocol(format!(
-                "tab was claimed but attach failed: {err}; inspect codex_list_tabs before proceeding"
-            ))
-        })?;
-    // Mark as attached only after attach succeeds so subsequent CDP calls can
-    // safely skip the detach+attach cycle.
-    client.mark_attached(id).await;
+    client.attach_tab(id).await.map_err(|err| {
+        BridgeError::Protocol(format!(
+            "tab was claimed but attach failed: {err}; inspect codex_list_tabs before proceeding"
+        ))
+    })?;
     Ok(Tab {
         id: String::new(),
         raw_id: tab.id,
@@ -1364,7 +1358,6 @@ pub async fn cua_type(client: &Client, tab_id: &str, text: &str) -> Result<()> {
     if text.is_empty() {
         return Ok(());
     }
-    crate::pointer::ensure_foreground(client, id, Instant::now() + Duration::from_secs(3)).await?;
     client
         .execute_cdp_once_with_timeout(
             id,
@@ -1378,7 +1371,6 @@ pub async fn cua_type(client: &Client, tab_id: &str, text: &str) -> Result<()> {
 
 pub async fn cua_keypress(client: &Client, tab_id: &str, keys: &[String]) -> Result<()> {
     let id = parse_tab_id("cua_keypress", tab_id)?;
-    crate::pointer::ensure_foreground(client, id, Instant::now() + Duration::from_secs(3)).await?;
     crate::input::keypress(client, id, keys).await
 }
 

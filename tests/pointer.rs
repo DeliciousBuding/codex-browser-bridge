@@ -19,25 +19,11 @@ async fn reply(peer: &mut DuplexStream, request: &Value, result: Value) {
         .unwrap();
 }
 
-/// Answer the pre-input visibility probe (if present) and return the next
-/// pointer command. Pointer helpers activate a hidden tab before dispatch, so
-/// tests that only care about the dispatched event report a visible tab.
 async fn next_cdp(peer: &mut DuplexStream) -> Value {
-    loop {
-        let request = next(peer).await;
-        assert_eq!(request["method"], "executeCdp");
-        assert_eq!(request["params"]["target"]["tabId"], 7);
-        if request["params"]["method"] == "Runtime.evaluate" {
-            reply(
-                peer,
-                &request,
-                json!({"result": {"type": "string", "value": "visible"}}),
-            )
-            .await;
-            continue;
-        }
-        return request;
-    }
+    let request = next(peer).await;
+    assert_eq!(request["method"], "executeCdp");
+    assert_eq!(request["params"]["target"]["tabId"], 7);
+    request
 }
 
 async fn next_mouse(peer: &mut DuplexStream) -> (Value, Value) {
@@ -124,6 +110,61 @@ async fn move_and_scroll_carry_official_modifier_mask() {
 }
 
 #[tokio::test]
+async fn scroll_without_modifiers_positions_pointer_then_sends_one_gesture() {
+    let (client, mut peer) = client_pair();
+    client.mark_attached(7).await;
+    let worker = client.clone();
+    let task =
+        tokio::spawn(async move { pointer::scroll(&worker, 7, 8.0, 9.0, 0.0, 200.0, &[]).await });
+    let (movement, mouse) = next_mouse(&mut peer).await;
+    assert_eq!(mouse["type"], "mouseMoved");
+    assert_eq!(mouse["modifiers"], 0);
+    reply(&mut peer, &movement, json!({})).await;
+    let gesture = next_cdp(&mut peer).await;
+    assert_eq!(gesture["params"]["method"], "Input.synthesizeScrollGesture");
+    assert_eq!(gesture["params"]["commandParams"]["yDistance"], -200.0);
+    reply(
+        &mut peer,
+        &gesture,
+        json!({"error":{"code":-1,"message":"gesture rejected"}}),
+    )
+    .await;
+    assert!(timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .is_err());
+    assert!(
+        timeout(Duration::from_millis(60), protocol::decode_frame(&mut peer))
+            .await
+            .is_err()
+    );
+    client.shutdown().await;
+}
+
+#[tokio::test]
+async fn missing_mouse_move_ack_is_an_error_and_does_not_replay() {
+    let (client, mut peer) = client_pair();
+    client.mark_attached(7).await;
+    let worker = client.clone();
+    let task = tokio::spawn(async move { pointer::move_to(&worker, 7, 8.0, 9.0, &[]).await });
+    let (_, mouse) = next_mouse(&mut peer).await;
+    assert_eq!(mouse["type"], "mouseMoved");
+    let error = timeout(Duration::from_secs(4), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(error.to_string().contains("timeout"));
+    assert!(
+        timeout(Duration::from_millis(60), protocol::decode_frame(&mut peer))
+            .await
+            .is_err()
+    );
+    client.shutdown().await;
+}
+
+#[tokio::test]
 async fn drag_uses_every_supplied_path_point_and_releases() {
     let (client, mut peer) = client_pair();
     client.mark_attached(7).await;
@@ -200,6 +241,51 @@ async fn drag_press_failure_releases_the_button() {
         .unwrap()
         .unwrap_err();
     assert!(error.to_string().contains("injected press failure"));
+}
+
+#[tokio::test]
+async fn invalidated_press_can_finish_slow_reattachment_before_release() {
+    let (client, mut peer) = client_pair();
+    client.mark_attached(7).await;
+    let worker = client.clone();
+    let task = tokio::spawn(async move { pointer::click(&worker, 7, 1.0, 2.0, 1, 1, &[]).await });
+    let (press, mouse) = next_mouse(&mut peer).await;
+    assert_eq!(mouse["type"], "mousePressed");
+    protocol::encode_frame(
+        &mut peer,
+        &json!({"id":press["id"],"error":{"code":-1,"message":"Debugger unattached"}}),
+    )
+    .await
+    .unwrap();
+    let detach = next(&mut peer).await;
+    assert_eq!(detach["method"], "detach");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    reply(&mut peer, &detach, json!({})).await;
+    let attach = next(&mut peer).await;
+    assert_eq!(attach["method"], "attach");
+    reply(&mut peer, &attach, json!({})).await;
+    let focus = next_cdp(&mut peer).await;
+    assert_eq!(
+        focus["params"]["method"],
+        "Emulation.setFocusEmulationEnabled"
+    );
+    reply(&mut peer, &focus, json!({})).await;
+    let (release, mouse) = next_mouse(&mut peer).await;
+    assert_eq!(mouse["type"], "mouseReleased");
+    assert_eq!(mouse["buttons"], 0);
+    reply(&mut peer, &release, json!({})).await;
+    let error = timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(error.to_string().contains("outcome unknown"));
+    assert!(!error.to_string().contains("cleanup failed"));
+    assert!(
+        timeout(Duration::from_millis(50), protocol::decode_frame(&mut peer))
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]

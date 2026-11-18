@@ -45,17 +45,6 @@ fn target(checked: bool) -> Value {
     json!({"ok":true,"rect":{"x":40.0,"y":20.0},"bounds":{"x":10.0,"y":10.0,"width":60.0,"height":20.0},"value":checked,"needs_click":true,"target_changed":false})
 }
 
-async fn foreground(peer: &mut DuplexStream) {
-    let request = next(peer).await;
-    assert_eq!(expression(&request), "document.visibilityState");
-    reply(
-        peer,
-        &request,
-        json!({"result":{"type":"string","value":"visible"}}),
-    )
-    .await;
-}
-
 async fn cleanup(peer: &mut DuplexStream) {
     let request = next(peer).await;
     assert!(expression(&request).contains("\"action\":\"release_target\""));
@@ -86,7 +75,6 @@ async fn checked_awaits_async_postcondition_after_exactly_one_trusted_click() {
         let request = next(&mut peer).await;
         locator_reply(&mut peer, &request, target(false)).await;
     }
-    foreground(&mut peer).await;
     for kind in ["mousePressed", "mouseReleased"] {
         let request = next(&mut peer).await;
         assert_eq!(request["params"]["method"], "Input.dispatchMouseEvent");
@@ -159,7 +147,6 @@ async fn failed_postcondition_has_bounded_timeout_and_never_reclicks() {
     });
     let request = next(&mut peer).await;
     locator_reply(&mut peer, &request, target(false)).await;
-    foreground(&mut peer).await;
     for kind in ["mousePressed", "mouseReleased"] {
         let request = next(&mut peer).await;
         assert_eq!(request["params"]["commandParams"]["type"], kind);
@@ -201,7 +188,6 @@ async fn sequential_text_appends_through_shared_keys_and_unicode_insert_text() {
         )
         .await
     });
-    foreground(&mut peer).await;
     let request = next(&mut peer).await;
     locator_reply(&mut peer, &request, json!({"ok":true,"focused":true})).await;
     for kind in ["keyDown", "keyUp"] {
@@ -237,7 +223,6 @@ async fn sequential_uppercase_uses_a_real_shift_chord() {
         )
         .await
     });
-    foreground(&mut peer).await;
     let request = next(&mut peer).await;
     locator_reply(&mut peer, &request, json!({"ok":true,"focused":true})).await;
     for (kind, key, mask) in [
@@ -278,7 +263,6 @@ async fn sequential_punctuation_uses_layout_independent_insert_text_once() {
         )
         .await
     });
-    foreground(&mut peer).await;
     let request = next(&mut peer).await;
     locator_reply(&mut peer, &request, json!({"ok":true,"focused":true})).await;
     for character in ["-", "+", "!", "_"] {
@@ -329,7 +313,6 @@ async fn force_bypasses_stability_and_dispatch_failure_does_not_replay() {
     });
     let request = next(&mut peer).await;
     locator_reply(&mut peer, &request, target(false)).await;
-    foreground(&mut peer).await;
     let request = next(&mut peer).await;
     assert_eq!(request["params"]["commandParams"]["type"], "mousePressed");
     protocol::encode_frame(

@@ -46,6 +46,13 @@ async fn control_c_is_a_chord_with_one_attach_and_reverse_release() {
         assert_eq!(request["params"]["tabId"], 7);
         reply(&mut peer, &request, json!({})).await;
     }
+    let focus = next(&mut peer).await;
+    assert_eq!(
+        focus["params"]["method"],
+        "Emulation.setFocusEmulationEnabled"
+    );
+    assert_eq!(focus["params"]["commandParams"], json!({"enabled": true}));
+    reply(&mut peer, &focus, json!({})).await;
     for (kind, key, code, virtual_key, modifiers) in [
         ("rawKeyDown", "Control", "ControlLeft", 17, 2),
         ("rawKeyDown", "c", "KeyC", 67, 2),
@@ -267,6 +274,13 @@ async fn session_invalid_keydown_is_not_replayed() {
         assert_eq!(request["method"], method);
         reply(&mut peer, &request, json!({})).await;
     }
+    let focus = next(&mut peer).await;
+    assert_eq!(
+        focus["params"]["method"],
+        "Emulation.setFocusEmulationEnabled"
+    );
+    assert_eq!(focus["params"]["commandParams"], json!({"enabled": true}));
+    reply(&mut peer, &focus, json!({})).await;
     let (request, up) = event(&mut peer).await;
     assert_eq!(up["type"], "keyUp");
     reply(&mut peer, &request, json!({})).await;

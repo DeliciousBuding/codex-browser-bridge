@@ -4,12 +4,12 @@ Read this reference after a browser tool fails or before a sensitive operation.
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
-| Screenshot or CDP call times out | Background tab is throttled | `codex_bring_to_front`, then retry |
+| Screenshot or CDP call times out | Renderer or attachment did not respond | Inspect the error and retry the observation; do not silently activate the tab |
 | Every CDP call fails with `Debugger unattached` | The extension dropped the debugger | Call any browser tool again: the attachment is invalidated and re-established. If it repeats, run `codex_doctor` and restart the extension |
 | Target closed or attach failed | Tab was replaced or not owned | `codex_user_tabs`, then `codex_claim_tab` |
 | Attach fails with `Cannot read properties of undefined (reading 'timeoutMs')` | The extension requires `params.networkPolicy` on every attach | Upgrade the bridge; a build without that field cannot attach to extension 1.26+. Set `CODEX_BRIDGE_NETWORK_POLICY` only to install real rules, not to work around this |
 | Element not found | Page changed or selector is stale | Re-run `codex_find_element` or `codex_dom_snapshot` |
-| Click has no effect | Target may be covered, disabled, or require another pointer button | Re-resolve with `codex_locator`, then try `codex_click_element` or coordinate CUA. Input activates a hidden tab first; if it still fails, check `document.visibilityState` |
+| Click has no effect | Target may be covered, disabled, or require another pointer button | Re-resolve with `codex_locator`, then try `codex_click_element` or coordinate CUA. Attachments use native focus emulation; verify the actual page postcondition before reporting success |
 | SPA never reports loaded | Route updated without full navigation | Use `codex_wait_for_element` or `codex_wait_for_url` |
 | All browser tools fail | Pipe disconnected or extension stalled | Run `codex_doctor`; restart the ChatGPT desktop app only if needed |
 | Upload rejected | Path is outside the allowed directory | Set `CODEX_BRIDGE_UPLOAD_BASE` and restart the MCP server |

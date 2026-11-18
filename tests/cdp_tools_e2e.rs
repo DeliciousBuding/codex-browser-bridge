@@ -50,6 +50,13 @@ async fn browser_calls_use_expected_cdp_sequence_and_sticky_attach() {
     assert_eq!(attach["method"], "attach");
     assert_eq!(attach["params"]["tabId"], 7);
     reply_result(&mut server, &attach, json!({})).await;
+    let focus = next_request(&mut server).await;
+    assert_eq!(
+        focus["params"]["method"],
+        "Emulation.setFocusEmulationEnabled"
+    );
+    assert_eq!(focus["params"]["commandParams"], json!({"enabled": true}));
+    reply_result(&mut server, &focus, json!({})).await;
 
     let evaluate = next_request(&mut server).await;
     assert_eq!(evaluate["method"], "executeCdp");
@@ -111,6 +118,13 @@ async fn evaluate_awaits_promises_and_returns_by_value() {
     let attach = next_request(&mut server).await;
     assert_eq!(attach["method"], "attach");
     reply_result(&mut server, &attach, json!({})).await;
+    let focus = next_request(&mut server).await;
+    assert_eq!(
+        focus["params"]["method"],
+        "Emulation.setFocusEmulationEnabled"
+    );
+    assert_eq!(focus["params"]["commandParams"], json!({"enabled": true}));
+    reply_result(&mut server, &focus, json!({})).await;
 
     let evaluate = next_request(&mut server).await;
     assert_eq!(evaluate["method"], "executeCdp");
@@ -147,6 +161,13 @@ async fn hover_waits_until_the_pointer_is_observed_on_the_target() {
     let attach = next_request(&mut server).await;
     assert_eq!(attach["method"], "attach");
     reply_result(&mut server, &attach, json!({})).await;
+    let focus = next_request(&mut server).await;
+    assert_eq!(
+        focus["params"]["method"],
+        "Emulation.setFocusEmulationEnabled"
+    );
+    assert_eq!(focus["params"]["commandParams"], json!({"enabled": true}));
+    reply_result(&mut server, &focus, json!({})).await;
 
     let resolve = next_request(&mut server).await;
     assert_eq!(resolve["params"]["method"], "Runtime.evaluate");
@@ -175,15 +196,6 @@ async fn hover_waits_until_the_pointer_is_observed_on_the_target() {
         &mut server,
         &cleanup,
         json!({"result":{"value":"{\"ok\":true}"}}),
-    )
-    .await;
-
-    let visibility = next_request(&mut server).await;
-    assert_eq!(visibility["params"]["method"], "Runtime.evaluate");
-    reply_result(
-        &mut server,
-        &visibility,
-        json!({"result":{"value":"visible"}}),
     )
     .await;
 
@@ -252,6 +264,13 @@ async fn print_pdf_uses_bounded_stream_and_closes_handle() {
     let attach = next_request(&mut server).await;
     assert_eq!(attach["method"], "attach");
     reply_result(&mut server, &attach, json!({})).await;
+    let focus = next_request(&mut server).await;
+    assert_eq!(
+        focus["params"]["method"],
+        "Emulation.setFocusEmulationEnabled"
+    );
+    assert_eq!(focus["params"]["commandParams"], json!({"enabled": true}));
+    reply_result(&mut server, &focus, json!({})).await;
 
     let print = next_request(&mut server).await;
     assert_eq!(print["method"], "executeCdp");
@@ -305,6 +324,13 @@ async fn print_pdf_closes_stream_when_read_fails() {
     let attach = next_request(&mut server).await;
     assert_eq!(attach["method"], "attach");
     reply_result(&mut server, &attach, json!({})).await;
+    let focus = next_request(&mut server).await;
+    assert_eq!(
+        focus["params"]["method"],
+        "Emulation.setFocusEmulationEnabled"
+    );
+    assert_eq!(focus["params"]["commandParams"], json!({"enabled": true}));
+    reply_result(&mut server, &focus, json!({})).await;
 
     let print = next_request(&mut server).await;
     assert_eq!(print["params"]["method"], "Page.printToPDF");
