@@ -21,6 +21,31 @@ child = subprocess.Popen(
 )
 (root / "pids.json").write_text(json.dumps([os.getpid(), child.pid]))
 (root / "cwd.txt").write_text(str(pathlib.Path.cwd()))
+(root / "environment.json").write_text(
+    json.dumps(
+        {
+            name: os.environ.get(name)
+            for name in [
+                "BRIDGE_NATIVE_FIXTURE_FORWARDED",
+                "BRIDGE_NATIVE_FIXTURE_LOCAL_FORWARDED",
+                "BRIDGE_NATIVE_FIXTURE_LITERAL",
+                "DISPLAY",
+                "XAUTHORITY",
+                "WAYLAND_DISPLAY",
+                "XDG_RUNTIME_DIR",
+                "DBUS_SESSION_BUS_ADDRESS",
+                "CUA_REPL_ENABLED_SURFACES",
+                "NODE_REPL_TRUSTED_SERVICES",
+                "SSL_CERT_FILE",
+                "BRIDGE_NATIVE_FIXTURE_AMBIENT",
+                "PATH",
+                "PATHEXT",
+                "SYSTEMROOT",
+                "NODE_REPL_AUTH_TOKEN",
+            ]
+        }
+    )
+)
 for line in sys.stdin:
     row = json.loads(line)
     with (root / "frames.jsonl").open("a", encoding="utf-8") as stream:
@@ -38,7 +63,44 @@ for line in sys.stdin:
     elif row["method"] == "tools/list":
         if os.environ.get("BRIDGE_NATIVE_FIXTURE_HANG_CATALOG"):
             continue
-        result = {"tools": []}
+        if os.environ.get("BRIDGE_NATIVE_FIXTURE_LOOP_CATALOG"):
+            result = {
+                "tools": [{"name": "js", "inputSchema": {"type": "object"}}],
+                "nextCursor": "loop",
+            }
+        elif os.environ.get("BRIDGE_NATIVE_FIXTURE_PAGINATE_CATALOG"):
+            if row.get("params", {}).get("cursor") is None:
+                result = {
+                    "tools": [
+                        {"name": "js", "inputSchema": {"type": "object"}},
+                        {"name": "js_reset", "inputSchema": {"type": "object"}},
+                    ],
+                    "nextCursor": "page-2",
+                }
+            elif row["params"]["cursor"] == "page-2":
+                result = {
+                    "tools": [
+                        {
+                            "name": "js_add_node_module_dir",
+                            "inputSchema": {"type": "object"},
+                        },
+                        {"name": "turn_ended", "inputSchema": {"type": "object"}},
+                    ]
+                }
+            else:
+                result = {"tools": []}
+        else:
+            result = {
+                "tools": [
+                    {"name": "js", "inputSchema": {"type": "object"}},
+                    {"name": "js_reset", "inputSchema": {"type": "object"}},
+                    {
+                        "name": "js_add_node_module_dir",
+                        "inputSchema": {"type": "object"},
+                    },
+                    {"name": "turn_ended", "inputSchema": {"type": "object"}},
+                ]
+            }
     else:
         if row.get("params", {}).get("name") == "turn_ended" and os.environ.get(
             "BRIDGE_NATIVE_FIXTURE_HANG_CLEANUP"
@@ -50,14 +112,25 @@ for line in sys.stdin:
             continue
         result = {"content": [{"type": "text", "text": "synthetic response"}]}
         if row.get("params", {}).get("name") == "js" and os.environ.get(
+            "BRIDGE_NATIVE_FIXTURE_IMAGE_RESULT"
+        ):
+            result["content"] = [
+                {
+                    "type": "image",
+                    "mimeType": "image/png",
+                    "data": "aGVsbG8=",
+                    "_meta": {"screenshotId": "synthetic-image"},
+                }
+            ]
+        if row.get("params", {}).get("name") == "js" and os.environ.get(
             "BRIDGE_NATIVE_FIXTURE_JS_ERROR"
         ):
             result["isError"] = True
     print(json.dumps({"jsonrpc": "2.0", "id": row["id"], "result": result}), flush=True)
 (root / "stdin-eof").write_text(str(os.getpid()))
-if os.environ.get("BRIDGE_NATIVE_FIXTURE_EXIT_ON_EOF"):
+if not os.environ.get("BRIDGE_NATIVE_FIXTURE_HOLD_ON_EOF"):
     sys.exit(0)
-# Force the adapter to exercise owned process-tree termination.
+# Force the adapter to exercise owned process-tree termination after grace timeout.
 while not release.exists():
     time.sleep(0.05)
 child.wait(timeout=3)

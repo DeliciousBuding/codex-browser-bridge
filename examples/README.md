@@ -43,13 +43,13 @@ elicitation. See [native setup and platform status](../docs/native-computer-use.
 | OpenClaw | [openclaw.json](openclaw.json) | OpenClaw MCP server config | Restart or reconnect MCP servers |
 | Hermes Agent | [hermes-agent.json](hermes-agent.json) | Hermes Agent MCP server config | Restart or reconnect MCP servers |
 
-Replace `C:\\Users\\YOUR_USER\\Downloads` with a real upload directory. This
+Replace `C:\\Users\\<user>\\Downloads` with a real upload directory. This
 directory is the only location `codex_file_input` can upload from.
 
 ## Platform notes
 
 ### Windows (native)
-Use the config as-is after replacing `YOUR_USER`. For GUI-launched clients and
+Use the config as-is after replacing `<user>` with the local Windows account. For GUI-launched clients and
 scheduled agents, prefer the absolute `command` path printed by npm
 `postinstall`.
 
@@ -61,7 +61,7 @@ $bridge = Join-Path (npm prefix -g) "codex-browser-bridge.cmd"
 ```
 
 ```json
-"command": "C:\\Users\\YOUR_USER\\AppData\\Roaming\\npm\\codex-browser-bridge.cmd"
+"command": "C:\\Users\\<user>\\AppData\\Roaming\\npm\\codex-browser-bridge.cmd"
 ```
 
 GUI-launched clients do not always inherit the same `PATH` as your terminal. If
@@ -70,7 +70,7 @@ the client reports spawn failures, paste the `command` from
 
 ### Linux and WSL
 
-v1.12.0 includes Linux GNU x64/arm64 packages and Unix sockets under
+Current releases include Linux GNU x64/arm64 packages and Unix sockets under
 `/tmp/codex-browser-use/*.sock`; release binaries require glibc >= 2.39. The
 Linux extension path has not been live-verified. WSL Linux sockets and Windows
 named pipes are separate transports: WSL does not make them interchangeable.
@@ -81,11 +81,11 @@ When using a Windows install from WSL, point the client at the Windows executabl
 {
   "mcpServers": {
     "codex-browser": {
-      "command": "/mnt/c/Users/YOUR_USER/AppData/Roaming/npm/codex-browser-bridge.cmd",
+      "command": "/mnt/c/Users/<user>/AppData/Roaming/npm/codex-browser-bridge.cmd",
       "args": ["--mode", "mcp"],
       "transport": "stdio",
       "env": {
-        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\YOUR_USER\\Downloads"
+        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\<user>\\Downloads"
       }
     }
   }

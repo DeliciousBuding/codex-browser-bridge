@@ -10,6 +10,10 @@ ChatGPT desktop app. It reuses the extension's browser profile, cookies, and
 logged-in tabs. Do not add Playwright, a second extension, or copied browser
 profiles.
 
+The default plugin registration exposes the browser surface only. Native
+Computer Use requires the separate `--surface computer` MCP registration
+described in [references/native-computer-use.md](references/native-computer-use.md).
+
 ## Progressive Loading
 
 Modern Claude Code and Codex clients use tool search. Start with
@@ -77,7 +81,7 @@ Current source counts are `basic` 46, `network` 65, and `full` 66. Clients
 without tool search can set `CODEX_BRIDGE_PROFILE=basic` or `network` when a
 smaller surface is intentional.
 
-v1.12.0 also exposes `codex_clipboard`, `codex_webmcp`, and
+The bridge also exposes `codex_clipboard`, `codex_webmcp`, and
 `codex_content_export`; read their MCP schemas before use. They are
 bridge-native contracts with explicit bounds, not claims that every official
 app-side policy or artifact service is inherited.
@@ -85,8 +89,7 @@ app-side policy or artifact service is inherited.
 ## Compatibility
 
 Chrome and Edge are tested. Brave, Opera, and Vivaldi use the same
-Chromium/CDP pipeline but are not live-tested by this project. Linux GNU x64
-and arm64 Unix transport ships in v1.12.0 and requires glibc >= 2.39 for
-published binaries. Linux arm64 Chrome passed the synthetic parity and
-observation smoke; upload permission denial was verified, not successful upload. A compiling
-macOS target is not a runtime support claim.
+Chromium/CDP pipeline. Current Linux GNU x64 and arm64 packages include Unix
+socket transport and require glibc >= 2.39. Linux arm64 Chrome passed the
+synthetic parity and observation smoke (including file-chooser permission-denial
+cleanup).

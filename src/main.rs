@@ -120,6 +120,14 @@ async fn main() -> anyhow::Result<()> {
         if args.session_file.is_some() || args.keep_turn {
             anyhow::bail!("Computer Use objects live in one native worker; use batch, not --session-file or --keep-turn");
         }
+        if args.image_dir.is_some()
+            && !matches!(
+                args.command.as_ref(),
+                Some(cli::Command::Call { .. } | cli::Command::Batch)
+            )
+        {
+            anyhow::bail!("--image-dir requires a Computer Use call or batch command");
+        }
         if args.pipe.is_some()
             || args.browser_family.is_some()
             || args.browser_instance.is_some()

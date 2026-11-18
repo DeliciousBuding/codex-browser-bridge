@@ -75,10 +75,6 @@ service separately; WSL does not make Linux sockets and Windows pipes interchang
 - `cargo test --locked` runs all unit, integration, and e2e tests.
 - `cargo clippy --locked -- -D warnings` is wired into CI; run it locally before pushing.
 
-Supply-chain checks cover the released targets and macOS source builds.
-`deny.toml` records one informational maintenance exception for the SDK's
-transitive `chrono` dependency. Vulnerability advisories remain denied.
-
 ## Commits
 
 - Use [Conventional Commits](https://www.conventionalcommits.org/) prefixes (`feat:`, `fix:`, `docs:`, `test:`, `chore:`, `ci:`).

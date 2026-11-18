@@ -1,13 +1,12 @@
 <p align="center">
-  <img src="assets/hero.png" alt="codex-browser-bridge" width="720">
+  <img src="https://raw.githubusercontent.com/DeliciousBuding/codex-browser-bridge/main/assets/hero.png" alt="codex-browser-bridge" width="720">
 </p>
 
+<h1 align="center">codex-browser-bridge</h1>
+
 <p align="center">
-  <h1 align="center">codex-browser-bridge</h1>
-  <p align="center">
-    让 Claude Code 和其他 MCP Agent 通过 ChatGPT 桌面应用的浏览器扩展控制你现有的浏览器配置。
-    <br>66 个浏览器工具，可显式接入原生 Computer Use。单文件 Rust 二进制。
-  </p>
+  让 Claude Code 和其他 MCP Agent 通过 ChatGPT 桌面应用的浏览器扩展控制你现有的浏览器配置。
+  <br>66 个浏览器工具，可显式接入原生 Computer Use。单文件 Rust 二进制。
 </p>
 
 <p align="center">
@@ -23,7 +22,7 @@
   <a href="https://codecov.io/gh/DeliciousBuding/codex-browser-bridge">
     <img src="https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square" alt="Coverage">
   </a>
-  <a href="README.md">English</a>
+  <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/README.md">English</a>
 </p>
 
 ---
@@ -39,18 +38,17 @@ JSON-RPC 协议，暴露 66 个 MCP 工具用于浏览器自动化。
 浏览器入口有 66 个 MCP 工具（basic 46 / network 65 / full 66），
 提供 Windows 与 Linux GNU 包。
 
-原生 Computer Use 使用独立的 `--surface computer` 入口，连接已安装的 Codex
-`cua_repl` MCP 服务。MCP 与 CLI 共用原生执行器、对象、应用授权、截图和平台错误。
-默认 Claude 插件继续只提供浏览器；按需使用[原生 MCP 示例](examples/native-computer-use.json)。
-[设置、CLI 与验证矩阵](docs/native-computer-use.md)按候选版本和平台区分协议、
-构建与真实验收；Windows 输入、macOS、Wayland 尚有验收缺口。
+原生 Computer Use 通过 `--surface computer` 连接已安装的 Codex `cua_repl` MCP
+服务，沿用宿主配置中的 surface、trusted services、环境策略、工具过滤、应用授权弹窗与
+进程树清理。默认 Claude 插件保持纯浏览器模式；按需接入见
+[原生 Computer Use 指南](docs/native-computer-use.md)与
+[原生 MCP 配置示例](examples/native-computer-use.json)。
 
 从 1.x 升级时，先读[升级说明](docs/upgrade-v2.md)。旧续接文件和只传数字 ID
 的 claim 调用需要调整；工具名称和数量不变。
 
 项目目标是让非 Codex agent 获得完整浏览器能力。具体方法与语义覆盖见
-[能力对齐表](docs/official-parity.md)；工具数量或新增 CLI 入口都不代表已完整对齐。
-应用私有服务、locator 等剩余差异在表中单独记录。
+[能力对齐表](docs/official-parity.md)，应用私有服务、locator 等剩余差异也在表中记录。
 
 > **命名说明：** OpenAI 现在把这一入口称为 **ChatGPT 浏览器扩展**。底层 `codex-browser-use` pipe 和 JSON-RPC 方法名仍使用 Codex 时期标识，因此本项目继续保留 `codex_*` 工具名以维持兼容性。
 
@@ -93,7 +91,8 @@ npm i -g @delicious233/codex-browser-bridge
 
 ## 兼容性
 
-最近一次实测：2026-10-24，ChatGPT 桌面应用（`OpenAI.Codex` 包）`26.1016.8120.0`，Edge 扩展 `1.26.1020.11845`。
+最近一次完整浏览器审计：2026-10-24，ChatGPT 桌面应用（`OpenAI.Codex` 包）`26.1016.8120.0`，Edge 扩展 `1.26.1020.11845`。
+原生 Computer Use 的验证状态单独记录在[原生指南](docs/native-computer-use.md)。
 
 | 层面 | 状态 |
 |------|------|
@@ -106,12 +105,12 @@ npm i -g @delicious233/codex-browser-bridge
 | Windows x64 | 当前源码通过合成标签页 Edge parity 冒烟；不等于完整能力面 |
 | Windows arm64 | 已发布二进制；本次发布未实测 |
 | Linux GNU x64 | Ubuntu 24.04 / glibc 2.39 上通过全量原生 Rust/Node 门禁、release 构建和无浏览器 doctor；未做扩展 live 验证 |
-| Linux GNU arm64 | 原生 Rust tests/clippy/release 和合成 Chrome 扩展 parity 冒烟通过；不等于完整能力面 |
+| Linux GNU arm64 | 原生 Rust tests/clippy/release 和合成 Chrome 扩展 parity 冒烟通过 |
+| macOS | 源码编译与 CI 测试通过；无预编译发布二进制 |
 
 2026-10-24 的 Windows Edge 与 Linux arm64 Chrome 均通过 20 项 parity 和
 9 项观察/locator/文件结果测试。chooser 捕获、权限拒绝与清理已验证；本次
 扩展未开放本地文件访问权限，没有成功上传的验收记录。
-| macOS | Unix 代码可编译不代表运行时支持；无发布二进制或实测记录 |
 
 Bridge 不会安装第二套浏览器扩展，也不会复制浏览器配置。一个 MCP session
 只控制一个浏览器扩展实例，不会把多个浏览器 profile 的标签页合并成一个列表。
@@ -138,8 +137,9 @@ pipe 名只作为传输诊断信息。不报告实例 ID 的旧扩展不会进�
 1. `codex_list_browsers` 列出所有实时实例。
 2. 多实例时用 `codex_bind_browser` 绑定精确 `browser_id`。
 
-只有一个实时实例时才允许隐式选择；多个实例会 fail closed。重连始终固定在
-所选 `extensionInstanceId`，不会静默切到另一个 Chrome/Edge/profile。
+自动或按 family 选择要求 inventory 完整。存在探测超时或未识别端点时，即使
+只有一个已识别实例也必须传精确 `browser_id`；多个匹配实例同样 fail closed。
+重连始终固定在所选 `extensionInstanceId`，不会静默切到另一个 Chrome/Edge/profile。
 
 进程级配置可使用 `--browser-family` / `--browser-instance`、
 `CODEX_BRIDGE_BROWSER_FAMILY` / `CODEX_BRIDGE_BROWSER_INSTANCE`，或 TOML 的
@@ -259,7 +259,7 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 
 - `CODEX_BRIDGE_MAX_TEXT_BYTES` 限制每个 text content，默认 `1048576`。
 - `CODEX_BRIDGE_MAX_IMAGE_BYTES` 限制每个 base64 image content，默认 `3145728`。
-- 两者都有 8 MiB 硬上限。文本截断会带原始字节数标记；超大图片返回文本摘要，不返回无效的半截 base64。
+- 取值超出 `1024..=8388608` 时会在启动阶段报错。文本截断会带原始字节数标记；超大图片返回文本摘要，不返回无效的半截 base64。
 - 也可以在 `.codex-browser-bridge.toml` 中使用 `max_text_bytes` / `max_image_bytes`，或用 CLI 参数 `--max-text-bytes` / `--max-image-bytes`；网络策略对应 TOML 键 `network_policy`。
 - `CODEX_BRIDGE_NETWORK_POLICY`（或 `--network-policy`）设置每次 attach 携带的
   Browser Use 网络策略。取值是扩展自身形状的内联 JSON：
@@ -284,13 +284,6 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
 
 ### 浏览器选择 `[Browser]`
 
-`codex_observe` 在操作前启动有界 tab/document 观察，提供 frame、dialog ID、
-事件/日志游标及明确的 gap；导航组合操作先捕获后执行。
-`codex_file_chooser` 提供 chooser ID 与 multiple；上传需配置
-`CODEX_BRIDGE_UPLOAD_BASE` 并显式传 `colocated_browser=true`。远程浏览器主机上传
-与浏览器已完成下载路径不支持。导出标记 `path_scope=bridge_host`，不冒充
-browser download；完整边界见 [parity 契约](docs/official-parity.md)。
-
 | 工具 | 说明 |
 |------|------|
 | `codex_list_browsers` | 列出实时实例的 `browser_id`、family、profile、版本、能力和 pipe 信息 |
@@ -301,6 +294,15 @@ browser download；完整边界见 [parity 契约](docs/official-parity.md)。
 | `codex_browser_visibility` | 在扩展声明该能力时查询或设置浏览器可见性 |
 
 ### 标签管理 `[Tabs]`
+
+`codex_observe` 在操作前启动有界 tab/document 观察，提供 frame、dialog ID、
+事件/日志游标及明确的 gap；导航组合操作先捕获后执行。
+`codex_file_chooser` 提供 chooser ID 与 multiple；上传需配置
+`CODEX_BRIDGE_UPLOAD_BASE` 并显式传 `colocated_browser=true`。远程浏览器主机上传
+与浏览器已完成下载路径不支持。导出标记 `path_scope=bridge_host`，不冒充
+browser download；完整边界见
+[parity 契约](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md)。
+
 | 工具 | 说明 |
 |------|------|
 | `codex_list_tabs` | 列出当前 session 拥有的标签 |
@@ -309,6 +311,8 @@ browser download；完整边界见 [parity 契约](docs/official-parity.md)。
 | `codex_user_tabs` | 列出浏览器所有标签（含未认领） |
 | `codex_claim_tab` | 用最新枚举的标题/URL 快照认领已有标签 |
 | `codex_mark_tab` | 标记 deliverable 或跨 turn handoff |
+| `codex_observe` | 启动有界 tab/document 观察，返回 frame、dialog、事件/日志游标及明确 gap |
+| `codex_file_chooser` | 捕获 document-bound 文件选择器；上传仍要求配置根目录和 colocated browser |
 
 ### 导航 `[Navigation]`
 | 工具 | 说明 |
@@ -390,9 +394,14 @@ CUA 指针移动采用有上限的无 ack 窗口：当前扩展会执行 `mouseM
 | `codex_get_info` | 获取 bridge 运行时 + 扩展后端元数据 |
 | `codex_doctor` | 自检诊断（pipe 连通性、延迟、版本） |
 
-## CLI 用法
+### Bridge 状态与产物
+| 工具 | 说明 |
+|------|------|
+| `codex_clipboard` | 有界 session 虚拟剪贴板与粘贴集成 |
+| `codex_webmcp` | 实验性的顶层文档注册列表与调用 |
+| `codex_content_export` | 有界本地 GSuite/YouTube 导出，路径作用域为 bridge 主机 |
 
-本版本还包括 `codex_clipboard`（session 虚拟剪贴板）、`codex_webmcp`（实验性的顶层文档注册/调用）和 `codex_content_export`（有界本地 GSuite/YouTube 导出）。
+## CLI 用法
 
 ```bash
 # MCP 模式（默认）

@@ -6,7 +6,7 @@
       "transport": "stdio",
       "env": {
         "CODEX_BRIDGE_PROFILE": "full",
-        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\YOUR_USER\\Downloads"
+        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\<user>\\Downloads"
       }
     }
   }

@@ -3,9 +3,22 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::Path,
     process::{Command, Stdio},
-    sync::mpsc,
+    sync::{mpsc, OnceLock},
     time::{Duration, Instant},
 };
+
+fn python_executable() -> &'static str {
+    static PYTHON: OnceLock<String> = OnceLock::new();
+    PYTHON.get_or_init(|| {
+        let python = if cfg!(windows) { "python" } else { "python3" };
+        let output = Command::new(python)
+            .args(["-c", "import sys; print(sys.executable)"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    })
+}
 
 struct Fixture {
     root: tempfile::TempDir,
@@ -14,21 +27,48 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
-        let python = if cfg!(windows) { "python" } else { "python3" };
-        let output = Command::new(python)
-            .args(["-c", "import sys; print(sys.executable)"])
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-        let python = String::from_utf8(output.stdout).unwrap().trim().to_string();
+        let python = python_executable();
         std::fs::copy(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/native_mcp.py"),
             root.path().join("native_mcp.py"),
         )
         .unwrap();
         let config = json!({"mcpServers":{"cua_repl":{
-            "command":python,"args":["native_mcp.py"],"cwd":root.path(),
-            "env":{"CUA_REPL_NODE_REPL_PATH":python,"BRIDGE_NATIVE_FIXTURE_ROOT":root.path()}
+            "command":if cfg!(windows){"python"}else{"python3"},
+            "args":["native_mcp.py"],"cwd":root.path(),
+            "startup_timeout_ms":5000,
+            "env":{
+                "CUA_REPL_NODE_REPL_PATH":python,
+                "BRIDGE_NATIVE_FIXTURE_ROOT":root.path(),
+                "BRIDGE_NATIVE_FIXTURE_LITERAL":"host-owned",
+                "DISPLAY":":synthetic",
+                "XAUTHORITY":"/synthetic/Xauthority",
+                "WAYLAND_DISPLAY":"wayland-synthetic",
+                "XDG_RUNTIME_DIR":"/synthetic/runtime",
+                "DBUS_SESSION_BUS_ADDRESS":"unix:path=/synthetic/bus",
+                "CUA_REPL_ENABLED_SURFACES":"browser,computer",
+                "NODE_REPL_TRUSTED_SERVICES":json!({
+                    "browser":"@oai/browser-desktop/service",
+                    "sky":"@oai/sky/service"
+                }).to_string(),
+                "NODE_REPL_AUTH_TOKEN":"fixture-value"
+            },
+            "env_vars":[
+                "BRIDGE_NATIVE_FIXTURE_FORWARDED",
+                {"name":"BRIDGE_NATIVE_FIXTURE_LOCAL_FORWARDED","source":"local"},
+                "BRIDGE_NATIVE_FIXTURE_HOLD_ON_EOF",
+                "BRIDGE_NATIVE_FIXTURE_HANG_INITIALIZE",
+                "BRIDGE_NATIVE_FIXTURE_HANG_CATALOG",
+                "BRIDGE_NATIVE_FIXTURE_HANG_CLEANUP",
+                "BRIDGE_NATIVE_FIXTURE_HANG_JS",
+                "BRIDGE_NATIVE_FIXTURE_JS_ERROR",
+                "BRIDGE_NATIVE_FIXTURE_PAGINATE_CATALOG",
+                "BRIDGE_NATIVE_FIXTURE_LOOP_CATALOG",
+                "BRIDGE_NATIVE_FIXTURE_IMAGE_RESULT",
+                "NODE_REPL_AUTH_TOKEN"
+            ],
+            "enabled_tools":["js","js_reset","turn_ended"],
+            "disabled_tools":["js_reset"]
         }}});
         std::fs::write(root.path().join("config.json"), config.to_string()).unwrap();
         Self { root }
@@ -165,9 +205,14 @@ fn mcp_eof(launcher_exits: bool) {
         .args(["--mode", "mcp"])
         .env("RUST_LOG", "codex_browser_bridge::native=debug")
         .env("NO_COLOR", "1")
+        .env("BRIDGE_NATIVE_FIXTURE_FORWARDED", "forwarded-name")
+        .env("BRIDGE_NATIVE_FIXTURE_LOCAL_FORWARDED", "forwarded-local")
+        .env("BRIDGE_NATIVE_FIXTURE_AMBIENT", "must-not-reach-native")
+        .env("BRIDGE_NATIVE_FIXTURE_LITERAL", "ambient")
+        .env("NODE_REPL_AUTH_TOKEN", format!("synthetic-{}", 1))
         .stderr(Stdio::from(std::fs::File::create(&diagnostic).unwrap()));
-    if launcher_exits {
-        command.env("BRIDGE_NATIVE_FIXTURE_EXIT_ON_EOF", "1");
+    if !launcher_exits {
+        command.env("BRIDGE_NATIVE_FIXTURE_HOLD_ON_EOF", "1");
     }
     let mut child = command.spawn().unwrap();
     let stdout = child.stdout.take().unwrap();
@@ -202,7 +247,17 @@ fn mcp_eof(launcher_exits: bool) {
         "params":{"name":"js","arguments":{"code":"synthetic"},"_meta":meta}}));
     assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap()["id"], 2);
     send(json!({"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}));
-    assert_eq!(rx.recv_timeout(Duration::from_secs(3)).unwrap()["id"], 3);
+    let catalog = rx.recv_timeout(Duration::from_secs(3)).unwrap();
+    assert_eq!(catalog["id"], 3);
+    assert_eq!(
+        catalog["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["js", "turn_ended"]
+    );
     drop(input);
     assert!(wait(&mut child, Duration::from_secs(12)).success());
     reader.join().unwrap();
@@ -239,19 +294,310 @@ fn mcp_eof(launcher_exits: bool) {
         std::fs::read_to_string(fixture.root.path().join("cwd.txt")).unwrap(),
         fixture.root.path().to_string_lossy()
     );
+    let environment: Value = serde_json::from_slice(
+        &std::fs::read(fixture.root.path().join("environment.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        environment["BRIDGE_NATIVE_FIXTURE_FORWARDED"],
+        "forwarded-name"
+    );
+    assert_eq!(
+        environment["BRIDGE_NATIVE_FIXTURE_LOCAL_FORWARDED"],
+        "forwarded-local"
+    );
+    assert_eq!(environment["BRIDGE_NATIVE_FIXTURE_LITERAL"], "host-owned");
+    assert_eq!(environment["DISPLAY"], ":synthetic");
+    assert_eq!(environment["XAUTHORITY"], "/synthetic/Xauthority");
+    assert_eq!(environment["WAYLAND_DISPLAY"], "wayland-synthetic");
+    assert_eq!(environment["XDG_RUNTIME_DIR"], "/synthetic/runtime");
+    assert_eq!(
+        environment["DBUS_SESSION_BUS_ADDRESS"],
+        "unix:path=/synthetic/bus"
+    );
+    assert_eq!(environment["CUA_REPL_ENABLED_SURFACES"], "browser,computer");
+    assert_eq!(
+        environment["NODE_REPL_TRUSTED_SERVICES"],
+        json!({
+            "browser":"@oai/browser-desktop/service",
+            "sky":"@oai/sky/service"
+        })
+        .to_string()
+    );
+    assert_eq!(environment["BRIDGE_NATIVE_FIXTURE_AMBIENT"], Value::Null);
+    assert_eq!(environment["NODE_REPL_AUTH_TOKEN"], Value::Null);
+    assert!(environment["PATH"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+    if cfg!(windows) {
+        assert!(environment["PATHEXT"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()));
+        assert!(environment["SYSTEMROOT"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()));
+    }
 }
 
 #[test]
 fn native_doctor_catalog_timeout_exits_and_terminates_the_owned_tree() {
     let fixture = Fixture::new();
+    let config_path = fixture.root.path().join("config.json");
+    let mut config: Value = serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+    config["mcpServers"]["cua_repl"]["startup_timeout_ms"] = json!(300);
+    std::fs::write(&config_path, config.to_string()).unwrap();
+    let log = fixture.root.path().join("catalog-timeout.stderr");
     let mut child = fixture
         .command()
         .args(["--mode", "doctor"])
         .env("BRIDGE_NATIVE_FIXTURE_HANG_CATALOG", "1")
+        .stderr(Stdio::from(std::fs::File::create(&log).unwrap()))
         .spawn()
         .unwrap();
-    assert!(!wait(&mut child, Duration::from_secs(24)).success());
+    assert!(!wait(&mut child, Duration::from_secs(15)).success());
     fixture.assert_processes_exited();
+    let diagnostic = std::fs::read_to_string(log).unwrap();
+    assert!(
+        diagnostic.contains("native catalog pagination timed out"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
+fn native_doctor_rejects_repeated_catalog_cursor_and_cleans_up() {
+    let fixture = Fixture::new();
+    let output = fixture
+        .command()
+        .args(["--mode", "doctor"])
+        .env("BRIDGE_NATIVE_FIXTURE_LOOP_CATALOG", "1")
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("repeated pagination cursor"), "{stderr}");
+    fixture.assert_processes_exited();
+}
+
+#[test]
+fn native_cli_tools_rejects_repeated_catalog_cursor_and_cleans_up() {
+    let fixture = Fixture::new();
+    let output = fixture
+        .command()
+        .arg("tools")
+        .env("BRIDGE_NATIVE_FIXTURE_LOOP_CATALOG", "1")
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("repeated pagination cursor"), "{stderr}");
+    fixture.assert_processes_exited();
+}
+
+#[test]
+fn native_cli_rejects_disabled_tool_without_forwarding_it() {
+    let fixture = Fixture::new();
+    let output = fixture
+        .command()
+        .args(["call", "js_reset", "{}"])
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("disabled by launch configuration"),
+        "{stderr}"
+    );
+    assert!(
+        fixture
+            .frames()
+            .iter()
+            .all(|frame| frame["method"] != "tools/call"),
+        "disabled tool reached the native service"
+    );
+    fixture.assert_processes_exited();
+}
+
+#[test]
+fn native_cli_skips_a_disabled_turn_ended_cleanup_call() {
+    let fixture = Fixture::new();
+    let config_path = fixture.root.path().join("config.json");
+    let mut config: Value = serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+    let row = &mut config["mcpServers"]["cua_repl"];
+    row["enabled_tools"] = json!(["js"]);
+    row["disabled_tools"] = json!([]);
+    std::fs::write(&config_path, config.to_string()).unwrap();
+
+    let output = fixture
+        .command()
+        .args(["call", "js", r#"{"code":"synthetic response"}"#])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        fixture.frames().iter().all(|frame| {
+            frame["method"] != "tools/call" || frame["params"]["name"] != "turn_ended"
+        }),
+        "disabled turn_ended cleanup was sent to the native service"
+    );
+    fixture.assert_processes_exited();
+}
+
+#[test]
+fn native_cli_image_dir_writes_native_image_bytes() {
+    let fixture = Fixture::new();
+    let image_dir = fixture.root.path().join("images");
+    let output = fixture
+        .command()
+        .args(["--image-dir"])
+        .arg(&image_dir)
+        .args(["call", "js", r#"{"code":"synthetic image"}"#])
+        .env("BRIDGE_NATIVE_FIXTURE_IMAGE_RESULT", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["content"][0]["data"], "aGVsbG8=");
+    let artifact = &result["bridge_artifacts"][0];
+    assert_eq!(artifact["mimeType"], "image/png");
+    assert_eq!(artifact["_meta"]["screenshotId"], "synthetic-image");
+    let path = Path::new(artifact["path"].as_str().unwrap());
+    assert_eq!(std::fs::read(path).unwrap(), b"hello");
+    fixture.assert_processes_exited();
+}
+
+#[test]
+fn native_cli_batch_image_dir_writes_native_image_bytes() {
+    let fixture = Fixture::new();
+    let image_dir = fixture.root.path().join("batch-images");
+    let mut child = fixture
+        .command()
+        .args(["--image-dir"])
+        .arg(&image_dir)
+        .arg("batch")
+        .env("BRIDGE_NATIVE_FIXTURE_IMAGE_RESULT", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"{\"name\":\"js\",\"arguments\":{\"code\":\"synthetic image\"}}\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let results = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(results.len(), 1);
+    let result = &results[0];
+    assert_eq!(result["content"][0]["data"], "aGVsbG8=");
+    let artifact = &result["bridge_artifacts"][0];
+    assert_eq!(artifact["content_index"], 0);
+    assert_eq!(artifact["mimeType"], "image/png");
+    assert_eq!(artifact["_meta"]["screenshotId"], "synthetic-image");
+    let path = Path::new(artifact["path"].as_str().unwrap());
+    assert_eq!(std::fs::read(path).unwrap(), b"hello");
+    fixture.assert_processes_exited();
+}
+
+#[test]
+fn native_ca_environment_paths_are_absolute_and_non_inheritable_values_are_scrubbed() {
+    let fixture = Fixture::new();
+    let output = fixture
+        .command()
+        .args(["--mode", "doctor"])
+        .current_dir(fixture.root.path())
+        .env("SSL_CERT_FILE", "relative-ca.pem")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let environment: Value = serde_json::from_slice(
+        &std::fs::read(fixture.root.path().join("environment.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        environment["SSL_CERT_FILE"],
+        fixture
+            .root
+            .path()
+            .join("relative-ca.pem")
+            .to_string_lossy()
+            .as_ref()
+    );
+    assert_eq!(environment["NODE_REPL_AUTH_TOKEN"], Value::Null);
+    fixture.assert_processes_exited();
+}
+
+#[test]
+fn native_cli_and_doctor_apply_host_catalog_filters() {
+    let fixture = Fixture::new();
+    let tools = fixture
+        .command()
+        .arg("tools")
+        .env("BRIDGE_NATIVE_FIXTURE_PAGINATE_CATALOG", "1")
+        .output()
+        .unwrap();
+    assert!(tools.status.success());
+    let tools: Value = serde_json::from_slice(&tools.stdout).unwrap();
+    assert_eq!(
+        tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["js", "turn_ended"]
+    );
+    assert!(fixture
+        .frames()
+        .iter()
+        .any(|frame| { frame["method"] == "tools/list" && frame["params"]["cursor"] == "page-2" }));
+
+    let before_doctor = fixture.frames().len();
+    let doctor = fixture
+        .command()
+        .args(["--mode", "doctor"])
+        .env("BRIDGE_NATIVE_FIXTURE_PAGINATE_CATALOG", "1")
+        .output()
+        .unwrap();
+    assert!(doctor.status.success());
+    let doctor: Value = serde_json::from_slice(&doctor.stdout).unwrap();
+    assert_eq!(doctor["tools"], json!(["js", "turn_ended"]));
+    assert!(fixture
+        .frames()
+        .into_iter()
+        .skip(before_doctor)
+        .any(|frame| { frame["method"] == "tools/list" && frame["params"]["cursor"] == "page-2" }));
+    fixture.assert_processes_exited();
+    let initialize_versions = fixture
+        .frames()
+        .into_iter()
+        .filter(|frame| frame["method"] == "initialize")
+        .map(|frame| frame["params"]["protocolVersion"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        initialize_versions,
+        [json!("2025-06-18"), json!("2025-06-18")]
+    );
 }
 
 #[test]
@@ -333,11 +679,76 @@ fn native_rejects_browser_options_and_mode_command_conflicts_before_startup() {
         vec!["--max-output-bytes", "16384"],
         vec!["--network-policy", "{}"],
         vec!["--finalize", "call", "js", "{}"],
+        vec!["--image-dir", "captures", "--mode", "mcp"],
+        vec!["--image-dir", "captures", "--mode", "doctor"],
+        vec!["--image-dir", "captures", "tools"],
     ] {
         let output = fixture.command().args(arguments).output().unwrap();
         assert!(!output.status.success());
         assert!(!fixture.root.path().join("pids.json").exists());
     }
+}
+
+#[test]
+fn native_image_dir_conflict_error_identifies_the_required_command() {
+    let fixture = Fixture::new();
+    let output = fixture
+        .command()
+        .args(["--image-dir", "captures", "tools"])
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--image-dir requires a Computer Use call or batch command"),
+        "{stderr}"
+    );
+    assert!(!fixture.root.path().join("pids.json").exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn native_launch_resolves_command_from_launch_row_path_and_preserves_pathext() {
+    let fixture = Fixture::new();
+    let config_path = fixture.root.path().join("config.json");
+    let mut config: Value = serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+    let row = &mut config["mcpServers"]["cua_repl"];
+    let python = row["env"]["CUA_REPL_NODE_REPL_PATH"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let wrapper = fixture.root.path().join("native-probe.cmd");
+    std::fs::write(
+        &wrapper,
+        format!("@echo off\r\n\"{python}\" \"%~dp0native_mcp.py\" %*\r\n"),
+    )
+    .unwrap();
+    row["command"] = json!("native-probe");
+    row["env"]["PATH"] = json!(fixture.root.path());
+    row["env"]["PATHEXT"] = json!(".SYNTHETIC;.CMD");
+    std::fs::write(&config_path, config.to_string()).unwrap();
+
+    let output = fixture
+        .command()
+        .args(["--mode", "doctor"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let environment: Value = serde_json::from_slice(
+        &std::fs::read(fixture.root.path().join("environment.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        environment["PATH"],
+        fixture.root.path().to_string_lossy().as_ref()
+    );
+    assert_eq!(environment["PATHEXT"], ".SYNTHETIC;.CMD");
+    fixture.assert_processes_exited();
 }
 
 #[cfg(unix)]

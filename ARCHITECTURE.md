@@ -18,7 +18,7 @@ Claude plugin marketplace ──installs──▶ skill + MCP config
 MCP client ──stdio JSON-RPC──▶ bridge ──local transport──▶ ChatGPT extension ──CDP──▶ Chromium browser
 ```
 
-v1.12.0 publishes Windows x64/arm64 and Linux GNU x64/arm64 binaries
+Current releases publish Windows x64/arm64 and Linux GNU x64/arm64 binaries
 (glibc >= 2.39 for the Linux release builds). Linux discovery uses
 `CODEX_BRIDGE_SOCKET_DIR` when set, otherwise
 `$XDG_RUNTIME_DIR/codex-browser-use`, then `/tmp/codex-browser-use`; native
@@ -36,7 +36,8 @@ and are not plugin targets for this bridge.
 
 | Module | Responsibility |
 |---|---|
-| `main.rs` | CLI entry. `--mode mcp\|cli\|discover\|doctor`, `tools`, `call`, `batch`; loads config |
+| `main.rs` | CLI entry. `--surface browser\|computer`, `--mode mcp\|cli\|discover\|doctor`, `tools`, `call`, `batch`; loads config |
+| `native.rs` | Installed native `cua_repl` discovery, filtered raw MCP relay, CLI/doctor worker and owned process cleanup |
 | `client.rs` | The pipe `Client`: requests, `execute_cdp`, reconnect, event subscriptions |
 | `pipe.rs` | Platform transport and dialing; Windows named pipe or validated Unix stream; `dial_named_pipe` remains a compatibility entrypoint |
 | `protocol.rs` | Length-prefixed frame encode/decode, `Request`/`Response`, session-param merge |
@@ -55,7 +56,7 @@ and are not plugin targets for this bridge.
 | `mcp/` | MCP server: JSON-RPC dispatch, 66 tool handlers, schema, profiles, resources/prompts, dual-era lifecycle |
 | `cli.rs` | Shell commands reuse MCP dispatch; bounded JSON output and same-session JSONL batch; legacy debug REPL |
 | `security.rs` | URL scheme + file-path validation (path-traversal defense) |
-| `config.rs` | Optional TOML config (profile, upload_base) |
+| `config.rs` | Optional TOML selectors, profile, upload root, response limits and network policy |
 | `doctor.rs` | Pipe connectivity diagnostics (`--mode doctor`) |
 | `error.rs` | `BridgeError` (`Connection`, `PipeIo`, `Cdp`, `Rpc`, `Protocol`, …) |
 
@@ -192,9 +193,9 @@ time.
 
 ### Config precedence
 CLI flags > env > config file (`.codex-browser-bridge.toml`) > built-in
-default. A missing default config file is silent; a malformed one warns and is
-ignored. If `CODEX_BRIDGE_CONFIG` is set, that path is authoritative and the
-bridge does not fall back to a working-directory config.
+default. A missing default config file is silent; a malformed file fails before
+browser work. If `CODEX_BRIDGE_CONFIG` is set, that path is authoritative and
+the bridge does not fall back to a working-directory config.
 
 ### MCP resources + prompts
 - **resources**: `codex://tabs` — an on-demand snapshot of open tabs

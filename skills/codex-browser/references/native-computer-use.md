@@ -1,28 +1,30 @@
 # Native Computer Use
 
-Use an explicitly configured `codex-computer` server running
-`codex-browser-bridge --surface computer --mode mcp`. It exposes the installed
-native `cua_repl` tools, not the browser `codex_*` tool catalog.
+Configure a separate MCP server entry running
+`codex-browser-bridge --surface computer --mode mcp` (see
+`examples/native-computer-use.json`). This surface exposes the installed native
+`cua_repl` tools (`js`, `js_reset`, `js_add_node_module_dir`, `turn_ended`) rather
+than the browser `codex_*` tools.
 
-Start with the native `js` tool instructions and exactly one documented entry
-point. Read the returned API documentation and state before proceeding.
-Windows/Linux app bindings use the exact `windowId` returned by inventory;
-macOS uses the native app name/path/bundle ID. Keep native ID types.
+1. Start with the native `js` tool instructions. Inspect the returned API
+   documentation and AX/screenshot state before sending UI input.
+2. Keep native target identifier types: Windows and Linux `getApp({windowId})`
+   use the exact `windowId` from `listWindows()`; macOS uses the native app
+   name, path, or bundle ID.
+3. The installed Codex launch row (`~/.codex/config.toml` `[mcp_servers.cua_repl]`
+   or the bundled plugin `.mcp.json`) is authoritative for enabled surfaces,
+   trusted services, environment variables, tool allow/deny filters, and
+   timeouts.
+4. Application approval uses MCP form elicitation (`elicitation/create`),
+   preserving `accept`, `decline`, and `cancel` decisions and persistence
+   metadata. The non-interactive CLI rejects approval prompts.
+5. Re-observe after input and use screenshot IDs from the latest observation for
+   coordinate actions. Treat timeouts or interrupts as unknown outcomes and do
+   not replay input automatically.
+6. For multi-step CLI workflows, use `batch` so JavaScript objects persist in one
+   worker (`call` starts a fresh worker each time). Add `--image-dir <dir>` on
+   `call` or `batch` to save returned image blocks to disk alongside the JSON
+   response.
 
-Application access uses the native MCP elicitation. Preserve the user's
-accept/decline/cancel choice and native persistence metadata. A rejected
-application, locked desktop, stale target or unsupported native method is an
-error; do not replace the executor or bypass policy.
-
-Observe after input. Use screenshot IDs from the latest corresponding native
-observation for coordinate actions. Treat a timeout as an unknown outcome and
-do not replay input. Native input can activate windows.
-
-Keep a multi-step CLI task in one `batch`; `call` starts a fresh worker.
-`--image-dir` writes visible image artifacts while retaining native image blocks.
-Noninteractive CLI cannot approve applications.
-
-`js_reset`, completion summary, turn end and worker exit have distinct meanings.
-Use the native completion summary when the task outcome is observed. Ending the
-worker must not close user apps. Platform and native runtime restrictions are
-listed in `docs/native-computer-use.md` in the repository.
+See `docs/native-computer-use.md` for runtime discovery rules, environment policy,
+and platform status.

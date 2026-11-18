@@ -1,13 +1,12 @@
 <p align="center">
-  <img src="assets/hero.png" alt="codex-browser-bridge" width="720">
+  <img src="https://raw.githubusercontent.com/DeliciousBuding/codex-browser-bridge/main/assets/hero.png" alt="codex-browser-bridge" width="720">
 </p>
 
+<h1 align="center">codex-browser-bridge</h1>
+
 <p align="center">
-  <h1 align="center">codex-browser-bridge</h1>
-  <p align="center">
-    Let Claude Code and other MCP agents control your existing browser profile through the ChatGPT desktop app's browser extension.
-    <br>66 browser tools plus opt-in native Computer Use. Single Rust binary.
-  </p>
+  Let Claude Code and other MCP agents control your existing browser profile through the ChatGPT desktop app's browser extension.
+  <br>66 browser tools plus opt-in native Computer Use. Single Rust binary.
 </p>
 
 <p align="center">
@@ -23,7 +22,7 @@
   <a href="https://codecov.io/gh/DeliciousBuding/codex-browser-bridge">
     <img src="https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square" alt="Coverage">
   </a>
-  <a href="README.zh-CN.md">中文</a>
+  <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/README.zh-CN.md">中文</a>
 </p>
 
 ---
@@ -44,17 +43,15 @@ Upgrading from 1.x? Read [the upgrade guide](docs/upgrade-v2.md) before updating
 an installation that uses saved continuation files or numeric-only tab claims.
 
 The goal is complete browser capability access for non-Codex agents. Coverage
-is tracked by method and semantics in [the parity matrix](docs/official-parity.md);
-a tool count or an alternative CLI does not establish full parity. App-private
-services and remaining locator differences are explicitly recorded there.
+is tracked by method and semantics in [the parity matrix](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md),
+including app-private services and remaining locator differences.
 
-Native Computer Use is an explicit second surface: `--surface computer` connects
-to the installed Codex `cua_repl` MCP service. MCP and CLI reuse its execution,
-objects, application approval, images and platform errors. The default Claude
-plugin remains browser-only. See [setup, CLI and verification status](docs/native-computer-use.md)
-and [the opt-in MCP example](examples/native-computer-use.json). The guide
-separates protocol, build and live acceptance for each candidate and platform.
-Windows input, macOS and Wayland still have acceptance gaps.
+For desktop automation, `--surface computer` connects to the installed Codex
+`cua_repl` MCP service while preserving the host's launch configuration,
+environment policy, tool filters, application elicitation, and owned worker
+cleanup. The default Claude plugin remains browser-only; see
+[Native Computer Use](docs/native-computer-use.md) and
+[examples/native-computer-use.json](examples/native-computer-use.json) to opt in.
 
 > **Naming note:** OpenAI now documents this surface as the **ChatGPT browser extension**. The underlying `codex-browser-use` pipe and JSON-RPC method names still use the Codex-era identifiers, so this project keeps its `codex_*` tool surface for compatibility.
 
@@ -97,8 +94,10 @@ Or download the binary from [GitHub Releases](https://github.com/DeliciousBuding
 
 ## Compatibility
 
-Last live verification: 2026-10-24 with ChatGPT desktop app (`OpenAI.Codex`
+Last full browser audit: 2026-10-24 with ChatGPT desktop app (`OpenAI.Codex`
 package) `26.1016.8120.0` and Edge extension `1.26.1020.11845`.
+Native Computer Use verification is tracked separately in the
+[native guide](docs/native-computer-use.md).
 
 | Surface | Status |
 |---------|--------|
@@ -111,13 +110,13 @@ package) `26.1016.8120.0` and Edge extension `1.26.1020.11845`.
 | Windows x64 | Current source passes the synthetic Edge parity smoke; not full-surface parity |
 | Windows arm64 | Published binary; not live-tested for this release |
 | Linux GNU x64 | Full native Rust/Node gates, release build, and no-browser doctor passed on Ubuntu 24.04 / glibc 2.39; extension not live-tested |
-| Linux GNU arm64 | Native Rust tests/clippy/release and synthetic Chrome extension parity smoke passed; not full-surface parity |
+| Linux GNU arm64 | Native Rust tests/clippy/release and synthetic Chrome extension parity smoke passed |
+| macOS | Source builds and CI tests pass; no prebuilt release binary |
 
 The 2026-10-24 Windows Edge and Linux arm64 Chrome runs passed the 20-check
 parity smoke and the 9-check observation/locator/file-result smoke. File chooser
 capture and permission-denial cleanup passed; successful file upload requires
 the extension's file-access permission and was not accepted in these runs.
-| macOS | Unix code compilation alone does not establish runtime support; no published binary or live verification |
 
 The bridge does not install a second browser extension or copy your browser
 profile. One MCP server session controls one browser-extension instance at a
@@ -322,9 +321,9 @@ JavaScript, CDP, or screenshot payloads by accident:
 
 - `CODEX_BRIDGE_MAX_TEXT_BYTES` caps each text content item. Default: `1048576`.
 - `CODEX_BRIDGE_MAX_IMAGE_BYTES` caps each base64 image content item. Default: `3145728`.
-- Both settings are clamped to an 8 MiB hard ceiling. Truncated text includes an
-  explicit marker with the original byte count; oversized images return a text
-  summary instead of invalid partial base64.
+- Values outside `1024..=8388608` are rejected at startup. Truncated text
+  includes an explicit marker with the original byte count; oversized images
+  return a text summary instead of invalid partial base64.
 - The same limits can be set in `.codex-browser-bridge.toml` as
   `max_text_bytes` and `max_image_bytes`, or via CLI flags
   `--max-text-bytes` and `--max-image-bytes`. `network_policy` is the TOML key
@@ -376,7 +375,7 @@ composites arm before acting. `codex_file_chooser` captures chooser IDs/multiple
 uploads require configured `CODEX_BRIDGE_UPLOAD_BASE` and explicit
 `colocated_browser=true`. Remote browser-host uploads and completed-download paths
 are unsupported. File exports report `path_scope=bridge_host`, not browser
-downloads. See [parity contracts](docs/official-parity.md).
+downloads. See [parity contracts](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md).
 
 | Tool | Description |
 |------|-------------|
@@ -386,6 +385,8 @@ downloads. See [parity contracts](docs/official-parity.md).
 | `codex_user_tabs` | List all browser tabs (including unclaimed) |
 | `codex_claim_tab` | Claim a user tab with expected title/URL from a fresh enumeration |
 | `codex_mark_tab` | Mark an owned tab as a deliverable or later-turn handoff |
+| `codex_observe` | Arm bounded tab/document observation and return frames, dialog cursors, events/log cursors and explicit gaps |
+| `codex_file_chooser` | Capture a modal file chooser and its document-bound ID; uploads still require the configured upload root and a colocated browser |
 
 ### Navigation `[Navigation]`
 | Tool | Description |
@@ -468,11 +469,14 @@ number of supplied path points.
 | `codex_get_info` | Get bridge runtime + extension backend metadata |
 | `codex_doctor` | Self-diagnostics (pipe health, latency, version) |
 
-## CLI Usage
+### Bridge State & Artifacts
+| Tool | Description |
+|------|-------------|
+| `codex_clipboard` | Session-virtual clipboard with bounded data and paste integration |
+| `codex_webmcp` | Experimental top-document registration list and invocation |
+| `codex_content_export` | Bounded local GSuite/YouTube exports with bridge-host path scope |
 
-Additional current-source tools are `codex_clipboard` (session virtual
-clipboard), `codex_webmcp` (experimental top-document registration list/invoke),
-and `codex_content_export` (bounded local GSuite/YouTube export).
+## CLI Usage
 
 ```bash
 # MCP mode (default)
@@ -548,7 +552,7 @@ The bridge is a **dual-era MCP server**:
 | Legacy | `2024-11-05` … `2025-11-25` | Classic stdio lifecycle with `initialize` version negotiation (byte-compatible with older clients) |
 | Modern | `2026-07-28` | Stateless requests: version carried per-request in `_meta`, `server/discover` probe, `resultType` + cache hints (`ttlMs`/`cacheScope`) on results, `UnsupportedProtocolVersionError` (-32022) |
 
-All 66 tools carry behavior annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) for client approval UX. See [CHANGELOG.md](CHANGELOG.md) for details.
+All 66 tools carry behavior annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) for client approval UX. See [CHANGELOG.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/CHANGELOG.md) for details.
 
 ## Maintenance
 
@@ -558,7 +562,8 @@ This project is intentionally a thin compatibility adapter, not a second browser
 2. `codex_list_browsers`
 3. `codex_bind_browser` when more than one instance is live
 4. `codex_get_info`
-5. Claim one disposable tab and read its title or DOM
+5. `codex_user_tabs`
+6. Claim one disposable tab and read its title or DOM
 
 Release a patch only when the pipe contract changes, compatibility needs documenting, or a real regression is fixed. Do not add Playwright or another browser extension as a fallback layer.
 
@@ -587,41 +592,30 @@ cargo clippy --locked -- -D warnings
 cargo build --locked --release
 ```
 
-Source layout:
-
-```
-src/
-  mcp/          MCP server (mod, lifecycle, types, schema, handlers, profiles)
-  browser.rs    CDP + browser operations
-  client.rs     Local transport + sticky attach
-  security.rs   URL + file path validation
-  doctor.rs     Local transport diagnostics
-  cli.rs        Shell commands and interactive debug REPL
-  discovery.rs  Local transport auto-discovery
-  protocol.rs   Length-prefixed JSON-RPC frames
-```
+See [ARCHITECTURE.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/ARCHITECTURE.md)
+for the current module map and design boundaries.
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md). Highlights:
+See [ROADMAP.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/ROADMAP.md). Highlights:
 
 - optional live E2E harness for the ChatGPT desktop app + Chrome/Edge (`scripts/live-e2e.ps1`)
 - typed tool result schemas
-- Linux Unix socket transport and GNU x64/arm64 packages ship in v1.12.0; Linux arm64 synthetic extension smoke is verified, not full-surface parity. macOS needs a real runtime test.
+- Linux Unix socket transport and GNU x64/arm64 packages have shipped since v1.12.0; Linux arm64 synthetic extension smoke is verified, not full-surface parity. macOS needs a real runtime test.
 
 The official capability matrix and drift baseline live in
-[docs/official-parity.md](docs/official-parity.md) and
-[docs/official-surface-baseline.json](docs/official-surface-baseline.json).
+[docs/official-parity.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md) and
+[docs/official-surface-baseline.json](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-surface-baseline.json).
 
 ## Related
 
-- [examples/](examples/) — MCP configs for Claude Code, Antigravity, Cursor, OpenClaw, Hermes Agent
-- [.claude-plugin/](.claude-plugin/plugin.json) — Claude Code plugin and marketplace metadata
-- [skills/codex-browser/](skills/codex-browser/SKILL.md) — Agent skill (LLM usage guide)
-- [ROADMAP.md](ROADMAP.md) — Release history and roadmap
-- [CHANGELOG.md](CHANGELOG.md) — Release history
-- [CONTRIBUTING.md](CONTRIBUTING.md) — Dev setup and conventions
-- [docs/release-process.md](docs/release-process.md) — Tag, changelog, GitHub Release, and npm publishing rules
+- [examples/](https://github.com/DeliciousBuding/codex-browser-bridge/tree/main/examples) — MCP configs for Claude Code, Antigravity, Cursor, OpenClaw, Hermes Agent
+- [.claude-plugin/](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/.claude-plugin/plugin.json) — Claude Code plugin and marketplace metadata
+- [skills/codex-browser/](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/skills/codex-browser/SKILL.md) — Agent skill (LLM usage guide)
+- [ROADMAP.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/ROADMAP.md) — Release history and roadmap
+- [CHANGELOG.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/CHANGELOG.md) — Release history
+- [CONTRIBUTING.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/CONTRIBUTING.md) — Dev setup and conventions
+- [docs/release-process.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/release-process.md) — Tag, changelog, GitHub Release, and npm publishing rules
 
 ## License
 
