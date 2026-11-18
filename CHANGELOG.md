@@ -36,7 +36,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Update pinned CI actions from reviewed dependency PRs #52, #53, #54 and #55.
-- Raise Rust MSRV to 1.88 for the native MCP SDK (`rmcp` 3.5.1).
+- Raise Rust MSRV to 1.88 for the native MCP SDK (`rmcp` 3.9.0).
 
 ## [2.0.3] - 2026-11-17
 

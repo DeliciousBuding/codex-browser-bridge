@@ -141,7 +141,7 @@ jobs:
         with:
           node-version: "22"
           package-manager-cache: false
-      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.88.0
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master (toolchain: 1.88.0)
         with:
           toolchain: "1.88.0"
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
@@ -201,7 +201,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ needs.validate-release.outputs.commit_sha }}
-      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.88.0
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master (toolchain: 1.88.0)
         with:
           toolchain: "1.88.0"
           targets: ${{ matrix.target }}
@@ -251,7 +251,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.validate-release.outputs.commit_sha }}
 
-      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.88.0
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master (toolchain: 1.88.0)
         with:
           toolchain: "1.88.0"
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc

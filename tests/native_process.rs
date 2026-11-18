@@ -160,7 +160,11 @@ fn native_mcp_eof_terminates_descendants_after_launcher_exit() {
 fn mcp_eof(launcher_exits: bool) {
     let fixture = Fixture::new();
     let mut command = fixture.command();
-    command.args(["--mode", "mcp"]);
+    let diagnostic = fixture.root.path().join("stderr.log");
+    command
+        .args(["--mode", "mcp"])
+        .env("RUST_LOG", "codex_browser_bridge::native=debug")
+        .stderr(Stdio::from(std::fs::File::create(&diagnostic).unwrap()));
     if launcher_exits {
         command.env("BRIDGE_NATIVE_FIXTURE_EXIT_ON_EOF", "1");
     }
@@ -202,6 +206,19 @@ fn mcp_eof(launcher_exits: bool) {
     assert!(wait(&mut child, Duration::from_secs(12)).success());
     reader.join().unwrap();
     fixture.assert_processes_exited();
+    assert!(
+        fixture.root.path().join("stdin-eof").exists(),
+        "native stdin never received EOF"
+    );
+    let diagnostic = std::fs::read_to_string(diagnostic).unwrap();
+    assert!(
+        diagnostic.contains(if launcher_exits {
+            "graceful=true"
+        } else {
+            "graceful=false"
+        }),
+        "launcher exit was not observed before terminating its descendant: {diagnostic}"
+    );
     let frames = fixture.frames();
     let cleanup = frames.last().unwrap();
     assert_eq!(cleanup["params"]["name"], "turn_ended");
@@ -234,6 +251,28 @@ fn native_doctor_catalog_timeout_exits_and_terminates_the_owned_tree() {
         .unwrap();
     assert!(!wait(&mut child, Duration::from_secs(24)).success());
     fixture.assert_processes_exited();
+}
+
+#[test]
+fn native_cli_reports_both_tool_error_and_unconfirmed_cleanup() {
+    let fixture = Fixture::new();
+    let log = fixture.root.path().join("stderr.log");
+    let mut child = fixture
+        .command()
+        .args(["call", "js", r#"{"code":"synthetic error"}"#])
+        .env("BRIDGE_NATIVE_FIXTURE_JS_ERROR", "1")
+        .env("BRIDGE_NATIVE_FIXTURE_HANG_CLEANUP", "1")
+        .stderr(Stdio::from(std::fs::File::create(&log).unwrap()))
+        .spawn()
+        .unwrap();
+    assert!(!wait(&mut child, Duration::from_secs(24)).success());
+    fixture.assert_processes_exited();
+    let diagnostic = std::fs::read_to_string(log).unwrap();
+    assert!(diagnostic.contains("native tool failed"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("native cleanup was not confirmed"),
+        "{diagnostic}"
+    );
 }
 
 #[cfg(unix)]

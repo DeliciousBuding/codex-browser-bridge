@@ -245,7 +245,11 @@ impl OwnedProcess {
     }
 
     async fn close(&mut self) -> Result<()> {
-        let _ = tokio::time::timeout(Duration::from_secs(3), self.child.wait()).await;
+        let graceful = tokio::time::timeout(Duration::from_secs(3), self.child.wait()).await;
+        tracing::debug!(
+            graceful = matches!(graceful, Ok(Ok(_))),
+            "native launcher exit before owned tree termination"
+        );
         // Also terminate descendants if the launcher already exited on EOF.
         if let Err(error) = self.child.start_kill() {
             #[cfg(unix)]
@@ -453,14 +457,28 @@ fn cleanup_metadata(mut meta: RequestMetaObject) -> RequestMetaObject {
     meta
 }
 
+fn finish<T>(result: Result<T>, cleanup: Result<()>) -> Result<T> {
+    match (result, cleanup) {
+        (Err(error), Err(cleanup)) => Err(anyhow::anyhow!("{error:#}; {cleanup:#}")),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(value), cleanup) => {
+            cleanup?;
+            Ok(value)
+        }
+    }
+}
+
 /// Relay native MCP frames without normalizing schemas or native extensions.
 pub async fn run_mcp(launch: Launch) -> Result<()> {
     let (mut process, output, input) = OwnedProcess::spawn(&launch)?;
     let mut native = JsonTransport::new(output, input);
     let mut host = JsonTransport::new(tokio::io::stdin(), tokio::io::stdout());
     let result = relay(&mut host, &mut native, shutdown_signal()).await;
+    // ChildStdin::shutdown is a no-op on supported platforms. Dropping the
+    // handle delivers EOF before the process receives its graceful deadline.
+    drop(native);
     let terminated = process.close().await;
-    result.and(terminated)
+    finish(result, terminated)
 }
 
 async fn relay<HR, HW, NR, NW, F>(
@@ -595,13 +613,18 @@ where
     };
     let cleanup = tokio::time::timeout(END_TIMEOUT, cleanup).await;
     let closed = tokio::time::timeout(END_TIMEOUT, native.close()).await;
-    if outcome? == "Interrupt" {
-        bail!("native action interrupted; outcome unknown and not replayed");
-    }
-    if !matches!(cleanup, Ok(Ok(()))) || !matches!(closed, Ok(Ok(()))) {
-        bail!("native cleanup was not confirmed");
-    }
-    Ok(())
+    let cleanup = cleanup.context("native cleanup timed out").and_then(|r| r);
+    let closed = closed
+        .context("native transport close timed out")
+        .and_then(|r| r);
+    let cleanup = finish(cleanup, closed).context("native cleanup was not confirmed");
+    let result = outcome.and_then(|event| {
+        if event == "Interrupt" {
+            bail!("native action interrupted; outcome unknown and not replayed");
+        }
+        Ok(())
+    });
+    finish(result, cleanup)
 }
 
 fn parse_context(value: &Value) -> Result<Value> {
@@ -657,17 +680,17 @@ pub async fn run_doctor(launch: Launch) -> Result<()> {
         .peer_info()
         .map(|info| info.protocol_version.clone());
     let cleanup = worker.close("Stop").await;
-    let catalog = serde_json::to_value(catalog?)?;
+    let catalog = serde_json::to_value(finish(catalog, cleanup)?)?;
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
             "launch":launch.summary(),"protocol":protocol,
             "tools":catalog["tools"].as_array().map(|tools|tools.iter().map(|t|t["name"].clone()).collect::<Vec<_>>()),
             "status":"native_mcp_connected","ui_actions":0,
-            "cleanup_confirmed":cleanup.is_ok()
+            "cleanup_confirmed":true
         }))?
     );
-    cleanup
+    Ok(())
 }
 
 pub async fn run_cli(
@@ -759,7 +782,7 @@ pub async fn run_cli(
         ),
     };
     let cleanup = worker.close(event).await;
-    result.and(cleanup)
+    finish(result, cleanup)
 }
 
 fn save_images(value: &Value, directory: &Path) -> Result<Vec<Value>> {
@@ -962,9 +985,16 @@ mod tests {
         let (fr, fw) = tokio::io::split(fixture_io);
         let mut client = JsonTransport::new(cr, cw);
         let mut fixture = JsonTransport::new(fr, fw);
-        for meta in [json!([]), json!({"x-codex-turn-metadata":{"session_id":"s"}})] {
-            send(&mut client, json!({"jsonrpc":"2.0","id":7,"method":"tools/call",
-                "params":{"name":"js","arguments":{},"_meta":meta}})).await;
+        for meta in [
+            json!([]),
+            json!({"x-codex-turn-metadata":{"session_id":"s"}}),
+        ] {
+            send(
+                &mut client,
+                json!({"jsonrpc":"2.0","id":7,"method":"tools/call",
+                "params":{"name":"js","arguments":{},"_meta":meta}}),
+            )
+            .await;
             let error = receive(&mut client).await;
             assert_eq!(error["id"], 7);
             assert_eq!(error["error"]["code"], -32602);
@@ -973,7 +1003,11 @@ mod tests {
         send(&mut client, ping.clone()).await;
         assert_eq!(receive(&mut fixture).await, ping);
         drop(client);
-        tokio::time::timeout(Duration::from_secs(2), task).await.unwrap().unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
@@ -987,22 +1021,34 @@ mod tests {
                 &mut JsonTransport::new(hr, hw),
                 &mut JsonTransport::new(nr, nw),
                 std::future::pending(),
-            ).await
+            )
+            .await
         });
         let (fr, fw) = tokio::io::split(fixture_io);
         let mut fixture = JsonTransport::new(fr, fw);
         client_io.write_all(b"{\"jsonrpc\":\"2.0\",").await.unwrap();
-        let event = json!({"jsonrpc":"2.0","method":"notifications/native-event","params":{"keep":true}});
+        let event =
+            json!({"jsonrpc":"2.0","method":"notifications/native-event","params":{"keep":true}});
         send(&mut fixture, event.clone()).await;
         let mut client = BufReader::new(client_io);
         let mut line = String::new();
         timeout_read_line(&mut client, &mut line).await;
         assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), event);
-        client.get_mut().write_all(b"\"id\":3,\"method\":\"ping\"}\n").await.unwrap();
-        assert_eq!(receive(&mut fixture).await,
-            json!({"jsonrpc":"2.0","id":3,"method":"ping"}));
+        client
+            .get_mut()
+            .write_all(b"\"id\":3,\"method\":\"ping\"}\n")
+            .await
+            .unwrap();
+        assert_eq!(
+            receive(&mut fixture).await,
+            json!({"jsonrpc":"2.0","id":3,"method":"ping"})
+        );
         drop(client);
-        tokio::time::timeout(Duration::from_secs(2), task).await.unwrap().unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1016,16 +1062,26 @@ mod tests {
             relay(
                 &mut JsonTransport::new(hr, hw),
                 &mut JsonTransport::new(nr, nw),
-                async { let _ = stop_rx.await; },
-            ).await
+                async {
+                    let _ = stop_rx.await;
+                },
+            )
+            .await
         });
         let (fr, fw) = tokio::io::split(fixture_io);
         let mut fixture = JsonTransport::new(fr, fw);
-        send(&mut fixture, json!({"jsonrpc":"2.0","id":1,"result":{"native": "x".repeat(4096)}})).await;
+        send(
+            &mut fixture,
+            json!({"jsonrpc":"2.0","id":1,"result":{"native": "x".repeat(4096)}}),
+        )
+        .await;
         tokio::time::sleep(Duration::from_millis(20)).await;
         stop_tx.send(()).unwrap();
         let error = tokio::time::timeout(Duration::from_secs(2), task)
-            .await.unwrap().unwrap().unwrap_err();
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
         assert!(error.to_string().contains("client stream may be truncated"));
     }
 

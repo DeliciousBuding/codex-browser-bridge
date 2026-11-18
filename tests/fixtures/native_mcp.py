@@ -40,12 +40,21 @@ for line in sys.stdin:
             continue
         result = {"tools": []}
     else:
+        if row.get("params", {}).get("name") == "turn_ended" and os.environ.get(
+            "BRIDGE_NATIVE_FIXTURE_HANG_CLEANUP"
+        ):
+            continue
         if row.get("params", {}).get("name") == "js" and os.environ.get(
             "BRIDGE_NATIVE_FIXTURE_HANG_JS"
         ):
             continue
         result = {"content": [{"type": "text", "text": "synthetic response"}]}
+        if row.get("params", {}).get("name") == "js" and os.environ.get(
+            "BRIDGE_NATIVE_FIXTURE_JS_ERROR"
+        ):
+            result["isError"] = True
     print(json.dumps({"jsonrpc": "2.0", "id": row["id"], "result": result}), flush=True)
+(root / "stdin-eof").write_text(str(os.getpid()))
 if os.environ.get("BRIDGE_NATIVE_FIXTURE_EXIT_ON_EOF"):
     sys.exit(0)
 # Force the adapter to exercise owned process-tree termination.

@@ -17,7 +17,11 @@ targets = [
 # Fail the build on any known vulnerability or yanked crate.
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
-ignore = []
+ignore = [
+    # Informational maintenance notice, not a vulnerability exception. The
+    # upstream rmcp SDK still requires chrono and exposes no replacement.
+    { id = "RUSTSEC-2026-0543", reason = "rmcp 3.9.0 transitively requires chrono; revisit when upstream replaces it" },
+]
 
 [licenses]
 # Permissive licenses only. Kept tight on purpose: if a future dependency

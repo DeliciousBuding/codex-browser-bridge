@@ -24,7 +24,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 uuid = { version = "1.11", features = ["v4"] }
 toml = "0.8"
 fs2 = "0.4.3"
-rmcp = { version = "=3.5.1", default-features = false, features = ["client", "server", "transport-child-process", "transport-io", "elicitation"] }
+rmcp = { version = "=3.9.0", default-features = false, features = ["client", "server", "transport-io", "elicitation"] }
 process-wrap = { version = "=10.0.1", features = ["tokio1"] }
 
 [target.'cfg(unix)'.dependencies]
