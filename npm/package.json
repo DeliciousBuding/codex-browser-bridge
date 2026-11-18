@@ -1,6 +1,6 @@
 {
   "name": "@delicious233/codex-browser-bridge",
-  "version": "2.0.3",
+  "version": "2.1.0",
   "private": false,
   "description": "Browser extension access and opt-in native Codex Computer Use for other MCP agents.",
   "bin": {

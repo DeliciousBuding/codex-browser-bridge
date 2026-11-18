@@ -4,6 +4,7 @@ Computer Use exposes the installed Codex `cua_repl` MCP service to other agents.
 The bridge supplies runtime discovery, MCP transport, CLI presentation and
 owned worker cleanup. Native JavaScript objects, platform dispatch, permissions,
 input, screenshots, documentation and errors stay with that service.
+This opt-in surface is experimental; the matrix below defines its accepted scope.
 
 The browser surface remains the default. Select `--surface computer` explicitly.
 Codex itself continues using its native integration. Do not install a second
@@ -119,14 +120,16 @@ write ends the worker because its completion is unknown.
 
 ## Verification status
 
-These are candidate-source results, not an installed release claim.
+Verified on 2026-11-18 using the candidate source. These results do not imply
+an installed release or full desktop parity. The adapter uses `rmcp` 3.9.0
+for CLI/doctor; the installed native runtime is a separate dependency.
 
 | Platform/runtime | Protocol and observation | Input | Boundary |
 | --- | --- | --- | --- |
-| Windows x64, `cua-repl` 0.1.5 / Sky 0.7.21 | Native host path: initialize, application decline/accept, synthetic AX state and screenshot passed | Not accepted: native input failed while the test desktop was locked | Requires the running native host and an unlocked interactive desktop; standalone helper returned `spawn EPERM` |
-| Linux ARM64 X11, installed native runtime | Direct native service and an earlier adapter: synthetic AX state and screenshot passed; current relay acceptance pending | Earlier adapter: synthetic button count changed from 0 to 1 on both paths | Broader clipboard, dialog, DPI and concurrent-client behavior remains unverified |
+| Windows x64, `cua-repl` 0.1.5 / Sky 0.7.21 | Current relay: initialize/catalog, fresh accept/decline/cancel, object/reset, synthetic AX state and screenshot passed; CLI unmet approval passed | Blocked: native input failed while the test desktop was locked; stale screenshot rejected | Requires the running native host and an unlocked interactive desktop; standalone helper returned `spawn EPERM` |
+| Linux ARM64 X11, `cua-repl` 0.1.5 / Sky 0.7.21 | Direct native service and current relay: synthetic AX state and screenshot passed; CLI persistence/reset, errors, image artifacts and SIGTERM cleanup passed | Synthetic button count changed from 0 to 1 on both paths | Broader clipboard, dialog, DPI and concurrent-client behavior remains unverified |
 | Windows ARM64 / Linux x64 | Binary platform exists; desktop workflow unverified | Unverified | Do not infer desktop parity from the build |
-| macOS | No accepted native workflow or released macOS binary | Unverified | Native runtime, GUI/TCC and first-run denial need a Mac |
+| macOS | CI source tests, clippy, release build and CLI smoke passed; native GUI unverified | Unverified | No macOS release asset; native runtime, GUI/TCC and first-run denial need a Mac |
 | Linux Wayland | Unverified | Unverified | X11 evidence does not establish portal/Wayland support |
 
 Source reference: public Codex host integration at

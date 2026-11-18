@@ -4,9 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-18
+
 ### Added
 
-- Explicit `--surface computer` access to the installed native `cua_repl`
+- Experimental, explicit `--surface computer` access to the installed native `cua_repl`
   MCP service, with native schemas, application elicitation, images, metadata,
   cancellation and owned worker cleanup.
 - Native CLI tools/call/batch, runtime discovery/doctor, and optional image
@@ -27,8 +29,8 @@ All notable changes to this project will be documented in this file.
 - Preserve native MCP extension fields and installed host service mappings.
   Reject invalid call metadata per request and report interrupted sessions
   with a nonzero exit status.
-- Keep failed observation focus setup outside the observation cancellation
-  deadline, attempt bounded detach, and avoid input release after expired setup.
+- Finish bounded attach/focus setup before starting the observation producer,
+  allow bounded detach rollback, and avoid input release after expired setup.
 - Position the pointer before every native scroll gesture. Report missing
   mouse-move acknowledgments as errors; background scroll timeouts remain
   unknown outcomes and are never retried or worked around by activation.
@@ -37,6 +39,9 @@ All notable changes to this project will be documented in this file.
 
 - Update pinned CI actions from reviewed dependency PRs #52, #53, #54 and #55.
 - Raise Rust MSRV to 1.88 for the native MCP SDK (`rmcp` 3.9.0).
+- Publish desktop acceptance separately from source builds: Linux ARM64 X11
+  passed the synthetic app workflow; Windows input requires an unlocked
+  desktop, while macOS GUI/TCC and Wayland remain unverified.
 
 ## [2.0.3] - 2026-11-17
 
