@@ -42,6 +42,7 @@ function main() {
   copyFile("LICENSE", "LICENSE");
   fs.mkdirSync(path.join(packageRoot, "docs"), { recursive: true });
   copyFile("docs/upgrade-v2.md", "docs/upgrade-v2.md");
+  copyFile("docs/native-computer-use.md", "docs/native-computer-use.md");
 
   const skillTarget = path.join(packageRoot, "skills");
   fs.rmSync(skillTarget, { recursive: true, force: true });

@@ -1,6 +1,6 @@
 use anyhow::Context;
-use clap::{Parser, ValueEnum};
-use codex_browser_bridge::{cli, client, config, discovery, doctor, logging, mcp, session};
+use clap::{CommandFactory, FromArgMatches, Parser, ValueEnum};
+use codex_browser_bridge::{cli, client, config, discovery, doctor, logging, mcp, native, session};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -11,6 +11,12 @@ enum Mode {
     Doctor,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum Surface {
+    Browser,
+    Computer,
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "codex-browser-bridge")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
@@ -18,6 +24,18 @@ enum Mode {
 struct Args {
     #[arg(long, value_enum, default_value_t = Mode::Mcp)]
     mode: Mode,
+
+    /// Use the installed native cua_repl MCP service for Computer Use.
+    #[arg(long, value_enum, default_value_t = Surface::Browser)]
+    surface: Surface,
+
+    /// Read-only native host MCP JSON containing mcpServers.cua_repl.
+    #[arg(long)]
+    native_config: Option<std::path::PathBuf>,
+
+    /// Also save native CLI image content to this directory, keeping JSON data.
+    #[arg(long)]
+    image_dir: Option<std::path::PathBuf>,
 
     #[arg(long)]
     pipe: Option<String>,
@@ -91,9 +109,46 @@ enum Profile {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     logging::init();
-    let args = Args::parse_from(normalized_args(std::env::args()));
+    let matches = Args::command().get_matches_from(normalized_args(std::env::args()));
+    let output_budget_explicit =
+        matches.value_source("max_output_bytes") == Some(clap::parser::ValueSource::CommandLine);
+    let args = Args::from_arg_matches(&matches)?;
     if args.command.is_some() && !matches!(args.mode, Mode::Mcp) {
         anyhow::bail!("commands cannot be combined with --mode; omit --mode for tools/call/batch");
+    }
+    if args.surface == Surface::Computer {
+        if args.session_file.is_some() || args.keep_turn {
+            anyhow::bail!("Computer Use objects live in one native worker; use batch, not --session-file or --keep-turn");
+        }
+        if args.pipe.is_some()
+            || args.browser_family.is_some()
+            || args.browser_instance.is_some()
+            || args.profile.is_some()
+            || args.upload_base.is_some()
+            || args.max_text_bytes.is_some()
+            || args.max_image_bytes.is_some()
+            || args.network_policy.is_some()
+            || args.finalize
+            || output_budget_explicit
+        {
+            anyhow::bail!("browser selection, profiles, output limits, network policy and --finalize require --surface browser; native results are preserved without browser output limits");
+        }
+        let launch = native::Launch::discover(args.native_config.as_deref())?;
+        if let Some(command) = args.command {
+            return native::run_cli(launch, command, args.image_dir.as_deref()).await;
+        }
+        return match args.mode {
+            Mode::Mcp => native::run_mcp(launch).await,
+            Mode::Cli => anyhow::bail!("Computer Use CLI requires tools, call, or batch"),
+            Mode::Doctor => native::run_doctor(launch).await,
+            Mode::Discover => {
+                println!("{}", serde_json::to_string_pretty(&launch.summary())?);
+                Ok(())
+            }
+        };
+    }
+    if args.native_config.is_some() || args.image_dir.is_some() {
+        anyhow::bail!("--native-config and --image-dir require --surface computer");
     }
     let owns_turn = matches!(
         args.command.as_ref(),

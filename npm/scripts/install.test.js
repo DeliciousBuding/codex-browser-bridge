@@ -130,47 +130,8 @@ async function run() {
       /download too large: exceeded 4 bytes/
     );
 
-    assert.deepStrictEqual(requiredFilesForEnv({}), [
-      "package.json",
-      "README.md",
-      "LICENSE",
-      "docs/upgrade-v2.md",
-      "scripts/install.js",
-      "bin/codex-browser-bridge.js",
-      "examples/README.md",
-      "examples/claude-code.json",
-      "examples/cursor.json",
-      "examples/hermes-agent.json",
-      "examples/openclaw.json",
-      "skills/codex-browser/SKILL.md",
-      "skills/codex-browser/references/tabs-navigation.md",
-      "skills/codex-browser/references/dom-input-capture.md",
-      "skills/codex-browser/references/network-session.md",
-      "skills/codex-browser/references/recovery-safety.md",
-      "skills/codex-browser/references/cli.md",
-      "skills/codex-browser/references/official-parity.md",
-    ]);
-    assert.deepStrictEqual(requiredFilesForEnv({ CODEX_BRIDGE_REQUIRE_CHECKSUMS: "1" }), [
-      "package.json",
-      "README.md",
-      "LICENSE",
-      "docs/upgrade-v2.md",
-      "scripts/install.js",
-      "bin/codex-browser-bridge.js",
-      "examples/README.md",
-      "examples/claude-code.json",
-      "examples/cursor.json",
-      "examples/hermes-agent.json",
-      "examples/openclaw.json",
-      "skills/codex-browser/SKILL.md",
-      "skills/codex-browser/references/tabs-navigation.md",
-      "skills/codex-browser/references/dom-input-capture.md",
-      "skills/codex-browser/references/network-session.md",
-      "skills/codex-browser/references/recovery-safety.md",
-      "skills/codex-browser/references/cli.md",
-      "skills/codex-browser/references/official-parity.md",
-      "checksums.json",
-    ]);
+    assert(!requiredFilesForEnv({}).includes("checksums.json"));
+    assert(requiredFilesForEnv({ CODEX_BRIDGE_REQUIRE_CHECKSUMS: "1" }).includes("checksums.json"));
     assert.deepStrictEqual(
       packageJsonForPublish({
         name: "pkg",

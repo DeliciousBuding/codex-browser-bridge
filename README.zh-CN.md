@@ -6,7 +6,7 @@
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
     让 Claude Code 和其他 MCP Agent 通过 ChatGPT 桌面应用的浏览器扩展控制你现有的浏览器配置。
-    <br>66 个 MCP 工具。纯 Rust。单文件二进制。
+    <br>66 个浏览器工具，可显式接入原生 Computer Use。单文件 Rust 二进制。
   </p>
 </p>
 
@@ -36,8 +36,14 @@
 `codex-browser-use` 本地传输，识别每个实时浏览器扩展实例，使用相同的
 JSON-RPC 协议，暴露 66 个 MCP 工具用于浏览器自动化。
 
-本文描述 v2.0.0：66 个 MCP 工具（basic 46 / network 65 / full 66），
+浏览器入口有 66 个 MCP 工具（basic 46 / network 65 / full 66），
 提供 Windows 与 Linux GNU 包。
+
+原生 Computer Use 使用独立的 `--surface computer` 入口，连接已安装的 Codex
+`cua_repl` MCP 服务。MCP 与 CLI 共用原生执行器、对象、应用授权、截图和平台错误。
+默认 Claude 插件继续只提供浏览器；按需使用[原生 MCP 示例](examples/native-computer-use.json)。
+[设置、CLI 与验证矩阵](docs/native-computer-use.md)按候选版本和平台区分协议、
+构建与真实验收；Windows 输入、macOS、Wayland 尚有验收缺口。
 
 从 1.x 升级时，先读[升级说明](docs/upgrade-v2.md)。旧续接文件和只传数字 ID
 的 claim 调用需要调整；工具名称和数量不变。
@@ -263,8 +269,14 @@ MCP 大响应有统一上限，避免 agent 意外收到多 MB 的 DOM、JavaScr
   策略按已 attach 的标签页安装，修改只影响之后的 attach，不影响已 attach 的标签页。
 - `CODEX_BRIDGE_SOCKET_DIR` 可以覆盖 Unix socket 发现目录；未设置时先尝试
   `$XDG_RUNTIME_DIR/codex-browser-use`，再回退到 `/tmp/codex-browser-use`。
-- `CODEX_BRIDGE_NO_AUTO_FOREGROUND=1` 会关闭合成输入前的自动隐藏标签页激活；
-  默认会激活标签页，关闭后可能恢复旧的静默输入丢失风险。
+- attach 后启用 `Emulation.setFocusEmulationEnabled`，与 Codex 原生浏览器客户端一致。
+  输入和截图调用不激活标签页、不抢窗口焦点；初始化失败时不发送输入，直接报告错误。
+  用户要求查看页面时可显式调用 `codex_bring_to_front`。旧的
+  `CODEX_BRIDGE_NO_AUTO_FOREGROUND` 变通开关已无作用。
+- 滚动沿用原生扩展的 `Input.synthesizeScrollGesture`。部分后台渲染器会延迟手势和回执；
+  超时代表结果未知，再次滚动前应检查页面，原手势仍可能迟到。Bridge 不重放输入，
+  不自动激活标签。浏览器调试提示、页面弹窗仍可能显示；桌面自动化另有焦点要求。
+- 后台截图仍可能超时或丢失渲染器连接；焦点模拟不保证截图可用，失败会明确报告。
 
 支持 MCP resources 的客户端可以读取 `codex://tabs`，它只返回当前 bridge session 拥有的标签页，不是所有 Chrome 标签页。支持 MCP prompts 的客户端还会看到 `login` 和 `extract-table` 两个提示模板。
 
@@ -332,7 +344,7 @@ browser download；完整边界见 [parity 契约](docs/official-parity.md)。
 | `codex_screenshot` | 截取视口截图，超大图片返回摘要 |
 | `codex_screenshot_element` | 截取单个元素，超大图片返回摘要 |
 | `codex_print_pdf` | 通过有界 CDP stream 渲染 PDF；只返回大小摘要，不嵌入 PDF 内容 |
-| `codex_bring_to_front` | 激活后台标签（修复截图超时） |
+| `codex_bring_to_front` | 用户要求查看时显式激活标签页 |
 | `codex_dialog` | 处理 alert / confirm / prompt |
 | `codex_performance_metrics` | DOM 节点数、JS 堆、事件监听数（性能） |
 

@@ -20,7 +20,7 @@ See [SECURITY.md](SECURITY.md) and use the private reporting path there.
 ## Development setup
 
 Requirements:
-- Rust 1.85+
+- Rust 1.88+
 - Windows, or Linux for the Unix transport (release GNU binaries require glibc >= 2.39)
 - A local ChatGPT browser-extension service and connected extension for live testing
 

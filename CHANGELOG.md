@@ -4,6 +4,40 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Explicit `--surface computer` access to the installed native `cua_repl`
+  MCP service, with native schemas, application elicitation, images, metadata,
+  cancellation and owned worker cleanup.
+- Native CLI tools/call/batch, runtime discovery/doctor, and optional image
+  artifacts through `--image-dir`. Noninteractive CLI never approves apps.
+
+### Fixed
+
+- Match the native Codex Browser client by enabling focus emulation after
+  every debugger attach, including claims and reconnects. Background clicks,
+  typing and screenshots no longer activate the selected tab or window.
+- Remove the automatic `Page.bringToFront` input fallback and its environment
+  workaround. Foreground activation remains an explicit user-requested tool.
+  Failed focus setup detaches and reports an error before dispatching input.
+- Bind successful attachment setup to the pipe generation so reconnecting
+  cannot send the first input with a stale debugger or focus cache.
+- Remove pending request registrations when an outer timeout cancels a call,
+  and allow attachment recovery to finish before the bounded pointer release.
+- Preserve native MCP extension fields and installed host service mappings.
+  Reject invalid call metadata per request and report interrupted sessions
+  with a nonzero exit status.
+- Keep failed observation focus setup outside the observation cancellation
+  deadline, attempt bounded detach, and avoid input release after expired setup.
+- Position the pointer before every native scroll gesture. Report missing
+  mouse-move acknowledgments as errors; background scroll timeouts remain
+  unknown outcomes and are never retried or worked around by activation.
+
+### Changed
+
+- Update pinned CI actions from reviewed dependency PRs #52, #53, #54 and #55.
+- Raise Rust MSRV to 1.88 for the native MCP SDK (`rmcp` 3.5.1).
+
 ## [2.0.3] - 2026-11-17
 
 ### Fixed

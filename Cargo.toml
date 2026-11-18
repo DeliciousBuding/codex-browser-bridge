@@ -3,9 +3,9 @@ name = "codex-browser-bridge"
 version = "2.0.3"
 edition = "2021"
 license = "MIT"
-description = "MCP server that exposes the ChatGPT desktop app's browser-extension bridge."
+description = "MCP and CLI access to the installed Codex browser and Computer Use runtimes."
 repository = "https://github.com/DeliciousBuding/codex-browser-bridge"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [[bin]]
 name = "codex-browser-bridge"
@@ -24,9 +24,14 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 uuid = { version = "1.11", features = ["v4"] }
 toml = "0.8"
 fs2 = "0.4.3"
+rmcp = { version = "=3.5.1", default-features = false, features = ["client", "server", "transport-child-process", "transport-io", "elicitation"] }
+process-wrap = { version = "=10.0.1", features = ["tokio1"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_System_Threading"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"

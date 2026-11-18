@@ -19,8 +19,9 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.88.0
         with:
+          toolchain: "1.88.0"
           targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
           components: clippy
       - name: Check
@@ -39,7 +40,7 @@ jobs:
         run: ./scripts/test-live-e2e-timeout.ps1
       - name: Install cargo-llvm-cov
         # Prebuilt binary via taiki-e — avoids `cargo install` compiling the
-        # latest cargo-llvm-cov (0.8.7+ needs rustc 1.87, but our MSRV is 1.85).
+        # cargo-llvm-cov independently of the project build.
         uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
         with:
           tool: cargo-llvm-cov
@@ -112,8 +113,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.85.0
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.88.0
         with:
+          toolchain: "1.88.0"
           targets: ${{ matrix.target }}
           components: clippy
       - name: Test Linux
@@ -126,3 +128,25 @@ jobs:
       - name: Build Linux release
         shell: bash
         run: cargo build --locked --release --target "${{ matrix.target }}"
+
+  macos-source:
+    # Source/adapter checks only. This does not establish GUI/TCC acceptance
+    # or add a macOS release asset.
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@98effd2fc0b766278e30ab86762dd5e9a8531399 # 1.88.0
+        with:
+          toolchain: "1.88.0"
+          components: clippy
+      - name: Test adapter
+        timeout-minutes: 10
+        run: cargo test --locked
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Build and CLI smoke
+        run: |
+          cargo build --locked --release
+          target/release/codex-browser-bridge --version
+          target/release/codex-browser-bridge --help
