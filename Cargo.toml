@@ -1,6 +1,6 @@
 [package]
 name = "codex-browser-bridge"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2021"
 license = "MIT"
 description = "MCP and CLI access to the installed Codex browser and Computer Use runtimes."

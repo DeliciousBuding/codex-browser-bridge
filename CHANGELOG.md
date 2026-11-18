@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-11-18
+
+### Changed
+
+- Align the native Computer Use launcher with Codex CLI: preserve the host's
+  surface and trusted-service configuration, honor `env_vars` and the local
+  stdio environment policy, resolve Windows commands through `PATH`/`PATHEXT`,
+  and apply configured startup/tool timeouts plus enabled/disabled tool filters.
+- Unify native MCP relay and CLI/doctor on the same untyped JSON stdio
+  transport without an external MCP SDK dependency. CLI and doctor send Codex's
+  `2025-06-18` MCP client request with server negotiation and default 30/300s
+  startup/tool deadlines, while the MCP relay leaves handshake negotiation,
+  pagination traversal, interactive elicitation waits and request deadlines to
+  the receiving MCP host.
+- Follow bounded native `tools/list` pagination in CLI and doctor, preserve call
+  correlation metadata for every native tool call, and reject unused
+  `--image-dir` combinations before launch.
+- Computer Use `js` now uses every native surface enabled by the host launch
+  row; browser-specific network, tab and output policies do not wrap that
+  native surface.
+
+### Fixed
+
+- Apply the host's `enabled_tools`/`disabled_tools` policy consistently to
+  advertised catalogs, direct `tools/call` requests, and internal `turn_ended`
+  cleanup across both MCP relay and CLI modes.
+
 ## [2.1.0] - 2026-11-18
 
 ### Added
