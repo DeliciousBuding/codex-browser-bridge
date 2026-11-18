@@ -39,16 +39,17 @@ JSON-RPC 协议，暴露 66 个 MCP 工具用于浏览器自动化。
 提供 Windows 与 Linux GNU 包。
 
 原生 Computer Use 通过 `--surface computer` 连接已安装的 Codex `cua_repl` MCP
-服务，沿用宿主配置中的 surface、trusted services、环境策略、工具过滤、应用授权弹窗与
-进程树清理。默认 Claude 插件保持纯浏览器模式；按需接入见
-[原生 Computer Use 指南](docs/native-computer-use.md)与
-[原生 MCP 配置示例](examples/native-computer-use.json)。
+服务：保留宿主配置中的 surface、trusted services、环境策略与工具过滤，原样透传原生
+应用授权弹窗（`elicitation/create`），并由 Bridge 负责清理受管 worker 进程树。默认
+Claude 插件保持纯浏览器模式；按需接入见
+[原生 Computer Use 指南](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md)与
+[原生 MCP 配置示例](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/examples/native-computer-use.json)。
 
-从 1.x 升级时，先读[升级说明](docs/upgrade-v2.md)。旧续接文件和只传数字 ID
+从 1.x 升级时，先读[升级说明](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v2.md)。旧续接文件和只传数字 ID
 的 claim 调用需要调整；工具名称和数量不变。
 
 项目目标是让非 Codex agent 获得完整浏览器能力。具体方法与语义覆盖见
-[能力对齐表](docs/official-parity.md)，应用私有服务、locator 等剩余差异也在表中记录。
+[能力对齐表](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md)，应用私有服务、locator 等剩余差异也在表中记录。
 
 > **命名说明：** OpenAI 现在把这一入口称为 **ChatGPT 浏览器扩展**。底层 `codex-browser-use` pipe 和 JSON-RPC 方法名仍使用 Codex 时期标识，因此本项目继续保留 `codex_*` 工具名以维持兼容性。
 
@@ -92,7 +93,7 @@ npm i -g @delicious233/codex-browser-bridge
 ## 兼容性
 
 最近一次完整浏览器审计：2026-10-24，ChatGPT 桌面应用（`OpenAI.Codex` 包）`26.1016.8120.0`，Edge 扩展 `1.26.1020.11845`。
-原生 Computer Use 的验证状态单独记录在[原生指南](docs/native-computer-use.md)。
+原生 Computer Use 的验证状态单独记录在[原生指南](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md)。
 
 | 层面 | 状态 |
 |------|------|
@@ -105,7 +106,7 @@ npm i -g @delicious233/codex-browser-bridge
 | Windows x64 | 当前源码通过合成标签页 Edge parity 冒烟；不等于完整能力面 |
 | Windows arm64 | 已发布二进制；本次发布未实测 |
 | Linux GNU x64 | Ubuntu 24.04 / glibc 2.39 上通过全量原生 Rust/Node 门禁、release 构建和无浏览器 doctor；未做扩展 live 验证 |
-| Linux GNU arm64 | 原生 Rust tests/clippy/release 和合成 Chrome 扩展 parity 冒烟通过 |
+| Linux GNU arm64 | 原生 Rust tests/clippy/release 和合成 Chrome 扩展 parity 冒烟通过；不等于完整能力面 |
 | macOS | 源码编译与 CI 测试通过；无预编译发布二进制 |
 
 2026-10-24 的 Windows Edge 与 Linux arm64 Chrome 均通过 20 项 parity 和
@@ -369,8 +370,8 @@ browser download；完整边界见
 | `codex_form_fill` | 批量填表 `{selector: value}` |
 | `codex_file_input` | 上传文件到 `<input type=file>` |
 
-CUA 指针移动采用有上限的无 ack 窗口：当前扩展会执行 `mouseMoved`，但不返回响应；
-因此 drag 延迟随 path 点数增长。
+CUA 指针移动要求在有界操作窗口内收到 `mouseMoved` 回执且超时不重放；drag 耗时随
+path 点数增长。
 
 ### 网络 `[Network]`
 | 工具 | 说明 |

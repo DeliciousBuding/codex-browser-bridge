@@ -55,10 +55,10 @@ backend; it does not select a different automation implementation.
   modifier names; iframe, force and full auto-wait semantics remain partial.
 - `codex_cua_click`, `codex_cua_move`, `codex_cua_scroll` and `codex_drag` use
   the official CUA button/modifier/path fields through one non-replayed CDP
-  pointer dispatcher; scroll uses `Input.synthesizeScrollGesture`. Current
-  extensions do not acknowledge `mouseMoved`, so moves use a bounded no-ack
-  window and drag time follows path length. Coordinate `downloadMedia` and
-  human-like timing remain.
+  pointer dispatcher; scroll uses `Input.synthesizeScrollGesture`. Pointer
+  moves require an acknowledgment within the bounded operation window, and drag
+  time follows path length. Coordinate `downloadMedia` and human-like timing
+  remain.
 - `codex_click` and `codex_hover` are CSS convenience aliases over the same
   locator hit test and trusted pointer path, not JavaScript synthetic events.
 - `codex_clipboard`, `codex_webmcp`, `codex_content_export` and

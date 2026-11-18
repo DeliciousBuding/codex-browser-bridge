@@ -39,7 +39,7 @@ exposes 66 MCP tools for browser automation.
 The browser surface has 66 MCP tools (`basic` 46 / `network` 65 /
 `full` 66), distributed as Windows and Linux GNU packages.
 
-Upgrading from 1.x? Read [the upgrade guide](docs/upgrade-v2.md) before updating
+Upgrading from 1.x? Read [the upgrade guide](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v2.md) before updating
 an installation that uses saved continuation files or numeric-only tab claims.
 
 The goal is complete browser capability access for non-Codex agents. Coverage
@@ -47,11 +47,12 @@ is tracked by method and semantics in [the parity matrix](https://github.com/Del
 including app-private services and remaining locator differences.
 
 For desktop automation, `--surface computer` connects to the installed Codex
-`cua_repl` MCP service while preserving the host's launch configuration,
-environment policy, tool filters, application elicitation, and owned worker
-cleanup. The default Claude plugin remains browser-only; see
-[Native Computer Use](docs/native-computer-use.md) and
-[examples/native-computer-use.json](examples/native-computer-use.json) to opt in.
+`cua_repl` MCP service: it preserves the host's launch configuration,
+environment policy, and tool filters, forwards native application approval
+prompts (`elicitation/create`), and cleans up the owned worker process tree on
+exit. The default Claude plugin remains browser-only; see
+[Native Computer Use](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md) and
+[examples/native-computer-use.json](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/examples/native-computer-use.json) to opt in.
 
 > **Naming note:** OpenAI now documents this surface as the **ChatGPT browser extension**. The underlying `codex-browser-use` pipe and JSON-RPC method names still use the Codex-era identifiers, so this project keeps its `codex_*` tool surface for compatibility.
 
@@ -97,7 +98,7 @@ Or download the binary from [GitHub Releases](https://github.com/DeliciousBuding
 Last full browser audit: 2026-10-24 with ChatGPT desktop app (`OpenAI.Codex`
 package) `26.1016.8120.0` and Edge extension `1.26.1020.11845`.
 Native Computer Use verification is tracked separately in the
-[native guide](docs/native-computer-use.md).
+[native guide](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md).
 
 | Surface | Status |
 |---------|--------|
@@ -110,7 +111,7 @@ Native Computer Use verification is tracked separately in the
 | Windows x64 | Current source passes the synthetic Edge parity smoke; not full-surface parity |
 | Windows arm64 | Published binary; not live-tested for this release |
 | Linux GNU x64 | Full native Rust/Node gates, release build, and no-browser doctor passed on Ubuntu 24.04 / glibc 2.39; extension not live-tested |
-| Linux GNU arm64 | Native Rust tests/clippy/release and synthetic Chrome extension parity smoke passed |
+| Linux GNU arm64 | Native Rust tests/clippy/release and synthetic Chrome extension parity smoke passed; not full-surface parity |
 | macOS | Source builds and CI tests pass; no prebuilt release binary |
 
 The 2026-10-24 Windows Edge and Linux arm64 Chrome runs passed the 20-check
@@ -443,9 +444,8 @@ downloads. See [parity contracts](https://github.com/DeliciousBuding/codex-brows
 | `codex_form_fill` | Fill multiple fields from `{selector: value}` map |
 | `codex_file_input` | Upload files to `<input type=file>` |
 
-CUA pointer moves use a bounded no-ack window because current extension builds
-apply but do not acknowledge `mouseMoved`; drag latency therefore follows the
-number of supplied path points.
+CUA pointer moves require an acknowledgment within the bounded operation window
+and are never replayed; drag latency follows the number of supplied path points.
 
 ### Network `[Network]`
 | Tool | Description |

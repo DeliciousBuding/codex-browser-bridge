@@ -800,7 +800,10 @@ where
                     }
                 }
                 row = native.receive() => {
-                    let Some(mut row) = row? else { return Ok("Stop") };
+                    let Some(mut row) = row? else {
+                        write_failed = true;
+                        bail!("native service closed connection");
+                    };
                     if row.get("method").is_none() {
                         if let Some(id) = row.get("id").map(ToString::to_string) {
                             active.remove(&id);
@@ -876,7 +879,13 @@ impl Worker<tokio::process::ChildStdout, tokio::process::ChildStdin> {
             _ = shutdown_signal() => Err(anyhow::anyhow!("native startup interrupted")),
         };
         if let Err(error) = initialized {
-            if let Some(mut process) = worker.process.take() {
+            let Worker {
+                native,
+                mut process,
+                ..
+            } = worker;
+            drop(native);
+            if let Some(mut process) = process.take() {
                 if let Err(cleanup) = process.close().await {
                     bail!("{error:#}; native startup cleanup failed: {cleanup:#}");
                 }
@@ -1077,10 +1086,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Worker<R, W> {
             Some(process) => process.close().await,
             None => Ok(()),
         };
-        if cleanup.is_err() || terminated.is_err() {
-            bail!("native cleanup was not confirmed");
-        }
-        Ok(())
+        finish(cleanup, terminated).context("native cleanup was not confirmed")
     }
 }
 

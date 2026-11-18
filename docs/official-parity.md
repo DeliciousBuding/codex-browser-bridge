@@ -259,7 +259,7 @@ outcome as an official app-side adapter.
 | Compact CLI | `tools`, `call`, JSONL `batch`; one process/session for batch | Keep. It reuses MCP schemas and handlers and is not an official API member |
 | Locator | Declarative result spec over CSS/role/text/label/placeholder/test-id | Keep the transport shape; continue aligning action semantics. Do not clone Playwright object chaining or add unsupported compatibility fields |
 | DOM/AX diagnostics | AX tree, backend DOM IDs and visible-DOM text are separate | Keep separate names. AX `nodeId`, `backendDOMNodeId` and an official-style actionable visible-DOM ref must never be conflated |
-| Pointer input | Shared bounded CDP dispatcher; no mutation replay | Aligned to CUA button/modifier/path fields. `mouseMoved` is applied without an extension response, so each move has a bounded no-ack window and drag latency follows the path length |
+| Pointer input | Shared bounded CDP dispatcher; no mutation replay | Aligned to CUA button/modifier/path fields. `mouseMoved` requires an acknowledgment within the bounded operation window, and drag latency follows the path length |
 | `codex_evaluate` | Unrestricted page JavaScript | Keep as a bridge escape hatch. A read-only locator-scoped evaluate needs a different name, sandbox and result contract |
 | `codex_clipboard` | Session-virtual, bounded MIME clipboard | Keep. Do not describe it as the OS clipboard and do not synthesize copy/cut capture |
 | `codex_webmcp` | Random document-bound handles, top same-origin document | Keep. A handle is bridge-native identity; the page-defined tool name remains data |

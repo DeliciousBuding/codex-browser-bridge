@@ -33,7 +33,9 @@ Local stdio launch follows Codex CLI's environment policy:
 - Strips ambient variables outside that set as well as Codex's non-inheritable
   internal auth tokens.
 - On Windows, resolves bare commands (such as `python` or `npx`) against the
-  constructed child `PATH` and `PATHEXT`.
+  constructed child `PATH` (using the process's `PATHEXT` for extension
+  matching, matching Codex CLI's `program_resolver`) while forwarding `PATHEXT`
+  in the child environment.
 - Desktop session variables (such as `DISPLAY` and `XAUTHORITY` on X11, or
   Wayland session variables) must be present in the launch row's `env` or
   `env_vars`.
@@ -111,8 +113,8 @@ codex-browser-bridge --surface computer --image-dir ./captures batch
   `--profile`, `--upload-base`, `--max-text-bytes`, `--max-image-bytes`,
   `--max-output-bytes`, `--network-policy`, `--finalize`, `--session-file`,
   `--keep-turn`) are rejected before startup.
-- The CLI is non-interactive and declines `elicitation/create` requests; approve
-  applications through an interactive MCP host.
+- The CLI is non-interactive and rejects `elicitation/create` requests with a
+  JSON-RPC error; approve applications through an interactive MCP host.
 
 ## Lifecycle
 
@@ -123,8 +125,10 @@ clears JavaScript bindings in the worker without closing user applications.
 On EOF or interrupt (`SIGINT`/`SIGTERM`), the bridge cancels any in-flight
 request, invokes `turn_ended` (`Stop` or `Interrupt`) for the active execution
 context with a fresh `callId` and no `progressToken`, closes child `stdin`, and
-terminates the owned process tree within an 8-second cleanup budget. Timed-out or
-interrupted calls exit nonzero and are never replayed.
+terminates the owned process tree (8-second `turn_ended` and transport-close
+budgets, followed by a 3-second graceful exit window and up to 8 seconds for
+process-tree termination). Timed-out or interrupted calls exit nonzero and are
+never replayed.
 
 ## Verification status
 
@@ -135,7 +139,7 @@ remaining platform checks live in
 
 | Platform / runtime | Protocol & observation | Input & lifecycle | Notes |
 | --- | --- | --- | --- |
-| Windows x64 (`cua-repl` 0.1.5 / Sky 0.7.21) | `initialize`, catalog filtering, fresh `accept`/`decline`/`cancel` elicitation, `js_reset`, synthetic AX state, screenshot, and CLI non-interactive rejection passed | Unlocked desktop synthetic Win32 click (`0 -> 1`), `typeText`, active-call cancel without replay, 17-worker process-tree cleanup, and fresh-worker retry passed | Verified against a running Codex desktop host pipe; standalone helper spawn without the host returned `spawn EPERM` |
+| Windows x64 (`cua-repl` 0.1.5 / Sky 0.7.21) | `initialize`, catalog filtering, fresh `accept`/`decline`/`cancel` elicitation, `js_reset`, synthetic AX state, screenshot, and CLI non-interactive rejection passed | Unlocked desktop synthetic Win32 click (`0 -> 1`), `typeText`, active-call cancel without replay, owned worker process-tree cleanup, and fresh-worker retry passed | Verified against a running Codex desktop host pipe; standalone helper spawn without the host returned `spawn EPERM` |
 | Linux ARM64 X11 (`cua-repl` 0.1.5 / Sky 0.7.21) | Direct native service and bridge relay both passed `initialize`, catalog, synthetic GTK AX state, screenshot, CLI batch persistence/`js_reset`, `--image-dir`, and `SIGTERM` cleanup | Synthetic GTK button click (`0 -> 1`) and process-group cleanup passed | Requires X11 session variables (`DISPLAY`, `XAUTHORITY`) in the launch row |
 | Windows ARM64 / Linux x64 | Release binaries built and CI tested | Not live-tested on desktop GUI | — |
 | macOS | CI source build, unit/process tests, clippy, and CLI smoke passed on `macos-15` | Not live-tested with macOS TCC/Accessibility | No prebuilt macOS release binary |

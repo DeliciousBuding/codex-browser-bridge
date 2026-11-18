@@ -10,8 +10,9 @@ All notable changes to this project will be documented in this file.
 
 - Align the native Computer Use launcher with Codex CLI: preserve the host's
   surface and trusted-service configuration, honor `env_vars` and the local
-  stdio environment policy, resolve Windows commands through `PATH`/`PATHEXT`,
-  and apply configured startup/tool timeouts plus enabled/disabled tool filters.
+  stdio environment policy, resolve Windows commands against the constructed
+  child `PATH` while forwarding `PATHEXT`, and apply configured startup/tool
+  timeouts plus enabled/disabled tool filters.
 - Unify native MCP relay and CLI/doctor on the same untyped JSON stdio
   transport without an external MCP SDK dependency. CLI and doctor send Codex's
   `2025-06-18` MCP client request with server negotiation and default 30/300s

@@ -528,21 +528,25 @@ pub async fn keypress(client: &Client, tab: i64, keys: &[String]) -> Result<()> 
     let original = result.unwrap_err();
     let mut cleanup_err = None;
     let deadline = Instant::now() + CLEANUP_TIMEOUT;
-    while let Some(m) = pressed.pop() {
-        let cleanup_mask = pressed.iter().fold(0, |bits, key| bits | key.modifier);
-        let attempt_deadline = std::cmp::min(deadline, Instant::now() + CLEANUP_EVENT_TIMEOUT);
-        if let Err(e) = send_until(
-            client,
-            tab,
-            m,
-            "keyUp",
-            cleanup_mask,
-            cleanup_mask & 8 != 0,
-            attempt_deadline,
-        )
-        .await
-        {
-            cleanup_err = Some(e);
+    if let Err(e) = client.prepare_input(tab, deadline).await {
+        cleanup_err = Some(e);
+    } else {
+        while let Some(m) = pressed.pop() {
+            let cleanup_mask = pressed.iter().fold(0, |bits, key| bits | key.modifier);
+            let attempt_deadline = std::cmp::min(deadline, Instant::now() + CLEANUP_EVENT_TIMEOUT);
+            if let Err(e) = send_until(
+                client,
+                tab,
+                m,
+                "keyUp",
+                cleanup_mask,
+                cleanup_mask & 8 != 0,
+                attempt_deadline,
+            )
+            .await
+            {
+                cleanup_err = Some(e);
+            }
         }
     }
     if let Some(e) = cleanup_err {

@@ -244,6 +244,9 @@ impl Drop for FrameWriteGuard<'_> {
         if let Some(task) = self.inner.read_task.lock().unwrap().take() {
             task.abort();
         }
+        if let Ok(mut subs) = self.inner.event_subs.try_lock() {
+            subs.clear();
+        }
         self.inner.pending.lock().unwrap().clear();
     }
 }
@@ -1165,57 +1168,55 @@ impl Client {
         // observer deadline, which may cancel event producer initialization.
         self.prepare_input(tab_id, deadline).await?;
         let epoch = self.inner.connection_epoch.load(Ordering::Acquire);
+        let remaining = remaining_before_write("start observation", deadline)?;
         let initial = self.inner.observations.lock().unwrap().register(tab_id)?;
         if initial.enabled {
             return Ok(initial);
         }
-        let result = timeout(
-            remaining_before_write("start observation", deadline)?,
-            async {
-                for (method, params) in [
-                    ("Page.enable", None),
-                    (
-                        "Page.setLifecycleEventsEnabled",
-                        Some(json!({"enabled":true})),
-                    ),
-                    ("Runtime.enable", None),
-                    ("Log.enable", None),
-                    ("Network.enable", None),
-                ] {
-                    self.execute_cdp_raw_until(tab_id, method, params, deadline, epoch)
-                        .await?;
-                }
-                let raw = self
-                    .execute_cdp_raw_until(tab_id, "Page.getFrameTree", None, deadline, epoch)
+        let result = timeout(remaining, async {
+            for (method, params) in [
+                ("Page.enable", None),
+                (
+                    "Page.setLifecycleEventsEnabled",
+                    Some(json!({"enabled":true})),
+                ),
+                ("Runtime.enable", None),
+                ("Log.enable", None),
+                ("Network.enable", None),
+            ] {
+                self.execute_cdp_raw_until(tab_id, method, params, deadline, epoch)
                     .await?;
-                let tree: Value = serde_json::from_str(raw.get()).map_err(|err| {
-                    BridgeError::Protocol(format!("parse observation frame tree: {err}"))
-                })?;
-                self.inner
-                    .observations
-                    .lock()
-                    .unwrap()
-                    .seed_frame_tree(tab_id, tree.get("frameTree").unwrap_or(&tree));
-                let before_ready = self.observation_snapshot(tab_id)?.cursor;
-                let raw = self
-                    .execute_cdp_raw_until(
-                        tab_id,
-                        "Runtime.evaluate",
-                        Some(json!({"expression":"document.readyState", "returnByValue":true})),
-                        deadline,
-                        epoch,
-                    )
-                    .await?;
-                let ready: Value = serde_json::from_str(raw.get()).map_err(|err| {
-                    BridgeError::Protocol(format!("parse observation ready state: {err}"))
-                })?;
-                self.inner.observations.lock().unwrap().finish_start(
+            }
+            let raw = self
+                .execute_cdp_raw_until(tab_id, "Page.getFrameTree", None, deadline, epoch)
+                .await?;
+            let tree: Value = serde_json::from_str(raw.get()).map_err(|err| {
+                BridgeError::Protocol(format!("parse observation frame tree: {err}"))
+            })?;
+            self.inner
+                .observations
+                .lock()
+                .unwrap()
+                .seed_frame_tree(tab_id, tree.get("frameTree").unwrap_or(&tree));
+            let before_ready = self.observation_snapshot(tab_id)?.cursor;
+            let raw = self
+                .execute_cdp_raw_until(
                     tab_id,
-                    &before_ready,
-                    ready.pointer("/result/value").and_then(Value::as_str),
+                    "Runtime.evaluate",
+                    Some(json!({"expression":"document.readyState", "returnByValue":true})),
+                    deadline,
+                    epoch,
                 )
-            },
-        )
+                .await?;
+            let ready: Value = serde_json::from_str(raw.get()).map_err(|err| {
+                BridgeError::Protocol(format!("parse observation ready state: {err}"))
+            })?;
+            self.inner.observations.lock().unwrap().finish_start(
+                tab_id,
+                &before_ready,
+                ready.pointer("/result/value").and_then(Value::as_str),
+            )
+        })
         .await
         .map_err(|_| BridgeError::Timeout("start observation".into()))
         .and_then(|result| result);
@@ -1556,10 +1557,8 @@ impl Client {
                     "{method} may have reached the browser before its CDP session became invalid; outcome unknown, so it was not replayed: {err}"
                 )))
             }
-            // A timeout here is expected for input commands the extension applies
-            // without acknowledging (for example `mouseMoved`); it does not mean
-            // the debugger is gone, so the attachment stays valid. A real
-            // detached session is matched above.
+            // A command timeout does not prove the debugger session is gone,
+            // so the attachment stays valid; a detached session is matched above.
             Err(err) => Err(err),
         }
     }
