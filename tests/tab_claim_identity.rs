@@ -39,6 +39,18 @@ async fn no_request(peer: &mut DuplexStream) {
         .is_err());
 }
 
+async fn enable_focus(peer: &mut DuplexStream) {
+    let focus = request(peer).await;
+    assert_eq!(focus["method"], "executeCdp");
+    assert_eq!(focus["params"]["target"]["tabId"], 7);
+    assert_eq!(
+        focus["params"]["method"],
+        "Emulation.setFocusEmulationEnabled"
+    );
+    assert_eq!(focus["params"]["commandParams"], json!({"enabled": true}));
+    respond(peer, &focus, json!({})).await;
+}
+
 #[tokio::test]
 async fn stale_missing_reused_and_incomplete_snapshots_never_claim() {
     for tabs in [
@@ -110,6 +122,7 @@ async fn matching_bare_and_wrapped_snapshots_claim_and_attach_exact_id() {
         // Extension 1.26+ reads params.networkPolicy.timeoutMs on every attach.
         assert_eq!(r["params"]["networkPolicy"], json!({"constraints": []}));
         respond(&mut peer, &r, Value::Null).await;
+        enable_focus(&mut peer).await;
         let tab = timeout(BOUND, task).await.unwrap().unwrap().unwrap();
         assert_eq!(tab.id, "7");
         assert_eq!(tab.title, title);
@@ -285,6 +298,7 @@ async fn attach_always_carries_the_network_policy_field() {
         json!([{"kind":"domains","mode":"denylist","patterns":["tracker.example"]}])
     );
     respond(&mut peer, &attach, Value::Null).await;
+    enable_focus(&mut peer).await;
     let evaluate = request(&mut peer).await;
     assert_eq!(evaluate["method"], "executeCdp");
     respond(

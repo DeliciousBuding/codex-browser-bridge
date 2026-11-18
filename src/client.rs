@@ -8,7 +8,7 @@ use std::sync::{Arc, Weak};
 use serde_json::{json, value::RawValue, Value};
 use tokio::io::{split, ReadHalf, WriteHalf};
 use tokio::sync::{mpsc, oneshot, Mutex};
-use tokio::time::{timeout, Duration, Instant};
+use tokio::time::{timeout, timeout_at, Duration, Instant};
 use uuid::Uuid;
 
 use crate::discovery;
@@ -166,7 +166,7 @@ struct ClientInner {
     /// in-flight writers to see `None` and return a `Connection` error instead of
     /// writing into a broken pipe.
     writer: Mutex<Option<WriteHalf<PipeStream>>>,
-    pending: Mutex<PendingMap>,
+    pending: StdMutex<PendingMap>,
     next_id: AtomicU64,
     session: tokio::sync::RwLock<SessionTurn>,
     browser_identity: StdMutex<Option<crate::session::BrowserIdentity>>,
@@ -178,7 +178,7 @@ struct ClientInner {
     tab_locks: Mutex<HashMap<i64, Arc<Mutex<()>>>>,
     /// Per-tab sticky attach cache: tabs known to have an active CDP debugger session.
     /// Avoids detach+attach round-trips for repeated CDP calls on the same tab.
-    attached_tabs: Mutex<HashMap<i64, bool>>,
+    attached_tabs: Mutex<HashMap<i64, u64>>,
     /// Active CDP event subscriptions. Routed by read_loop for frames with a `method` and no `id`.
     event_subs: Mutex<Vec<EventSubscription>>,
     observations: StdMutex<ObservationStore>,
@@ -208,6 +208,44 @@ struct ClientInner {
     /// Browser Use network policy carried on every `attach`. Extension 1.26+
     /// reads it unconditionally; the default is the documented empty policy.
     network_policy: StdMutex<crate::network_policy::NetworkPolicy>,
+}
+
+/// A cancelled write may leave a length-prefixed frame partially delivered.
+/// Retire its pipe while still holding the writer lock; never append a new
+/// request to that ambiguous byte stream.
+struct FrameWriteGuard<'a> {
+    writer: &'a mut Option<WriteHalf<PipeStream>>,
+    inner: &'a ClientInner,
+    complete: bool,
+}
+
+/// Request registration must be removed even when an outer deadline drops
+/// the future after a complete frame was written.
+struct PendingRequest<'a> {
+    pending: &'a StdMutex<PendingMap>,
+    id: u64,
+}
+
+impl Drop for PendingRequest<'_> {
+    fn drop(&mut self) {
+        self.pending.lock().unwrap().remove(&self.id);
+    }
+}
+
+impl Drop for FrameWriteGuard<'_> {
+    fn drop(&mut self) {
+        if self.complete {
+            return;
+        }
+        self.writer.take();
+        self.inner.alive.store(false, Ordering::Release);
+        self.inner.connection_epoch.fetch_add(1, Ordering::AcqRel);
+        self.inner.observations.lock().unwrap().clear();
+        if let Some(task) = self.inner.read_task.lock().unwrap().take() {
+            task.abort();
+        }
+        self.inner.pending.lock().unwrap().clear();
+    }
 }
 
 impl Drop for ClientInner {
@@ -394,7 +432,7 @@ impl Client {
         Self {
             inner: Arc::new(ClientInner {
                 writer: Mutex::new(None),
-                pending: Mutex::new(HashMap::new()),
+                pending: StdMutex::new(HashMap::new()),
                 next_id: AtomicU64::new(1),
                 session: tokio::sync::RwLock::new(SessionTurn {
                     session_id,
@@ -441,7 +479,7 @@ impl Client {
         let client = Self {
             inner: Arc::new(ClientInner {
                 writer: Mutex::new(Some(writer)),
-                pending: Mutex::new(HashMap::new()),
+                pending: StdMutex::new(HashMap::new()),
                 next_id: AtomicU64::new(1),
                 session: tokio::sync::RwLock::new(SessionTurn {
                     session_id,
@@ -496,7 +534,7 @@ impl Client {
             handle.abort();
         }
         self.inner.writer.lock().await.take();
-        self.inner.pending.lock().await.clear();
+        self.inner.pending.lock().unwrap().clear();
         self.inner.event_subs.lock().await.clear();
         self.inner.observations.lock().unwrap().clear();
         self.inner.tab_locks.lock().await.clear();
@@ -586,7 +624,7 @@ impl Client {
         self.ensure_alive().await?;
 
         match self
-            .send_request_once(method, params.clone(), request_timeout)
+            .send_request_once(method, params.clone(), request_timeout, None)
             .await
         {
             Ok(raw) => Ok(raw),
@@ -595,7 +633,7 @@ impl Client {
                 // reconnect and retry exactly once on the fresh connection.
                 tracing::debug!(method, error = %err, "request failed, reconnecting + retrying once");
                 self.force_reconnect().await?;
-                self.send_request_once(method, params, request_timeout)
+                self.send_request_once(method, params, request_timeout, None)
                     .await
             }
             Err(err) if Self::is_connection_error(&err) => {
@@ -614,7 +652,9 @@ impl Client {
         method: &str,
         params: Option<Value>,
         request_timeout: Duration,
+        expected_epoch: Option<u64>,
     ) -> Result<Box<RawValue>> {
+        let deadline = Instant::now() + request_timeout;
         if !matches!(
             method,
             "getInfo" | "getTabs" | "getUserTabs" | "getUserHistory" | "turnEnded" | "detach"
@@ -627,35 +667,47 @@ impl Client {
         let req = Request::new(id, method, params);
         let (tx, rx) = oneshot::channel();
 
-        self.inner.pending.lock().await.insert(id, tx);
-        let write_result = {
-            let mut writer_guard = self.inner.writer.lock().await;
-            match writer_guard.as_mut() {
-                Some(w) => {
-                    if !matches!(
-                        method,
-                        "getInfo" | "getTabs" | "getUserTabs" | "getUserHistory"
-                    ) {
-                        // Mark before writing: an interrupted write/ACK can still
-                        // leave browser-side effects. Do not infer no ownership.
-                        self.inner.turn_may_own_tabs.store(true, Ordering::Release);
-                    }
-                    protocol::encode_frame(w, &req).await
-                }
-                None => Err(BridgeError::Connection(
-                    "writer is none (connection dropped)".into(),
-                )),
-            }
+        self.inner.pending.lock().unwrap().insert(id, tx);
+        let _pending = PendingRequest {
+            pending: &self.inner.pending,
+            id,
         };
-        if let Err(err) = write_result {
-            self.inner.pending.lock().await.remove(&id);
-            return Err(err);
-        }
+        let write_result = timeout_at(deadline, async {
+            let mut writer_guard = self.inner.writer.lock().await;
+            if writer_guard.is_some()
+                && expected_epoch.is_none_or(|epoch| {
+                    self.inner.connection_epoch.load(Ordering::Acquire) == epoch
+                })
+            {
+                if !matches!(
+                    method,
+                    "getInfo" | "getTabs" | "getUserTabs" | "getUserHistory"
+                ) {
+                    // Mark before writing: an interrupted write/ACK can still
+                    // leave browser-side effects. Do not infer no ownership.
+                    self.inner.turn_may_own_tabs.store(true, Ordering::Release);
+                }
+                let mut frame = FrameWriteGuard {
+                    writer: &mut writer_guard,
+                    inner: &self.inner,
+                    complete: false,
+                };
+                let result = protocol::encode_frame(frame.writer.as_mut().unwrap(), &req).await;
+                frame.complete = result.is_ok();
+                result
+            } else {
+                Err(BridgeError::Connection(
+                    "connection changed before request write; no command was sent".into(),
+                ))
+            }
+        })
+        .await
+        .unwrap_or_else(|_| Err(BridgeError::Timeout(method.to_string())));
+        write_result?;
 
-        let resp = match timeout(request_timeout, rx).await {
+        let resp = match timeout_at(deadline, rx).await {
             Ok(Ok(resp)) => resp,
             Ok(Err(_)) => {
-                self.inner.pending.lock().await.remove(&id);
                 // Channel closed = the read loop died (connection down). Surface as a
                 // Connection error so the caller's retry path can trigger a reconnect.
                 return Err(BridgeError::Connection(format!(
@@ -663,7 +715,6 @@ impl Client {
                 )));
             }
             Err(_) => {
-                self.inner.pending.lock().await.remove(&id);
                 return Err(BridgeError::Timeout(method.to_string()));
             }
         };
@@ -786,8 +837,12 @@ impl Client {
                         }
                     }
                     let (reader, writer) = split(stream);
-                    let epoch = self.inner.connection_epoch.fetch_add(1, Ordering::AcqRel) + 1;
-                    *self.inner.writer.lock().await = Some(writer);
+                    let epoch = {
+                        let mut current_writer = self.inner.writer.lock().await;
+                        let epoch = self.inner.connection_epoch.fetch_add(1, Ordering::AcqRel) + 1;
+                        *current_writer = Some(writer);
+                        epoch
+                    };
                     // New connection has no CDP debugger sessions — drop the cache so
                     // execute_cdp falls back to a full attach instead of trusting a stale entry.
                     self.inner.attached_tabs.lock().await.clear();
@@ -933,7 +988,7 @@ impl Client {
                     Err(_) => continue,
                 };
                 if let Some(id) = response.id {
-                    if let Some(tx) = inner.pending.lock().await.remove(&id) {
+                    if let Some(tx) = inner.pending.lock().unwrap().remove(&id) {
                         let _ = tx.send(response);
                     }
                 }
@@ -955,7 +1010,7 @@ impl Client {
             inner.alive.store(false, Ordering::Release);
             // Drop pending waiters' senders — they return Connection errors via the
             // RecvError → Connection translation in send_request_once.
-            inner.pending.lock().await.clear();
+            inner.pending.lock().unwrap().clear();
             inner.event_subs.lock().await.clear();
             inner.observations.lock().unwrap().clear();
             // Reclaim the writer so any in-flight encode sees None instead of
@@ -1106,6 +1161,10 @@ impl Client {
         )
         .await
         .map_err(|_| BridgeError::Timeout("start observation".into()))??;
+        // Attachment rollback has its own bounded budget. Keep it outside the
+        // observer deadline, which may cancel event producer initialization.
+        self.prepare_input(tab_id, deadline).await?;
+        let epoch = self.inner.connection_epoch.load(Ordering::Acquire);
         let initial = self.inner.observations.lock().unwrap().register(tab_id)?;
         if initial.enabled {
             return Ok(initial);
@@ -1123,21 +1182,11 @@ impl Client {
                     ("Log.enable", None),
                     ("Network.enable", None),
                 ] {
-                    self.execute_cdp_with_timeout(
-                        tab_id,
-                        method,
-                        params,
-                        remaining_before_write("start observation", deadline)?,
-                    )
-                    .await?;
+                    self.execute_cdp_raw_until(tab_id, method, params, deadline, epoch)
+                        .await?;
                 }
                 let raw = self
-                    .execute_cdp_with_timeout(
-                        tab_id,
-                        "Page.getFrameTree",
-                        None,
-                        remaining_before_write("start observation", deadline)?,
-                    )
+                    .execute_cdp_raw_until(tab_id, "Page.getFrameTree", None, deadline, epoch)
                     .await?;
                 let tree: Value = serde_json::from_str(raw.get()).map_err(|err| {
                     BridgeError::Protocol(format!("parse observation frame tree: {err}"))
@@ -1149,11 +1198,12 @@ impl Client {
                     .seed_frame_tree(tab_id, tree.get("frameTree").unwrap_or(&tree));
                 let before_ready = self.observation_snapshot(tab_id)?.cursor;
                 let raw = self
-                    .execute_cdp_with_timeout(
+                    .execute_cdp_raw_until(
                         tab_id,
                         "Runtime.evaluate",
                         Some(json!({"expression":"document.readyState", "returnByValue":true})),
-                        remaining_before_write("start observation", deadline)?,
+                        deadline,
+                        epoch,
                     )
                     .await?;
                 let ready: Value = serde_json::from_str(raw.get()).map_err(|err| {
@@ -1171,13 +1221,13 @@ impl Client {
         .and_then(|result| result);
         if result.is_err() {
             self.inner.observations.lock().unwrap().remove(tab_id);
-            // The overall deadline can cancel a request before its own timeout
-            // branch removes the sender. Do not leave cancelled waiters behind.
-            self.inner
-                .pending
-                .lock()
-                .await
-                .retain(|_, sender| !sender.is_closed());
+            self.inner.attached_tabs.lock().await.remove(&tab_id);
+            let cleanup_deadline = Instant::now() + Duration::from_millis(500);
+            let _ = timeout_at(
+                cleanup_deadline,
+                self.detach_tab_until(tab_id, cleanup_deadline),
+            )
+            .await;
         }
         result
     }
@@ -1372,17 +1422,13 @@ impl Client {
         params: Option<Value>,
         request_timeout: Duration,
     ) -> Result<Box<RawValue>> {
+        self.ensure_alive().await?;
         let tab_lock = self.tab_lock(tab_id).await;
         let _guard = tab_lock.lock().await;
+        let epoch = self.inner.connection_epoch.load(Ordering::Acquire);
 
-        let already_attached = self
-            .inner
-            .attached_tabs
-            .lock()
-            .await
-            .get(&tab_id)
-            .copied()
-            .unwrap_or(false);
+        let already_attached =
+            self.inner.attached_tabs.lock().await.get(&tab_id).copied() == Some(epoch);
 
         if already_attached {
             // Sticky attach: skip detach+attach, go direct to CDP.
@@ -1392,7 +1438,7 @@ impl Client {
             // the full 60s budget on a doomed wait.
             let sticky_deadline = Instant::now() + STICKY_FAST_TIMEOUT.min(request_timeout);
             match self
-                .execute_cdp_raw_until(tab_id, method, params.clone(), sticky_deadline)
+                .execute_cdp_raw_until(tab_id, method, params.clone(), sticky_deadline, epoch)
                 .await
             {
                 Ok(raw) => return Ok(raw),
@@ -1424,16 +1470,19 @@ impl Client {
         // budget even if the sticky fast-path just consumed STICKY_FAST_TIMEOUT.
         let deadline = Instant::now() + request_timeout;
         self.detach_tab_until(tab_id, deadline).await.ok();
-        if let Err(err) = self.attach_tab_until(tab_id, deadline).await {
-            self.retire_current_tab_state(tab_id).await;
-            return Err(BridgeError::Protocol(format!(
-                "attach failed for tab {tab_id}: {err}"
-            )));
-        }
-        self.inner.attached_tabs.lock().await.insert(tab_id, true);
+        let epoch = match self.attach_tab_until(tab_id, deadline).await {
+            Ok(epoch) => epoch,
+            Err(err) => {
+                self.retire_current_tab_state(tab_id).await;
+                return Err(BridgeError::Protocol(format!(
+                    "attach failed for tab {tab_id}: {err}"
+                )));
+            }
+        };
+        self.inner.attached_tabs.lock().await.insert(tab_id, epoch);
 
         match self
-            .execute_cdp_raw_until(tab_id, method, params.clone(), deadline)
+            .execute_cdp_raw_until(tab_id, method, params.clone(), deadline, epoch)
             .await
         {
             Ok(raw) => Ok(raw),
@@ -1441,14 +1490,17 @@ impl Client {
                 self.inner.attached_tabs.lock().await.remove(&tab_id);
                 self.inner.observations.lock().unwrap().remove(tab_id);
                 self.detach_tab_until(tab_id, deadline).await.ok();
-                if let Err(err) = self.attach_tab_until(tab_id, deadline).await {
-                    self.retire_current_tab_state(tab_id).await;
-                    return Err(BridgeError::Protocol(format!(
-                        "retry attach failed for tab {tab_id}: {err}"
-                    )));
-                }
-                self.inner.attached_tabs.lock().await.insert(tab_id, true);
-                self.execute_cdp_raw_until(tab_id, method, params, deadline)
+                let epoch = match self.attach_tab_until(tab_id, deadline).await {
+                    Ok(epoch) => epoch,
+                    Err(err) => {
+                        self.retire_current_tab_state(tab_id).await;
+                        return Err(BridgeError::Protocol(format!(
+                            "retry attach failed for tab {tab_id}: {err}"
+                        )));
+                    }
+                };
+                self.inner.attached_tabs.lock().await.insert(tab_id, epoch);
+                self.execute_cdp_raw_until(tab_id, method, params, deadline, epoch)
                     .await
             }
             Err(err) => Err(err),
@@ -1470,31 +1522,30 @@ impl Client {
         params: Option<Value>,
         request_timeout: Duration,
     ) -> Result<Box<RawValue>> {
+        self.ensure_alive().await?;
         let tab_lock = self.tab_lock(tab_id).await;
         let _guard = tab_lock.lock().await;
 
         let deadline = Instant::now() + request_timeout;
-        let already_attached = self
-            .inner
-            .attached_tabs
-            .lock()
-            .await
-            .get(&tab_id)
-            .copied()
-            .unwrap_or(false);
+        let mut epoch = self.inner.connection_epoch.load(Ordering::Acquire);
+        let already_attached =
+            self.inner.attached_tabs.lock().await.get(&tab_id).copied() == Some(epoch);
         if !already_attached {
             self.detach_tab_until(tab_id, deadline).await.ok();
-            if let Err(err) = self.attach_tab_until(tab_id, deadline).await {
-                self.retire_current_tab_state(tab_id).await;
-                return Err(BridgeError::Protocol(format!(
-                    "attach failed for tab {tab_id}: {err}"
-                )));
-            }
-            self.inner.attached_tabs.lock().await.insert(tab_id, true);
+            epoch = match self.attach_tab_until(tab_id, deadline).await {
+                Ok(epoch) => epoch,
+                Err(err) => {
+                    self.retire_current_tab_state(tab_id).await;
+                    return Err(BridgeError::Protocol(format!(
+                        "attach failed for tab {tab_id}: {err}"
+                    )));
+                }
+            };
+            self.inner.attached_tabs.lock().await.insert(tab_id, epoch);
         }
 
         match self
-            .execute_cdp_raw_until(tab_id, method, params, deadline)
+            .execute_cdp_raw_until(tab_id, method, params, deadline, epoch)
             .await
         {
             Ok(raw) => Ok(raw),
@@ -1552,7 +1603,8 @@ impl Client {
 
     /// Mark a tab as attached (call after manual attach, e.g. from claim_user_tab).
     pub async fn mark_attached(&self, tab_id: i64) {
-        self.inner.attached_tabs.lock().await.insert(tab_id, true);
+        let epoch = self.inner.connection_epoch.load(Ordering::Acquire);
+        self.inner.attached_tabs.lock().await.insert(tab_id, epoch);
     }
 
     /// Clear all per-tab state (call on session finalize).
@@ -1575,14 +1627,97 @@ impl Client {
             .clone()
     }
 
-    async fn attach_tab_until(&self, tab_id: i64, deadline: Instant) -> Result<()> {
-        self.send_request_with_timeout(
+    /// Finish native attachment setup before callers can record a key/button
+    /// as possibly pressed. A setup failure must not trigger input cleanup.
+    pub(crate) async fn prepare_input(&self, tab_id: i64, deadline: Instant) -> Result<()> {
+        timeout_at(deadline, self.ensure_alive())
+            .await
+            .map_err(|_| BridgeError::Timeout("prepare input".into()))??;
+        let lock = self.tab_lock(tab_id).await;
+        let _guard = timeout_at(deadline, lock.lock())
+            .await
+            .map_err(|_| BridgeError::Timeout("prepare input".into()))?;
+        let epoch = self.inner.connection_epoch.load(Ordering::Acquire);
+        if self.inner.attached_tabs.lock().await.get(&tab_id) == Some(&epoch) {
+            remaining_before_write("prepare input", deadline)?;
+            return Ok(());
+        }
+        let _ = self.detach_tab_until(tab_id, deadline).await;
+        let epoch = match self.attach_tab_until(tab_id, deadline).await {
+            Ok(epoch) => epoch,
+            Err(error) => {
+                self.retire_current_tab_state(tab_id).await;
+                return Err(error);
+            }
+        };
+        self.inner.attached_tabs.lock().await.insert(tab_id, epoch);
+        remaining_before_write("prepare input", deadline)?;
+        Ok(())
+    }
+
+    async fn attach_tab_until(&self, tab_id: i64, deadline: Instant) -> Result<u64> {
+        let epoch = self.inner.connection_epoch.load(Ordering::Acquire);
+        self.send_request_once(
             "attach",
             Some(self.attach_params(tab_id)),
             remaining_before_write("attach", deadline)?,
+            Some(epoch),
         )
-        .await
-        .map(|_| ())
+        .await?;
+        if self.inner.connection_epoch.load(Ordering::Acquire) != epoch {
+            return Err(BridgeError::Connection(
+                "connection changed after attach; setup not verified".into(),
+            ));
+        }
+        // Match the native Browser client: make the attached page focused for
+        // CDP input without selecting its tab or focusing the browser window.
+        // Finish writing the frame before checking the elapsed deadline.
+        // Cancelling a backpressured frame would corrupt the next detach.
+        let focus = self
+            .execute_cdp_raw_until(
+                tab_id,
+                "Emulation.setFocusEmulationEnabled",
+                Some(json!({"enabled": true})),
+                deadline,
+                epoch,
+            )
+            .await
+            .and_then(|_| remaining_before_write("focus emulation", deadline));
+        if let Err(error) = focus {
+            if self.inner.connection_epoch.load(Ordering::Acquire) != epoch {
+                return Err(BridgeError::Connection(format!(
+                    "connection changed during attachment setup; setup not verified: {error}"
+                )));
+            }
+            let cleanup_deadline = Instant::now() + Duration::from_millis(500);
+            let _ = timeout_at(
+                cleanup_deadline,
+                self.detach_tab_until(tab_id, cleanup_deadline),
+            )
+            .await;
+            return Err(BridgeError::Protocol(format!(
+                "background focus emulation failed: {error}; no foreground activation or input was sent; detach was attempted"
+            )));
+        }
+        Ok(epoch)
+    }
+
+    pub(crate) async fn attach_tab(&self, tab_id: i64) -> Result<()> {
+        self.ensure_alive().await?;
+        let lock = self.tab_lock(tab_id).await;
+        let _guard = lock.lock().await;
+        let epoch = match self
+            .attach_tab_until(tab_id, Instant::now() + DEFAULT_REQUEST_TIMEOUT)
+            .await
+        {
+            Ok(epoch) => epoch,
+            Err(error) => {
+                self.retire_current_tab_state(tab_id).await;
+                return Err(error);
+            }
+        };
+        self.inner.attached_tabs.lock().await.insert(tab_id, epoch);
+        Ok(())
     }
 
     /// Replace the Browser Use network policy sent with every attach. The
@@ -1622,9 +1757,10 @@ impl Client {
         method: &str,
         params: Option<Value>,
         deadline: Instant,
+        epoch: u64,
     ) -> Result<Box<RawValue>> {
         let raw = self
-            .send_request_with_timeout(
+            .send_request_once(
                 "executeCdp",
                 Some(json!({
                     "target": { "tabId": tab_id },
@@ -1632,6 +1768,7 @@ impl Client {
                     "commandParams": params.unwrap_or_else(|| json!({}))
                 })),
                 remaining_before_write(method, deadline)?,
+                Some(epoch),
             )
             .await?;
         check_cdp_error(method, &raw)?;
@@ -1641,7 +1778,7 @@ impl Client {
     #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) async fn pending_len_for_test(&self) -> usize {
-        self.inner.pending.lock().await.len()
+        self.inner.pending.lock().unwrap().len()
     }
 
     #[cfg(test)]
@@ -2224,6 +2361,236 @@ mod reconnect_tests {
     }
 
     #[tokio::test]
+    async fn reconnected_first_input_attaches_and_emulates_focus_before_dispatch() {
+        let (first, mut old_peer) = duplex(8192);
+        let (second, mut new_peer) = duplex(8192);
+        let next = Arc::new(Mutex::new(Some(second)));
+        let factory: ConnectionFactory = Arc::new(move || {
+            let next = next.clone();
+            Box::pin(async move { Ok(Box::new(next.lock().await.take().unwrap()) as PipeStream) })
+        });
+        let client = Client::from_stream_with_factory(first, factory).unwrap();
+        let worker = client.clone();
+        let task = tokio::spawn(async move { worker.attach_tab(7).await });
+        assert_eq!(
+            reply_ok_and_return_request(&mut old_peer).await["method"],
+            "attach"
+        );
+        assert_eq!(
+            reply_ok_and_return_request(&mut old_peer).await["params"]["method"],
+            "Emulation.setFocusEmulationEnabled"
+        );
+        timeout(TEST_STATE_TIMEOUT, task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        drop(old_peer);
+        expect_alive(&client, false).await;
+
+        let worker = client.clone();
+        let task =
+            tokio::spawn(async move { crate::browser::cua_type(&worker, "7", "probe").await });
+        reply_ok(&mut new_peer).await; // identity verification
+        assert_eq!(
+            reply_ok_and_return_request(&mut new_peer).await["method"],
+            "detach"
+        );
+        assert_eq!(
+            reply_ok_and_return_request(&mut new_peer).await["method"],
+            "attach"
+        );
+        assert_eq!(
+            reply_ok_and_return_request(&mut new_peer).await["params"]["method"],
+            "Emulation.setFocusEmulationEnabled"
+        );
+        let input = reply_ok_and_return_request(&mut new_peer).await;
+        assert_eq!(input["params"]["method"], "Input.insertText");
+        assert_eq!(input["params"]["commandParams"]["text"], "probe");
+        timeout(TEST_STATE_TIMEOUT, task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        no_request(&mut new_peer, "input must not replay").await;
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn stale_attachment_epoch_never_writes_cdp_to_new_connection() {
+        let (client, mut peer) = test_client(8192).await;
+        let epoch = client.inner.connection_epoch.load(Ordering::Acquire);
+        client.inner.connection_epoch.fetch_add(1, Ordering::AcqRel);
+        let error = client
+            .execute_cdp_raw_until(
+                7,
+                "Input.insertText",
+                Some(json!({"text": "probe"})),
+                Instant::now() + TEST_STATE_TIMEOUT,
+                epoch,
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("no command was sent"));
+        no_request(&mut peer, "old attachment must not send on new epoch").await;
+        expect_pending_len(&client, 0).await;
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn observation_focus_timeout_detaches_before_returning() {
+        let (client, mut peer) = test_client(8192).await;
+        let worker = client.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .start_observation(7, Duration::from_millis(150))
+                .await
+        });
+        assert_eq!(
+            reply_ok_and_return_request(&mut peer).await["method"],
+            "detach"
+        );
+        assert_eq!(
+            reply_ok_and_return_request(&mut peer).await["method"],
+            "attach"
+        );
+        let focus = next_request(&mut peer).await;
+        assert_eq!(
+            focus["params"]["method"],
+            "Emulation.setFocusEmulationEnabled"
+        );
+        let rollback = reply_ok_and_return_request(&mut peer).await;
+        assert_eq!(rollback["method"], "detach");
+        assert!(timeout(TEST_STATE_TIMEOUT, task)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err());
+        expect_pending_len(&client, 0).await;
+        assert!(!client.inner.attached_tabs.lock().await.contains_key(&7));
+        no_request(&mut peer, "failed setup must not enable observation").await;
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn observer_invalid_session_does_not_reattach_inside_initialization() {
+        let (client, mut peer) = test_client(8192).await;
+        client.mark_attached(7).await;
+        let worker = client.clone();
+        let task = tokio::spawn(async move {
+            worker
+                .start_observation(7, Duration::from_millis(300))
+                .await
+        });
+        let enable = next_request(&mut peer).await;
+        assert_eq!(enable["params"]["method"], "Page.enable");
+        encode_frame(
+            &mut peer,
+            &json!({"id":enable["id"],"error":{"code":-32000,"message":"Debugger unattached"}}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            reply_ok_and_return_request(&mut peer).await["method"],
+            "detach"
+        );
+        assert!(timeout(TEST_STATE_TIMEOUT, task)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err());
+        no_request(
+            &mut peer,
+            "observer must not start another attach after invalidation",
+        )
+        .await;
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_backpressured_cleanup_retires_pipe_before_next_request() {
+        let (client, mut peer) = test_client(8).await;
+        let old = {
+            let mut store = client.inner.observations.lock().unwrap();
+            let snapshot = store.register(9).unwrap();
+            store
+                .finish_start(9, &snapshot.cursor, Some("complete"))
+                .unwrap()
+        };
+        let worker = client.clone();
+        let task = tokio::spawn(async move { worker.attach_tab(7).await });
+        assert_eq!(
+            reply_ok_and_return_request(&mut peer).await["method"],
+            "attach"
+        );
+        let focus = next_request(&mut peer).await;
+        encode_frame(
+            &mut peer,
+            &json!({"id":focus["id"],"error":{"code":-1,"message":"rejected"}}),
+        )
+        .await
+        .unwrap();
+        // Leave detach backpressured until its independent cleanup deadline.
+        assert!(timeout(TEST_STATE_TIMEOUT, task)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err());
+        assert!(!client.has_live_connection().await);
+        assert!(client.observation_snapshot(9).is_err());
+        assert!(client
+            .read_observed_events(9, Some(&old.cursor), &[], 1, 1024)
+            .is_err());
+        assert!(client.send_request("getInfo", None).await.is_err());
+        // The retired pipe ends in an incomplete frame; no later request is
+        // appended to it and mistaken for the detach payload.
+        assert!(timeout(TEST_STATE_TIMEOUT, decode_frame(&mut peer))
+            .await
+            .unwrap()
+            .is_err());
+        expect_pending_len(&client, 0).await;
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn expired_setup_ack_never_sends_press_or_release() {
+        for chord in [false, true] {
+            let (client, mut peer) = test_client(128).await;
+            let worker = client.clone();
+            let task = tokio::spawn(async move {
+                if chord {
+                    crate::browser::cua_keypress(&worker, "7", &["Control".into(), "a".into()])
+                        .await
+                } else {
+                    crate::pointer::click(&worker, 7, 10.0, 20.0, 1, 1, &[]).await
+                }
+            });
+            assert_eq!(
+                reply_ok_and_return_request(&mut peer).await["method"],
+                "detach"
+            );
+            assert_eq!(
+                reply_ok_and_return_request(&mut peer).await["method"],
+                "attach"
+            );
+            // Keep the focus frame backpressured beyond the input deadline.
+            tokio::time::sleep(Duration::from_millis(3100)).await;
+            assert!(timeout(TEST_STATE_TIMEOUT, decode_frame(&mut peer))
+                .await
+                .unwrap()
+                .is_err());
+            assert!(timeout(TEST_STATE_TIMEOUT, task)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_err());
+            assert!(!client.has_live_connection().await);
+            expect_pending_len(&client, 0).await;
+            client.shutdown().await;
+        }
+    }
+
+    #[tokio::test]
     async fn verified_stream_session_ids_are_reused_for_requests() {
         let (client_end, mut server) = duplex(4096);
         let client = Client::from_stream_inner_with_ids(
@@ -2330,6 +2697,74 @@ mod reconnect_tests {
     }
 
     #[tokio::test]
+    async fn externally_cancelled_request_removes_its_pending_registration() {
+        let (client, mut server) = test_client(4096).await;
+        client.mark_attached(7).await;
+        let handle = tokio::spawn({
+            let client = client.clone();
+            async move {
+                timeout(
+                    Duration::from_millis(50),
+                    client.execute_cdp_once_with_timeout(
+                        7,
+                        "Input.dispatchMouseEvent",
+                        Some(json!({"type":"mouseMoved","x":8,"y":9})),
+                        Duration::from_secs(5),
+                    ),
+                )
+                .await
+            }
+        });
+        let request = next_request(&mut server).await;
+        assert_eq!(request["params"]["method"], "Input.dispatchMouseEvent");
+        assert!(handle.await.unwrap().is_err());
+        assert_eq!(client.pending_len_for_test().await, 0);
+        assert!(
+            client.is_alive(),
+            "complete frame cancellation retired a healthy pipe"
+        );
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn attachment_epoch_change_reports_connection_loss_without_focus_or_rollback() {
+        let (client, mut server) = test_client(4096).await;
+        let handle = tokio::spawn({
+            let client = client.clone();
+            async move {
+                client
+                    .attach_tab_until(7, Instant::now() + Duration::from_secs(2))
+                    .await
+            }
+        });
+        let attach = next_request(&mut server).await;
+        assert_eq!(attach["method"], "attach");
+        let sender = client
+            .inner
+            .pending
+            .lock()
+            .unwrap()
+            .remove(&attach["id"].as_u64().unwrap())
+            .unwrap();
+        sender
+            .send(serde_json::from_value(json!({"id":attach["id"],"result":{}})).unwrap())
+            .unwrap();
+        client.inner.connection_epoch.fetch_add(1, Ordering::AcqRel);
+        let error = timeout(Duration::from_secs(2), handle)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(error, BridgeError::Connection(_)), "{error}");
+        no_request(
+            &mut server,
+            "stale attachment must not focus or detach a new connection",
+        )
+        .await;
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn execute_cdp_timeout_cleans_pending() {
         let (client, mut server) = test_client(4096).await;
         let handle = tokio::spawn({
@@ -2351,6 +2786,12 @@ mod reconnect_tests {
         let attach = reply_ok_and_return_request(&mut server).await;
         assert_eq!(attach["method"], "attach");
 
+        let focus = reply_ok_and_return_request(&mut server).await;
+        assert_eq!(
+            focus["params"]["method"],
+            "Emulation.setFocusEmulationEnabled"
+        );
+        assert_eq!(focus["params"]["commandParams"], json!({"enabled": true}));
         let req = next_request(&mut server).await;
         assert_eq!(req["method"], "executeCdp");
         expect_pending_len(&client, 1).await;
@@ -2370,6 +2811,7 @@ mod reconnect_tests {
                 "Runtime.evaluate",
                 Some(json!({"expression":"window.sideEffect = true"})),
                 Instant::now(),
+                client.inner.connection_epoch.load(Ordering::Acquire),
             )
             .await
             .unwrap_err();

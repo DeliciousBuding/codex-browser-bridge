@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "codex-computer": {
+      "command": "codex-browser-bridge",
+      "args": ["--surface", "computer", "--mode", "mcp"]
+    }
+  }
+}

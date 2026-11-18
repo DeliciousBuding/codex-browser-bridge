@@ -873,6 +873,13 @@ mod tools_call_tests {
         assert_eq!(attach["method"], "attach");
         assert_eq!(attach["params"]["tabId"], tab_id);
         reply_result(server, &attach, json!({})).await;
+        let focus = next_request(server).await;
+        assert_eq!(
+            focus["params"]["method"],
+            "Emulation.setFocusEmulationEnabled"
+        );
+        assert_eq!(focus["params"]["commandParams"], json!({"enabled": true}));
+        reply_result(server, &focus, json!({})).await;
     }
 
     async fn call(server: &Server, request: Value) -> Value {

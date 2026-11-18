@@ -6,7 +6,7 @@
   <h1 align="center">codex-browser-bridge</h1>
   <p align="center">
     Let Claude Code and other MCP agents control your existing browser profile through the ChatGPT desktop app's browser extension.
-    <br>66 MCP tools. Pure Rust. Single binary.
+    <br>66 browser tools plus opt-in native Computer Use. Single Rust binary.
   </p>
 </p>
 
@@ -37,7 +37,7 @@ No browser profile copying. No WebDriver. No remote setup. It discovers the
 each live browser-extension instance, speaks the same JSON-RPC protocol, and
 exposes 66 MCP tools for browser automation.
 
-This README describes v2.0.0: 66 MCP tools (`basic` 46 / `network` 65 /
+The browser surface has 66 MCP tools (`basic` 46 / `network` 65 /
 `full` 66), distributed as Windows and Linux GNU packages.
 
 Upgrading from 1.x? Read [the upgrade guide](docs/upgrade-v2.md) before updating
@@ -47,6 +47,14 @@ The goal is complete browser capability access for non-Codex agents. Coverage
 is tracked by method and semantics in [the parity matrix](docs/official-parity.md);
 a tool count or an alternative CLI does not establish full parity. App-private
 services and remaining locator differences are explicitly recorded there.
+
+Native Computer Use is an explicit second surface: `--surface computer` connects
+to the installed Codex `cua_repl` MCP service. MCP and CLI reuse its execution,
+objects, application approval, images and platform errors. The default Claude
+plugin remains browser-only. See [setup, CLI and verification status](docs/native-computer-use.md)
+and [the opt-in MCP example](examples/native-computer-use.json). The guide
+separates protocol, build and live acceptance for each candidate and platform.
+Windows input, macOS and Wayland still have acceptance gaps.
 
 > **Naming note:** OpenAI now documents this surface as the **ChatGPT browser extension**. The underlying `codex-browser-use` pipe and JSON-RPC method names still use the Codex-era identifiers, so this project keeps its `codex_*` tool surface for compatibility.
 
@@ -331,9 +339,20 @@ JavaScript, CDP, or screenshot payloads by accident:
   after the change, not to tabs already attached.
 - `CODEX_BRIDGE_SOCKET_DIR` overrides Unix socket discovery. Without it,
   `$XDG_RUNTIME_DIR/codex-browser-use` is tried before `/tmp/codex-browser-use`.
-- `CODEX_BRIDGE_NO_AUTO_FOREGROUND=1` disables the automatic hidden-tab
-  activation before synthesized input. The default is to activate the tab;
-  disabling it can restore the old silent-input risk.
+- Attachments enable `Emulation.setFocusEmulationEnabled`, matching the native
+  Codex Browser client. Input and screenshot calls do not activate tabs
+  or focus browser windows. If setup fails, no input is sent and the error is
+  reported. `codex_bring_to_front` is available for an explicit request to view
+  a tab. The former `CODEX_BRIDGE_NO_AUTO_FOREGROUND` workaround is no longer
+  needed and has no effect.
+- Scrolling keeps the native extension's `Input.synthesizeScrollGesture` path.
+  Some background renderers delay that gesture and its acknowledgment. A
+  timeout is an unknown outcome: inspect the page before another scroll, since
+  the original gesture can arrive later. The bridge never retries the input or
+  activates the tab automatically. Browser debug indicators and page dialogs
+  can still be visible; desktop automation has separate focus requirements.
+- Background screenshots can still time out or lose a renderer attachment.
+  Focus emulation is not a guarantee of capture availability; errors are reported.
 
 `codex://tabs` is available as an MCP resource for clients that support resources. It returns tabs owned by the current bridge session, not every Chrome tab. The prompt templates `login` and `extract-table` are also exposed for clients that support MCP prompts.
 
@@ -402,7 +421,7 @@ downloads. See [parity contracts](docs/official-parity.md).
 | `codex_screenshot` | Capture viewport screenshot; oversized images return a summary |
 | `codex_screenshot_element` | Capture a single element by selector; oversized images return a summary |
 | `codex_print_pdf` | Render page to PDF via bounded CDP stream; returns a size summary, not embedded PDF bytes |
-| `codex_bring_to_front` | Activate a background tab (fixes screenshot timeouts) |
+| `codex_bring_to_front` | Explicitly activate a tab when the user wants to view it |
 | `codex_dialog` | Handle alert / confirm / prompt |
 | `codex_performance_metrics` | DOM nodes, JS heap, event listeners (Performance) |
 

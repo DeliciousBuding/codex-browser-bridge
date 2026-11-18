@@ -15,17 +15,23 @@ entry and the progressive `codex-browser` skill:
 claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
 ```
 
-The Claude plugin uses the `full` 61-tool source profile because Claude Code defers
+The Claude plugin uses the `full` 66-tool source profile because Claude Code defers
 tool schemas through tool search. The manual JSON examples below are the
 fallback for MCP clients without plugin or tool-search support and use the
-`full` profile so they expose the same source capability set. Set `basic` (42)
-or `network` (60) only when deliberately reducing the surface. They require a
+`full` profile so they expose the same source capability set. Set `basic` (46)
+or `network` (65) only when deliberately reducing the surface. They require a
 global `npm i -g` install or an
 absolute command path.
 
 Codex and ChatGPT desktop already control the browser extension natively. Do
 not install this bridge as a Codex plugin; these examples are for non-Codex MCP
 clients that need to reuse the same browser session.
+
+Native application automation is opt-in through
+[native-computer-use.json](native-computer-use.json). It starts
+`--surface computer` and exposes the installed native `cua_repl` catalog,
+separately from browser profiles. The MCP client must support native application
+elicitation. See [native setup and platform status](../docs/native-computer-use.md).
 
 ## Supported clients
 

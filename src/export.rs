@@ -44,7 +44,7 @@ fn export_type(format: &str) -> Result<ExportType> {
 fn tab_number(tab_id: &str) -> Result<i64> {
     tab_id
         .parse::<i64>()
-        .map_err(|_| BridgeError::User(format!("export requires numeric tab_id, got {:?}", tab_id)))
+        .map_err(|_| BridgeError::User(format!("export requires numeric tab_id, got {tab_id:?}")))
 }
 
 fn runtime_string(raw: &serde_json::value::RawValue) -> Result<String> {

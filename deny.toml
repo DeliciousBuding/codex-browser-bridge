@@ -3,17 +3,25 @@
 # Runs in .github/workflows/supply-chain.yml on every PR and weekly.
 
 [graph]
-# Lint against the exact targets we ship (Windows x64 + arm64).
+# Cover released binaries and the macOS source-build checks.
 targets = [
     { triple = "x86_64-pc-windows-msvc" },
     { triple = "aarch64-pc-windows-msvc" },
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-unknown-linux-gnu" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-apple-darwin" },
 ]
 
 [advisories]
 # Fail the build on any known vulnerability or yanked crate.
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
-ignore = []
+ignore = [
+    # Informational maintenance notice, not a vulnerability exception. The
+    # upstream rmcp SDK still requires chrono and exposes no replacement.
+    { id = "RUSTSEC-2026-0543", reason = "rmcp 3.9.0 transitively requires chrono; revisit when upstream replaces it" },
+]
 
 [licenses]
 # Permissive licenses only. Kept tight on purpose: if a future dependency

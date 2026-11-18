@@ -36,6 +36,7 @@ async fn start(server: &mut DuplexStream, events: bool) {
         reply(server, &req, json!({})).await;
     }
     for method in [
+        "Emulation.setFocusEmulationEnabled",
         "Page.enable",
         "Page.setLifecycleEventsEnabled",
         "Runtime.enable",
@@ -260,6 +261,12 @@ async fn failed_or_timed_out_start_does_not_leave_active_observation() {
     let req = request(&mut server).await;
     assert_eq!(req["method"], "attach");
     reply(&mut server, &req, json!({})).await;
+    let focus = request(&mut server).await;
+    assert_eq!(
+        focus["params"]["method"],
+        "Emulation.setFocusEmulationEnabled"
+    );
+    reply(&mut server, &focus, json!({})).await;
     assert_eq!(
         request(&mut server).await["params"]["method"],
         "Page.enable"

@@ -12,6 +12,7 @@ pub mod input;
 pub mod locator;
 pub mod logging;
 pub mod mcp;
+pub mod native;
 pub mod network_policy;
 pub mod observation;
 pub mod page_assets;

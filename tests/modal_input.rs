@@ -35,6 +35,7 @@ async fn start(client: &Client, peer: &mut DuplexStream) {
     for method in [
         "detach",
         "attach",
+        "Emulation.setFocusEmulationEnabled",
         "Page.enable",
         "Page.setLifecycleEventsEnabled",
         "Runtime.enable",
@@ -67,14 +68,6 @@ async fn begin_click(
 ) -> tokio::task::JoinHandle<codex_browser_bridge::error::Result<()>> {
     let worker = client.clone();
     let task = tokio::spawn(async move { pointer::click(&worker, 7, 10.0, 20.0, 1, 1, &[]).await });
-    let request = next(peer).await;
-    assert_eq!(request["params"]["method"], "Runtime.evaluate");
-    reply(
-        peer,
-        &request,
-        json!({"result":{"type":"string","value":"visible"}}),
-    )
-    .await;
     let request = next(peer).await;
     assert_eq!(request["params"]["commandParams"]["type"], "mousePressed");
     reply(peer, &request, json!({})).await;
@@ -217,13 +210,6 @@ async fn modal_opened_on_press_is_not_evidence_that_release_was_delivered() {
     start(&client, &mut peer).await;
     let worker = client.clone();
     let task = tokio::spawn(async move { pointer::click(&worker, 7, 10.0, 20.0, 1, 1, &[]).await });
-    let request = next(&mut peer).await;
-    reply(
-        &mut peer,
-        &request,
-        json!({"result":{"type":"string","value":"visible"}}),
-    )
-    .await;
     let press = next(&mut peer).await;
     assert_eq!(press["params"]["commandParams"]["type"], "mousePressed");
     event(

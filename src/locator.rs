@@ -345,11 +345,6 @@ async fn run_until(
     actionable: bool,
     deadline: Instant,
 ) -> Result<Value> {
-    if matches!(action, "press" | "type" | "press_sequentially")
-        && spec.get("trial") != Some(&json!(true))
-    {
-        crate::pointer::ensure_foreground(client, tab, deadline).await?;
-    }
     let mut previous: Option<Value> = None;
     let mut last_error = "target did not become actionable".to_string();
     let mut result = loop {

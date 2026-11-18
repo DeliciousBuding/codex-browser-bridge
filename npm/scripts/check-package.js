@@ -11,12 +11,14 @@ function requiredFilesForEnv(env = process.env) {
     "README.md",
     "LICENSE",
     "docs/upgrade-v2.md",
+    "docs/native-computer-use.md",
     "scripts/install.js",
     "bin/codex-browser-bridge.js",
     "examples/README.md",
     "examples/claude-code.json",
     "examples/cursor.json",
     "examples/hermes-agent.json",
+    "examples/native-computer-use.json",
     "examples/openclaw.json",
     "skills/codex-browser/SKILL.md",
     "skills/codex-browser/references/tabs-navigation.md",
@@ -25,6 +27,7 @@ function requiredFilesForEnv(env = process.env) {
     "skills/codex-browser/references/recovery-safety.md",
     "skills/codex-browser/references/cli.md",
     "skills/codex-browser/references/official-parity.md",
+    "skills/codex-browser/references/native-computer-use.md",
   ];
 
   if (env.CODEX_BRIDGE_REQUIRE_CHECKSUMS === "1") {

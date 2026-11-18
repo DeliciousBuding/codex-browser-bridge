@@ -262,7 +262,7 @@ fn normalize(name: &str) -> Result<KeySpec> {
             let c = l.as_bytes()[2] as char;
             (c.to_string(), format!("Numpad{c}"), 96 + (c as i64 - '0' as i64), Some(c.to_string()), Some(c.to_string()))
         }
-        _ => return Err(BridgeError::User(format!("unsupported key {:?}", name))),
+        _ => return Err(BridgeError::User(format!("unsupported key {name:?}"))),
     };
     Ok(KeySpec {
         key,
@@ -477,11 +477,18 @@ pub async fn keypress(client: &Client, tab: i64, keys: &[String]) -> Result<()> 
     let mut mask = 0u8;
     let mut pressed: Vec<&KeySpec> = Vec::new();
     let deadline = Instant::now() + OP_TIMEOUT;
+    client.prepare_input(tab, deadline).await?;
     let result: Result<()> = async {
         for m in &modifiers {
+            if Instant::now() >= deadline {
+                return Err(BridgeError::Timeout("key operation deadline".into()));
+            }
             mask |= m.modifier;
             pressed.push(m);
             send_until(client, tab, m, "keyDown", mask, false, deadline).await?;
+        }
+        if Instant::now() >= deadline {
+            return Err(BridgeError::Timeout("key operation deadline".into()));
         }
         pressed.push(final_key);
         send_until(

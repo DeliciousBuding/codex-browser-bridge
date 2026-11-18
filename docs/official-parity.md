@@ -1,5 +1,9 @@
 # Official browser capability parity
 
+The opt-in native desktop surface is documented separately in
+[Native Computer Use](native-computer-use.md). It reuses the installed native
+MCP runtime rather than mapping desktop methods onto the browser tools below.
+
 The target is the user-owned Chromium extension backend used by the official
 Browser plugin, exposed to Claude Code and other MCP clients. Complete parity
 requires matching inputs, results, lifecycle, and failure behavior. Tool counts
@@ -151,7 +155,7 @@ implementation of an action does not establish full locator parity.
 
 | Interface / members | Mapping | Remaining behavior or boundary |
 |---|---|---|
-| `CUAAPI.click`, `double_click`, `move`, `scroll`, `type`, `keypress`, `drag` | CDP partial | One shared pointer dispatcher supports button 1..5, modifier names, exact drag paths and failure-safe release; mutations are not replayed. Synthesized input activates a hidden tab first, because Chrome acknowledges input for an occluded tab without delivering it | Scroll uses `Input.synthesizeScrollGesture`. Current extension builds do not acknowledge `mouseMoved`, so movement uses a bounded 3-second dispatch window. Human-like timing, hold duration and coordinate downloadMedia remain |
+| `CUAAPI.click`, `double_click`, `move`, `scroll`, `type`, `keypress`, `drag` | CDP partial | One shared pointer dispatcher supports button 1..5, modifier names, exact drag paths and failure-safe release; mutations are not replayed. Attach enables native `Emulation.setFocusEmulationEnabled` before CDP work; input does not activate tabs or focus windows | Scroll uses `Input.synthesizeScrollGesture`. Background gestures can time out and arrive later; inspect page state before another action. Movement requires an acknowledgment within its bounded window. Human-like timing, hold duration and coordinate downloadMedia remain |
 | `CUAAPI.downloadMedia` | Implementable, transport-dependent | Coordinate-to-media resolution and verified saved-file handling |
 | `DomCUAAPI.click`, `double_click`, `keypress`, `type` | CDP partial | Backend-node actions exist; official visible-DOM local refs are not raw AX IDs |
 | `DomCUAAPI.get_visible_dom`, `scroll`, `downloadMedia` | Implementable | Current visible DOM text has no actionable refs; add document/frame-bound refs, node-targeted scroll and media resolution |

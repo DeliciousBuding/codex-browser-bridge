@@ -59,11 +59,16 @@ extraction, not as the first choice for a task already covered by a typed tool.
 | `codex_screenshot` | Capture the viewport as PNG, JPEG, or WebP |
 | `codex_screenshot_element` | Capture one element through a clipped screenshot |
 | `codex_print_pdf` | Render a bounded PDF and return a size summary |
-| `codex_bring_to_front` | Activate a tab that is background-throttled |
+| `codex_bring_to_front` | Explicitly activate a tab when the user asks to view it |
 | `codex_dialog` | Accept or dismiss alert, confirm, or prompt dialogs |
 
-Screenshots on inactive tabs can time out. Call `codex_bring_to_front` first.
+Native focus emulation supports background capture without activating the tab.
+A capture timeout is reported; do not silently bring the user's browser forward.
 Prefer JPEG with an explicit quality when screenshot token size matters.
+
+Scroll uses the native extension's `Input.synthesizeScrollGesture`. A background
+gesture may time out and execute later. Inspect the resulting page state before
+another scroll; neither replay the gesture nor activate the tab automatically.
 
 ## Input
 
