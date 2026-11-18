@@ -1386,8 +1386,33 @@ impl super::Server {
         let action = required_str(&args, "action")?;
         let client = self.client_snapshot();
         if action == "element_info" {
+            crate::locator::validate_spec(&args)?;
+            for unsupported in [
+                "role",
+                "name",
+                "text",
+                "test_id",
+                "placeholder",
+                "label",
+                "frame_selectors",
+                "scopes",
+                "has_text",
+                "has_not_text",
+                "has",
+                "has_not",
+                "and",
+                "or",
+                "nth",
+            ] {
+                if args.get(unsupported).is_some() {
+                    anyhow::bail!(
+                        "locator action=element_info supports CSS selector only; '{unsupported}' is unsupported"
+                    );
+                }
+            }
             let selector = required_str(&args, "selector")?;
-            let info = browser::element_info(&client, tab_id, selector).await?;
+            let strict = optional_bool(&args, "strict")?.unwrap_or(true);
+            let info = browser::element_info_with_strict(&client, tab_id, selector, strict).await?;
             return Ok(vec![Content::text(serde_json::to_string(&info)?)]);
         }
         crate::locator::validate_spec(&args)?;

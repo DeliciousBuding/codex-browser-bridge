@@ -1,0 +1,1496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>codex-browser-bridge — Codex Browser Use + Native Computer Use for every agent</title>
+<meta name="description" content="Break the wall: 66 browser MCP tools over the ChatGPT desktop app's extension pipe, plus opt-in native Codex Computer Use through cua_repl. One Rust binary. Zero SDK bloat.">
+<meta name="theme-color" content="#06070a">
+<link rel="canonical" href="https://deliciousbuding.github.io/codex-browser-bridge/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="codex-browser-bridge — Break the Wall">
+<meta property="og:description" content="Codex Browser Use + Native Computer Use for every MCP agent. Single Rust binary, 66 browser tools, 4 native cua tools.">
+<meta property="og:url" content="https://deliciousbuding.github.io/codex-browser-bridge/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23090b10'/%3E%3Cpath d='M8 11h9a5 5 0 0 1 0 10H8' stroke='%237aa2ff' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Cpath d='M8 21h9a5 5 0 0 0 0-10H8' stroke='%235eead4' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root{
+    color-scheme:dark;
+    --bg:#06070a;
+    --bg-2:#090b11;
+    --panel:#0c0f16;
+    --panel-2:#10141d;
+    --line:#1a202c;
+    --line-2:#283143;
+    --text:#e9ecf3;
+    --muted:#98a1b6;
+    --dim:#606b83;
+    --accent:#7aa2ff;
+    --accent-soft:rgba(122,162,255,.14);
+    --teal:#5eead4;
+    --violet:#b49bff;
+    --violet-soft:rgba(180,155,255,.12);
+    --green:#4ade80;
+    --green-soft:rgba(74,222,128,.12);
+    --amber:#fbbf24;
+    --mono:"JetBrains Mono","Fira Code","SFMono-Regular",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
+    --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    --r:14px;
+    --max:1180px;
+  }
+  *,*::before,*::after{box-sizing:border-box}
+  html{scroll-behavior:smooth;scroll-padding-top:80px}
+  html[data-lang="zh"] body{letter-spacing:0}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    font-size:16px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    overflow-x:hidden;
+  }
+  body::before{
+    content:"";
+    position:fixed;
+    inset:0;
+    z-index:-2;
+    background:
+      radial-gradient(900px 520px at 78% -8%, rgba(122,162,255,.13), transparent 60%),
+      radial-gradient(720px 480px at 8% 12%, rgba(94,234,212,.07), transparent 62%),
+      radial-gradient(680px 520px at 52% 108%, rgba(180,155,255,.06), transparent 65%),
+      linear-gradient(180deg,#06070a 0%,#07090d 55%,#06070a 100%);
+  }
+  body::after{
+    content:"";
+    position:fixed;
+    inset:0;
+    z-index:-1;
+    pointer-events:none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.026) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.026) 1px, transparent 1px);
+    background-size:64px 64px;
+    mask-image:radial-gradient(1100px 700px at 50% 0%, #000 0%, transparent 78%);
+    -webkit-mask-image:radial-gradient(1100px 700px at 50% 0%, #000 0%, transparent 78%);
+  }
+  ::selection{background:rgba(122,162,255,.32);color:#fff}
+  a{color:inherit;text-decoration:none}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  img,svg{display:block;max-width:100%}
+  code,pre,kbd{font-family:var(--mono)}
+  .wrap{width:min(var(--max),calc(100% - 48px));margin-inline:auto}
+  .mono{font-family:var(--mono)}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+  /* ---------- nav ---------- */
+  .nav{
+    position:sticky;top:0;z-index:50;
+    backdrop-filter:blur(14px) saturate(140%);
+    -webkit-backdrop-filter:blur(14px) saturate(140%);
+    background:rgba(6,7,10,.72);
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  .nav-in{display:flex;align-items:center;gap:28px;height:64px}
+  .brand{display:flex;align-items:center;gap:11px;font-family:var(--mono);font-size:13.5px;font-weight:600;letter-spacing:.2px;white-space:nowrap}
+  .brand svg{width:26px;height:26px;flex:none}
+  .brand b{font-weight:600;color:var(--text)}
+  .brand span{color:var(--dim);font-weight:500}
+  .nav-links{display:flex;align-items:center;gap:26px;margin-left:auto}
+  .nav-links a{font-size:13.5px;color:var(--muted);letter-spacing:.1px;transition:color .18s}
+  .nav-links a:hover{color:var(--text)}
+  .nav-right{display:flex;align-items:center;gap:14px;margin-left:auto}
+  .lang{display:flex;align-items:center;padding:3px;border:1px solid var(--line-2);border-radius:9px;background:rgba(255,255,255,.025)}
+  .lang button{
+    font-family:var(--mono);font-size:11.5px;line-height:1;letter-spacing:.4px;
+    padding:6px 9px;border-radius:6px;color:var(--dim);transition:color .15s,background .15s;
+  }
+  .lang button[aria-pressed="true"]{background:rgba(255,255,255,.09);color:var(--text)}
+  .lang button:hover{color:var(--text)}
+  .gh-btn{
+    display:inline-flex;align-items:center;gap:7px;
+    font-family:var(--mono);font-size:12px;letter-spacing:.2px;
+    padding:8px 12px;border:1px solid var(--line-2);border-radius:9px;
+    color:var(--muted);background:rgba(255,255,255,.025);transition:.18s;
+    white-space:nowrap;
+  }
+  .gh-btn:hover{border-color:#3a4761;color:var(--text);background:rgba(255,255,255,.05)}
+  .gh-btn svg{width:15px;height:15px}
+
+  /* ---------- hero ---------- */
+  .hero{padding:clamp(56px,8vw,104px) 0 clamp(44px,6vw,72px)}
+  .hero-grid{display:grid;grid-template-columns:1.12fr .88fr;gap:clamp(36px,5vw,64px);align-items:center}
+  .hero-grid > *{min-width:0}
+  .eyebrow{
+    display:inline-flex;align-items:center;flex-wrap:wrap;row-gap:4px;gap:9px;
+    max-width:100%;
+    font-family:var(--mono);font-size:11.5px;letter-spacing:1.1px;text-transform:uppercase;
+    color:var(--muted);
+    padding:6px 11px;border:1px solid var(--line-2);border-radius:999px;
+    background:rgba(255,255,255,.02);
+  }
+  .eyebrow > span{white-space:nowrap}
+  .eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 10px rgba(74,222,128,.8)}
+  .eyebrow .sep{color:#3a4356}
+  .hero h1{
+    margin:22px 0 0;
+    font-size:clamp(34px,4.55vw,54px);
+    line-height:1.06;
+    letter-spacing:-.03em;
+    font-weight:600;
+  }
+  .eyebrow .ver{text-transform:none}
+  html[data-lang="zh"] .eyebrow{letter-spacing:.4px}
+  html[data-lang="zh"] .hero h1{letter-spacing:-.02em}
+  .hero h1 .grad{
+    background:linear-gradient(96deg,#9db9ff 0%,#7aa2ff 34%,#5eead4 78%,#b49bff 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .hero h1 .thin{color:#aab3c7;font-weight:500}
+  .lede{margin:20px 0 0;max-width:56ch;color:var(--muted);font-size:clamp(15px,1.5vw,17px);line-height:1.68}
+  .lede strong{color:#d6dcea;font-weight:500}
+  .install{margin-top:28px}
+  .install-label{font-family:var(--mono);font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);margin-bottom:9px}
+  .cmd{
+    display:flex;align-items:center;gap:12px;
+    border:1px solid var(--line-2);border-radius:12px;
+    background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.015));
+    padding:11px 11px 11px 15px;
+    box-shadow:0 12px 40px -22px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.04);
+  }
+  .cmd .prompt{color:var(--teal);font-family:var(--mono);font-size:13px;flex:none;user-select:none}
+  .cmd code{
+    font-size:12.5px;color:#dbe2f0;white-space:normal;overflow-wrap:normal;flex:1;min-width:0;
+    line-height:1.65;padding-block:1px;
+  }
+  .cmd code .nowrap{white-space:nowrap}
+  .copy{
+    display:inline-flex;align-items:center;gap:6px;flex:none;
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.3px;
+    padding:7px 10px;border-radius:8px;border:1px solid var(--line-2);
+    color:var(--muted);background:rgba(255,255,255,.03);transition:.18s;
+  }
+  .copy:hover{color:var(--text);border-color:#3a4761}
+  .copy.copied{color:#0a1510;background:var(--green);border-color:var(--green)}
+  .copy svg{width:13px;height:13px}
+  .quick{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .quick a{
+    display:inline-flex;align-items:center;gap:7px;
+    font-size:12.5px;color:var(--muted);
+    padding:7px 11px;border:1px solid var(--line);border-radius:8px;
+    background:rgba(255,255,255,.015);transition:.18s;
+  }
+  .quick a:hover{color:var(--text);border-color:var(--line-2);background:rgba(255,255,255,.035)}
+  .quick a .arr{color:var(--dim);font-family:var(--mono);font-size:11px;transition:transform .18s}
+  .quick a:hover .arr{transform:translate(1px,-1px);color:var(--accent)}
+  .hero-note{margin-top:16px;font-family:var(--mono);font-size:11.5px;color:var(--dim);letter-spacing:.2px}
+
+  /* terminal */
+  .term-wrap{position:relative;min-width:0}
+  .term-wrap::before{
+    content:"";position:absolute;inset:-16% 0;z-index:-1;
+    background:radial-gradient(closest-side,rgba(122,162,255,.2),transparent 72%);
+    filter:blur(10px);
+  }
+  .term{
+    border:1px solid var(--line-2);border-radius:14px;overflow:hidden;
+    background:linear-gradient(180deg,#0c0f16,#080a0f);
+    box-shadow:0 40px 90px -40px rgba(0,0,0,.95),0 0 0 1px rgba(255,255,255,.02) inset,0 1px 0 rgba(255,255,255,.06) inset;
+    transform:perspective(1200px) rotateX(1.4deg) rotateY(-1.2deg);
+  }
+  @media (max-width:980px){.term{transform:none}}
+  .term-bar{
+    display:flex;align-items:center;gap:8px;
+    padding:11px 14px;border-bottom:1px solid var(--line);
+    background:rgba(255,255,255,.022);
+  }
+  .tl{display:flex;gap:6px}
+  .tl i{width:10px;height:10px;border-radius:50%;background:#2a3140}
+  .tl i:nth-child(1){background:#3d4456}
+  .tl i:nth-child(2){background:#3d4456}
+  .tl i:nth-child(3){background:#3d4456}
+  .term-title{margin-left:8px;font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.4px}
+  .term-live{margin-left:auto;font-family:var(--mono);font-size:10.5px;letter-spacing:.6px;color:#7ee0ba;display:flex;align-items:center;gap:6px}
+  .term-live i{width:5px;height:5px;border-radius:50%;background:var(--green);box-shadow:0 0 8px rgba(74,222,128,.9);animation:pulse 2.4s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .term-body{padding:16px 16px 18px;font-family:var(--mono);font-size:12.2px;line-height:1.85;color:#aeb8cc;overflow-x:auto}
+  .term-body .row{white-space:nowrap;min-width:max-content}
+  .term-body .t-dim{color:#586379}
+  .term-body .t-cmd{color:#e2e8f4}
+  .term-body .t-ok{color:#63d6a4}
+  .term-body .t-tool{color:#8fb4ff}
+  .term-body .t-arrow{color:#4a5468}
+  .term-body .t-val{color:#c8d0e0}
+  .term-body .t-warn{color:#e9c46a}
+  .term-body .sp{height:13px}
+  .term-foot{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;padding-top:13px;border-top:1px dashed #202736;font-family:var(--mono);font-size:10.5px;color:#586379;letter-spacing:.3px}
+  .term-foot b{color:#8fb4ff;font-weight:500}
+
+  /* ---------- stats ---------- */
+  .stats{border-block:1px solid var(--line);background:rgba(255,255,255,.012)}
+  .stats-in{display:grid;grid-template-columns:repeat(4,1fr)}
+  .stat{padding:24px 26px;border-left:1px solid var(--line)}
+  .stat:first-child{border-left:0;padding-left:0}
+  .stat .n{font-family:var(--mono);font-size:clamp(24px,3vw,32px);font-weight:600;letter-spacing:-.02em;color:#eef1f8;line-height:1.1}
+  .stat .n em{font-style:normal;color:var(--accent);font-size:.62em;margin-left:2px}
+  .stat .l{margin-top:5px;font-size:11.5px;font-family:var(--mono);letter-spacing:.4px;color:var(--dim);text-transform:uppercase}
+
+  /* ---------- sections ---------- */
+  section{position:relative}
+  .sec{padding:clamp(58px,8vw,96px) 0}
+  .sec-head{max-width:760px;margin-bottom:clamp(32px,4vw,48px)}
+  .kicker{
+    display:flex;align-items:center;gap:12px;
+    font-family:var(--mono);font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--dim);
+    margin-bottom:16px;
+  }
+  .kicker .hash{color:var(--accent)}
+  .kicker::after{content:"";height:1px;flex:1;max-width:120px;background:linear-gradient(90deg,var(--line-2),transparent)}
+  .sec-head h2{margin:0;font-size:clamp(26px,3.4vw,38px);line-height:1.16;letter-spacing:-.024em;font-weight:600}
+  .sec-head p{margin:14px 0 0;color:var(--muted);font-size:15.5px;line-height:1.68;max-width:660px}
+  .sec-head p code{color:#c7d2e6;font-size:.9em;background:rgba(255,255,255,.045);padding:1px 5px;border-radius:4px}
+
+  /* surfaces */
+  .surfaces{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .surface{
+    position:relative;display:flex;flex-direction:column;
+    border:1px solid var(--line);border-radius:var(--r);
+    background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.008));
+    padding:26px;overflow:hidden;
+    transition:border-color .25s,transform .25s,box-shadow .25s;
+  }
+  .surface::before{
+    content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;
+    background:radial-gradient(520px 260px at 12% 0%,var(--glow),transparent 70%);
+    opacity:.9;
+  }
+  .surface:hover{transform:translateY(-2px);border-color:var(--line-2);box-shadow:0 30px 70px -45px rgba(0,0,0,.9)}
+  .surface.computer{--glow:rgba(180,155,255,.10);--sc:var(--violet);--sc-soft:var(--violet-soft)}
+  .surface.browser{--glow:rgba(74,222,128,.085);--sc:var(--green);--sc-soft:var(--green-soft)}
+  .s-top{position:relative;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .s-tag{
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.2px;color:var(--sc);
+    padding:4px 8px;border-radius:6px;border:1px solid color-mix(in srgb,var(--sc) 28%,transparent);
+    background:var(--sc-soft);
+  }
+  .s-status{
+    margin-left:auto;font-family:var(--mono);font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);
+    padding:3px 7px;border:1px solid var(--line);border-radius:5px;
+  }
+  .surface h3{position:relative;margin:18px 0 0;font-size:22px;line-height:1.28;letter-spacing:-.018em;font-weight:600}
+  .surface h3 span{color:var(--sc)}
+  .s-copy{position:relative;margin:11px 0 0;color:var(--muted);font-size:14px;line-height:1.66}
+  .s-code{
+    position:relative;margin:18px 0 0;
+    border:1px solid var(--line);border-radius:10px;background:rgba(3,4,7,.55);
+    padding:11px 13px;font-family:var(--mono);font-size:11.5px;line-height:1.75;color:#9fb0c9;
+    overflow-x:auto;white-space:pre;
+  }
+  .s-code .k{color:#c9a8ff}
+  .s-code .s{color:#8fd6a9}
+  .s-code .d{color:#6b768c}
+  .surface.browser .s-code .k{color:#8ce6b9}
+  .s-list{position:relative;margin:20px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+  .s-list li{display:flex;gap:10px;font-size:13.2px;line-height:1.55;color:#b6c0d2}
+  .s-list li::before{
+    content:"";flex:none;width:5px;height:5px;margin-top:8px;border-radius:1px;
+    background:var(--sc);transform:rotate(45deg);opacity:.85;
+  }
+  .s-list li b{color:#e2e7f2;font-weight:500}
+  .s-foot{position:relative;margin-top:auto;padding-top:22px}
+  .s-foot a{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12px;color:var(--sc);letter-spacing:.2px}
+  .s-foot a:hover{text-decoration:underline;text-underline-offset:4px}
+
+  .arch{
+    margin-top:20px;border:1px solid var(--line);border-radius:var(--r);
+    background:rgba(255,255,255,.015);padding:22px 24px;
+  }
+  .arch-flow{display:flex;align-items:stretch;gap:10px;flex-wrap:wrap}
+  .arch-node{
+    flex:1 1 150px;min-width:140px;border:1px solid var(--line);border-radius:10px;
+    background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.01));
+    padding:12px 14px;
+  }
+  .arch-node .t{font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--dim)}
+  .arch-node .v{margin-top:5px;font-family:var(--mono);font-size:12px;color:#d3daea;line-height:1.5}
+  .arch-node.hot{border-color:rgba(122,162,255,.4);background:linear-gradient(180deg,rgba(122,162,255,.1),rgba(122,162,255,.02));box-shadow:0 0 30px -18px rgba(122,162,255,.6)}
+  .arch-node.hot .v{color:#bcd0ff}
+  .arch-arrow{align-self:center;color:#39445a;font-family:var(--mono);font-size:14px;flex:none}
+  .arch-note{margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.7}
+
+  /* ---------- code switcher ---------- */
+  .code-shell{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:rgba(8,10,15,.7);box-shadow:0 40px 90px -60px #000}
+  .tabs{display:flex;gap:2px;padding:8px 8px 0;border-bottom:1px solid var(--line);background:rgba(255,255,255,.018);overflow-x:auto;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{
+    position:relative;display:inline-flex;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:12px;letter-spacing:.1px;color:var(--dim);
+    padding:11px 14px 12px;border-radius:8px 8px 0 0;white-space:nowrap;transition:.16s;
+  }
+  .tab .idx{font-size:10px;color:#48536a;border:1px solid var(--line);border-radius:4px;padding:1px 4px;line-height:1.3}
+  .tab:hover{color:var(--muted)}
+  .tab[aria-selected="true"]{color:var(--text);background:rgba(255,255,255,.035)}
+  .tab[aria-selected="true"]::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;background:var(--accent);border-radius:2px}
+  .tab[aria-selected="true"] .idx{color:var(--accent);border-color:rgba(122,162,255,.4)}
+  .panel{display:none;padding:22px}
+  .panel.active{display:block}
+  .panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap;margin-bottom:16px}
+  .panel-head h3{margin:0;font-size:16px;font-weight:600;letter-spacing:-.01em}
+  .panel-head p{margin:5px 0 0;color:var(--dim);font-size:12.8px;max-width:640px;line-height:1.62}
+  .panel-head p code{color:#b9c5da}
+  .block{margin-top:16px}
+  .block:first-of-type{margin-top:0}
+  .block-bar{display:flex;align-items:center;gap:9px;margin-bottom:0;padding:8px 12px;border:1px solid var(--line);border-bottom:0;border-radius:9px 9px 0 0;background:rgba(255,255,255,.025)}
+  .block-bar .fname{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.3px}
+  .block-bar .kind{font-family:var(--mono);font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:2px 5px}
+  .block-bar .copy{margin-left:auto;padding:5px 8px;font-size:10.5px}
+  pre.code{
+    margin:0;border:1px solid var(--line);border-radius:0 0 9px 9px;background:#07090d;
+    padding:15px 16px;overflow-x:auto;font-size:12.3px;line-height:1.78;color:#c3ccdc;
+    tab-size:2;
+  }
+  pre.code::-webkit-scrollbar{height:8px}
+  pre.code::-webkit-scrollbar-thumb{background:#222a39;border-radius:4px}
+  .tk-k{color:#c9a8ff}
+  .tk-s{color:#93d8a8}
+  .tk-c{color:#5a6580;font-style:italic}
+  .tk-n{color:#f0b878}
+  .tk-f{color:#8fb4ff}
+  .tk-p{color:#8fd0ea}
+  .tk-d{color:#78859c}
+  .panel-note{margin-top:14px;display:flex;gap:9px;align-items:flex-start;font-size:12px;color:var(--dim);line-height:1.6}
+  .panel-note .i{color:var(--amber);font-family:var(--mono);flex:none}
+
+  /* ---------- tools ---------- */
+  .tools-top{display:flex;flex-direction:column;gap:18px;margin-bottom:26px}
+  .tool-controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .search{position:relative;flex:1;min-width:240px;max-width:420px}
+  .search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--dim);pointer-events:none}
+  .search input{
+    width:100%;padding:11px 74px 11px 36px;
+    font-family:var(--mono);font-size:12.5px;color:var(--text);
+    background:rgba(255,255,255,.025);border:1px solid var(--line-2);border-radius:10px;outline:none;
+    transition:border-color .18s,box-shadow .18s;
+  }
+  .search input::placeholder{color:#5b6579}
+  .search input:focus{border-color:rgba(122,162,255,.55);box-shadow:0 0 0 3px rgba(122,162,255,.12)}
+  .search kbd{
+    position:absolute;right:10px;top:50%;transform:translateY(-50%);
+    font-family:var(--mono);font-size:10.5px;color:var(--dim);border:1px solid var(--line-2);border-radius:5px;padding:2px 6px;background:rgba(255,255,255,.03);
+  }
+  .count{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--dim);letter-spacing:.3px;white-space:nowrap}
+  .count b{color:var(--text);font-weight:500}
+  .chips{display:flex;gap:7px;flex-wrap:wrap}
+  .chip{
+    display:inline-flex;align-items:center;gap:7px;
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.1px;color:var(--muted);
+    padding:7px 11px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.018);
+    transition:.16s;
+  }
+  .chip:hover{color:var(--text);border-color:var(--line-2)}
+  .chip[aria-pressed="true"]{color:#0a0d14;background:#dfe5f0;border-color:#dfe5f0;font-weight:500}
+  .chip .c{opacity:.55;font-size:10px}
+  .chip[aria-pressed="true"] .c{opacity:.6}
+  .chip .cd{width:6px;height:6px;border-radius:50%;background:var(--cc,var(--accent))}
+  .chip[aria-pressed="true"] .cd{background:#0a0d14;opacity:.55}
+  .tool-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .tool{
+    position:relative;border:1px solid var(--line);border-radius:10px;
+    background:linear-gradient(180deg,rgba(255,255,255,.025),rgba(255,255,255,.006));
+    padding:13px 14px;transition:border-color .18s,background .18s,transform .18s;
+  }
+  .tool:hover{border-color:var(--line-2);background:rgba(255,255,255,.035);transform:translateY(-1px)}
+  .tool-top{display:flex;align-items:center;gap:8px}
+  .tool-top .cd{width:5px;height:5px;border-radius:50%;background:var(--cc);flex:none;box-shadow:0 0 8px color-mix(in srgb,var(--cc) 60%,transparent)}
+  .tool-name{font-family:var(--mono);font-size:12.3px;color:#dfe5f0;letter-spacing:-.1px;overflow-wrap:anywhere}
+  .tool-cat{margin-left:auto;font-family:var(--mono);font-size:9px;letter-spacing:.6px;text-transform:uppercase;color:#4e586d;flex:none}
+  .tool-desc{margin:6px 0 0;font-size:12.2px;line-height:1.55;color:#8d97ab}
+  .tool mark{background:rgba(122,162,255,.28);color:#e9efff;border-radius:2px;padding:0 1px}
+  .empty{padding:56px 20px;text-align:center;border:1px dashed var(--line-2);border-radius:12px;color:var(--dim);font-family:var(--mono);font-size:12.5px}
+
+  /* ---------- trust ---------- */
+  .trust-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .trust{
+    border:1px solid var(--line);border-radius:12px;padding:20px;
+    background:linear-gradient(180deg,rgba(255,255,255,.025),rgba(255,255,255,.008));
+  }
+  .trust .ti{
+    width:30px;height:30px;border-radius:8px;display:grid;place-items:center;
+    border:1px solid var(--line-2);background:rgba(122,162,255,.07);color:#9db9ff;margin-bottom:13px;
+  }
+  .trust .ti svg{width:15px;height:15px}
+  .trust h3{margin:0;font-size:14px;font-weight:600;letter-spacing:-.005em}
+  .trust p{margin:6px 0 0;font-size:12.6px;line-height:1.62;color:var(--muted)}
+  .trust p code{color:#b8c5db;font-size:.92em}
+  .trust a{color:#a9c3ff;text-decoration:underline;text-underline-offset:3px;text-decoration-color:rgba(169,195,255,.35)}
+  .trust a:hover{text-decoration-color:inherit}
+
+  /* ---------- cta ---------- */
+  .cta{
+    position:relative;border:1px solid var(--line-2);border-radius:18px;overflow:hidden;
+    padding:clamp(34px,5vw,56px);
+    background:
+      radial-gradient(700px 320px at 82% 0%,rgba(94,234,212,.13),transparent 62%),
+      radial-gradient(600px 300px at 8% 110%,rgba(122,162,255,.14),transparent 62%),
+      linear-gradient(180deg,#0b0e15,#080a0f);
+    box-shadow:0 50px 110px -70px #000;
+  }
+  .cta-grid{display:grid;grid-template-columns:1.3fr .7fr;gap:clamp(24px,4vw,52px);align-items:center}
+  .cta h2{margin:0;font-size:clamp(26px,3.4vw,38px);line-height:1.14;letter-spacing:-.026em;max-width:18ch;font-weight:600;text-wrap:balance}
+  .cta p{margin:13px 0 0;color:var(--muted);max-width:56ch;font-size:14.5px;line-height:1.65}
+  .cta .cmd{margin-top:24px;max-width:720px}
+  .cta-links{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+  .cta-links a{
+    font-family:var(--mono);font-size:12px;color:var(--muted);
+    padding:8px 13px;border:1px solid var(--line-2);border-radius:8px;background:rgba(255,255,255,.02);transition:.18s;
+  }
+  .cta-links a:hover{color:var(--text);border-color:#3a4761}
+  .cta-side{
+    border:1px solid var(--line-2);border-radius:12px;
+    background:linear-gradient(180deg,rgba(9,12,18,.72),rgba(5,7,11,.7));
+    padding:6px 18px 10px;backdrop-filter:blur(6px);
+  }
+  .cta-side .h{
+    font-family:var(--mono);font-size:10px;letter-spacing:1.4px;text-transform:uppercase;
+    color:var(--dim);padding:12px 0 10px;
+  }
+  .cta-row{
+    display:flex;align-items:baseline;justify-content:space-between;gap:14px;
+    padding:9px 0;border-top:1px dashed #202736;
+    font-family:var(--mono);font-size:11.5px;line-height:1.5;
+  }
+  .cta-row span{color:var(--dim)}
+  .cta-row b{font-weight:500;color:#dbe3f2;text-align:right}
+  @media (max-width:900px){.cta-grid{grid-template-columns:1fr}.cta-side{display:none}}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--line);margin-top:clamp(60px,8vw,100px);padding:34px 0 46px}
+  .foot{display:flex;gap:24px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+  .foot-l{max-width:420px}
+  .foot-brand{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:12.5px;color:var(--text)}
+  .foot-brand svg{width:20px;height:20px}
+  .foot p{margin:10px 0 0;font-size:12px;line-height:1.65;color:var(--dim)}
+  .foot-links{display:flex;gap:34px;flex-wrap:wrap}
+  .fcol{display:flex;flex-direction:column;gap:8px}
+  .fcol .h{font-family:var(--mono);font-size:10px;letter-spacing:1.3px;text-transform:uppercase;color:#4e586d;margin-bottom:2px}
+  .fcol a{font-size:12.5px;color:var(--muted);transition:color .16s}
+  .fcol a:hover{color:var(--text)}
+  .foot-bottom{display:flex;gap:16px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-top:30px;padding-top:20px;border-top:1px solid rgba(255,255,255,.05);font-family:var(--mono);font-size:10.5px;color:#4e586d;letter-spacing:.2px}
+
+  :focus-visible{outline:2px solid #7aa2ff;outline-offset:3px;border-radius:4px}
+
+  /* ---------- responsive ---------- */
+  @media (max-width:1080px){
+    .tool-grid{grid-template-columns:repeat(2,1fr)}
+    .trust-grid{grid-template-columns:repeat(2,1fr)}
+  }
+  @media (max-width:980px){
+    .hero-grid{grid-template-columns:1fr;gap:42px}
+    .hero .lede{max-width:none}
+    .surfaces{grid-template-columns:1fr}
+    .nav-links{display:none}
+    .arch-flow{gap:8px}
+    .arch-arrow{display:none}
+  }
+  @media (max-width:760px){
+    .wrap{width:calc(100% - 32px)}
+    .hero h1{font-size:clamp(26px,7.7vw,34px)}
+    .eyebrow{font-size:10px;letter-spacing:.5px;gap:7px;padding:5px 9px}
+    .tabs{flex-wrap:wrap;row-gap:2px}
+    .tab{flex:1 1 auto;justify-content:center}
+    pre.code{white-space:pre-wrap;overflow-wrap:anywhere;font-size:10.8px;padding:13px 12px}
+    .s-code{white-space:pre-wrap;overflow-wrap:break-word;font-size:10.6px}
+    .stats-in{grid-template-columns:repeat(2,1fr)}
+    .stat{padding:18px 16px}
+    .stat:nth-child(3){border-left:0;padding-left:0}
+    .stat:nth-child(3),.stat:nth-child(4){border-top:1px solid var(--line)}
+    .tool-grid{grid-template-columns:1fr}
+    .trust-grid{grid-template-columns:1fr}
+    .nav-in{gap:14px}
+    .brand span{display:none}
+    .gh-btn{padding:8px 10px}
+    .gh-btn span{display:none}
+    .panel{padding:16px}
+    .cmd{flex-wrap:wrap}
+    .cmd code{white-space:normal;overflow-wrap:break-word;line-height:1.6}
+    .cmd code .nowrap{white-space:normal}
+    .cmd .copy{margin-left:auto}
+    .count{width:100%;margin-left:0}
+    .foot{gap:32px}
+  }
+  @media (max-width:420px){
+    .gh-btn{display:none}
+    .brand b{font-size:12.5px}
+    .lang button{padding:6px 7px}
+    .hero h1{letter-spacing:-.025em}
+  }
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important}
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav" aria-label="Primary">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" aria-label="codex-browser-bridge home">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="1" y="1" width="30" height="30" rx="8" fill="#0b0e14" stroke="#1f2634"/>
+        <path d="M9 11h8.5a5 5 0 0 1 0 10H9" fill="none" stroke="#7aa2ff" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M9 21h8.5a5 5 0 0 0 0-10H9" fill="none" stroke="#5eead4" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>
+      <b>codex-browser-bridge</b><span> / bridge</span>
+    </a>
+    <div class="nav-links">
+      <a href="#surfaces" data-en="Surfaces" data-zh="双表面">Surfaces</a>
+      <a href="#code" data-en="Code" data-zh="接入代码">Code</a>
+      <a href="#tools" data-en="66+4 Tools" data-zh="66+4 工具">66+4 Tools</a>
+      <a href="#trust" data-en="Trust model" data-zh="可信边界">Trust model</a>
+    </div>
+    <div class="nav-right">
+      <div class="lang" role="group" aria-label="Language / 语言">
+        <button type="button" data-lang-btn="en" aria-pressed="true" aria-label="English">EN</button>
+        <button type="button" data-lang-btn="zh" aria-pressed="false" aria-label="简体中文">中文</button>
+      </div>
+      <a class="gh-btn" href="https://github.com/DeliciousBuding/codex-browser-bridge" aria-label="GitHub repository">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.27-.01-1.18-.02-2.14-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.25 3.33.95.1-.74.4-1.25.73-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.25.45-2.28 1.18-3.08-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.15 1.18a10.9 10.9 0 0 1 5.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.59.23 2.76.11 3.05.73.8 1.18 1.83 1.18 3.08 0 4.41-2.69 5.38-5.25 5.67.41.35.78 1.05.78 2.12 0 1.53-.01 2.76-.01 3.14 0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+        <span data-en="GitHub" data-zh="GitHub">GitHub</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<main id="top">
+
+  <!-- ================= HERO ================= -->
+  <header class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <div class="eyebrow">
+          <i class="dot" aria-hidden="true"></i>
+          <span class="ver">v2.1.1</span><span class="sep">·</span>
+          <span data-en="Single Rust Binary" data-zh="单一 Rust 二进制">Single Rust Binary</span><span class="sep">·</span>
+          <span data-en="Zero SDK Bloat" data-zh="零 SDK 负担">Zero SDK Bloat</span>
+        </div>
+        <h1>
+          <span data-en="Break the wall." data-zh="打破那堵墙。">Break the wall.</span><br>
+          <span class="grad" data-en="Codex Browser Use" data-zh="Codex 浏览器操作">Codex Browser Use</span><br>
+          <span class="grad" data-en="and Native Computer Use," data-zh="与原生电脑操作，">and Native Computer Use,</span><br>
+          <span class="thin" data-en="for every agent." data-zh="为每一个 Agent。">for every agent.</span>
+        </h1>
+        <p class="lede">
+          <span data-en="Your ChatGPT browser extension and the installed cua_repl runtime are already on this machine. The bridge turns them into an MCP surface any agent can drive —" data-zh="你机器上早已装着 ChatGPT 浏览器扩展和 cua_repl 运行时。桥接器把它们变成任何 Agent 都能驱动的 MCP 接口——">Your ChatGPT browser extension and the installed cua_repl runtime are already on this machine. The bridge turns them into an MCP surface any agent can drive —</span>
+          <strong data-en=" no profile copies, no WebDriver, no second extension." data-zh="不复制配置、不用 WebDriver、不装第二个扩展。"> no profile copies, no WebDriver, no second extension.</strong>
+        </p>
+
+        <div class="install">
+          <div class="install-label" data-en="Install in one command" data-zh="一条命令安装">Install in one command</div>
+          <div class="cmd">
+            <span class="prompt" aria-hidden="true">$</span>
+            <code id="installCmd"><span>claude plugin install codex-browser --marketplace</span> <span class="nowrap">DeliciousBuding/codex-browser-bridge</span></code>
+            <button class="copy" type="button" data-copy="#installCmd">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>
+              <span data-en="Copy" data-zh="复制">Copy</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="quick">
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge">
+            <span data-en="Repository" data-zh="代码仓库">Repository</span><span class="arr" aria-hidden="true">↗</span>
+          </a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/releases">
+            <span data-en="Releases" data-zh="版本发布">Releases</span><span class="arr" aria-hidden="true">↗</span>
+          </a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md">
+            <span data-en="Native Computer Use guide" data-zh="原生电脑操作指南">Native Computer Use guide</span><span class="arr" aria-hidden="true">↗</span>
+          </a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md">
+            <span data-en="Official parity matrix" data-zh="官方对照矩阵">Official parity matrix</span><span class="arr" aria-hidden="true">↗</span>
+          </a>
+        </div>
+        <div class="hero-note">
+          <span data-en="MIT · Windows / Linux / macOS source · npm or a single binary" data-zh="MIT 许可 · Windows / Linux / macOS 源码 · npm 或单二进制">MIT · Windows / Linux / macOS source · npm or a single binary</span>
+        </div>
+      </div>
+
+      <div class="term-wrap" aria-hidden="true">
+        <div class="term">
+          <div class="term-bar">
+            <div class="tl"><i></i><i></i><i></i></div>
+            <div class="term-title">bridge://session-42</div>
+            <div class="term-live"><i></i>LIVE</div>
+          </div>
+          <div class="term-body">
+            <div class="row"><span class="t-dim">$</span> <span class="t-cmd">claude plugin install codex-browser</span></div>
+            <div class="row"><span class="t-ok">✓</span> marketplace added <span class="t-dim">·</span> <span class="t-val">codex-browser@2.1.1</span></div>
+            <div class="row"><span class="t-ok">✓</span> mcp server registered <span class="t-dim">·</span> <span class="t-val">stdio · full profile</span></div>
+            <div class="sp"></div>
+            <div class="row"><span class="t-dim">&gt;</span> <span class="t-cmd">claim the dashboard and capture it</span></div>
+            <div class="sp"></div>
+            <div class="row"><span class="t-tool">● codex_list_browsers</span> <span class="t-arrow">→</span> <span class="t-val">1 instance · edge</span> <span class="t-dim">26.1016</span></div>
+            <div class="row"><span class="t-tool">● codex_user_tabs</span> <span class="t-arrow">→</span> <span class="t-val">7 tabs</span> <span class="t-dim">· 3 unclaimed</span></div>
+            <div class="row"><span class="t-tool">● codex_claim_tab</span> <span class="t-arrow">→</span> <span class="t-val">#42 "Dashboard"</span> <span class="t-dim">owned</span></div>
+            <div class="row"><span class="t-tool">● codex_observe</span> <span class="t-arrow">→</span> <span class="t-val">networkidle</span> <span class="t-dim">· 0 gaps</span></div>
+            <div class="row"><span class="t-tool">● codex_screenshot</span> <span class="t-arrow">→</span> <span class="t-val">1280×800 png</span> <span class="t-dim">· 214 KB</span></div>
+            <div class="row"><span class="t-ok">✓</span> turn ended <span class="t-dim">· owned tabs released</span></div>
+            <div class="term-foot">
+              <span><b>66</b> browser tools</span>
+              <span><b>4</b> native cua tools</span>
+              <span><b>0</b> profile copies</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= STATS ================= -->
+  <div class="stats" aria-hidden="true">
+    <div class="wrap stats-in">
+      <div class="stat"><div class="n">66<em>+4</em></div><div class="l" data-en="MCP tools" data-zh="MCP 工具">MCP tools</div></div>
+      <div class="stat"><div class="n">2<em>surfaces</em></div><div class="l" data-en="Browser · Computer" data-zh="浏览器 · 电脑">Browser · Computer</div></div>
+      <div class="stat"><div class="n">2<em>eras</em></div><div class="l" data-en="MCP protocol" data-zh="MCP 协议">MCP protocol</div></div>
+      <div class="stat"><div class="n">0<em>copies</em></div><div class="l" data-en="of your profile" data-zh="复制你的配置">of your profile</div></div>
+    </div>
+  </div>
+
+  <!-- ================= SURFACES ================= -->
+  <section class="sec" id="surfaces">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker"><span class="hash">//</span><span data-en="Dual-surface architecture" data-zh="双表面架构">Dual-surface architecture</span></div>
+        <h2 data-en="One binary. Two surfaces. The wall is gone." data-zh="一个二进制，两个表面。墙已经不存在。">One binary. Two surfaces. The wall is gone.</h2>
+        <p data-en="Codex keeps its browser and computer runtimes behind the desktop app. The bridge speaks their native protocols directly, so Claude Code and every other MCP client can reach both — with the host's own configuration, permissions and cleanup semantics preserved." data-zh="Codex 把浏览器与电脑运行时藏在桌面应用后面。桥接器直接与它们的原生协议通信，让 Claude Code 和其他任何 MCP 客户端都能触达两者，同时保留宿主自身的配置、权限与清理语义。">Codex keeps its browser and computer runtimes behind the desktop app. The bridge speaks their native protocols directly, so Claude Code and every other MCP client can reach both — with the host's own configuration, permissions and cleanup semantics preserved.</p>
+      </div>
+
+      <div class="surfaces">
+        <!-- computer -->
+        <article class="surface computer">
+          <div class="s-top">
+            <span class="s-tag">--surface computer</span>
+            <span class="s-status" data-en="Opt-in" data-zh="按需启用">Opt-in</span>
+          </div>
+          <h3><span data-en="Native Computer Use," data-zh="原生 Computer Use，">Native Computer Use,</span><br><span data-en="unlocked for everyone." data-zh="向所有 Agent 开放。">unlocked for everyone.</span></h3>
+          <p class="s-copy" data-en="The installed Codex cua_repl service is a stateful JavaScript runtime for desktop windows and browser tabs alike. The bridge discovers it, relays it, and cleans it up." data-zh="已安装的 Codex cua_repl 服务是一个有状态 JavaScript 运行时，能同时操作桌面窗口与浏览器标签页。桥接器负责发现、转发与收尾。">The installed Codex cua_repl service is a stateful JavaScript runtime for desktop windows and browser tabs alike. The bridge discovers it, relays it, and cleans it up.</p>
+          <div class="s-code"><span class="d">// one Target interface, two worlds</span>
+const wins = <span class="k">await</span> cua.listWindows();
+<span class="k">const</span> app = <span class="k">await</span> cua.getApp({ windowId: wins[0].windowId });
+<span class="k">const</span> state = <span class="k">await</span> app.getAXStateAndScreenshot();
+<span class="k">await</span> app.click(state.elements[0].index);
+<span class="k">await</span> app.typeText(<span class="s">"hello from the bridge"</span>);</div>
+          <ul class="s-list">
+            <li><span data-en="Connects any MCP agent or shell script to Codex's installed cua_repl (@oai/cua + @oai/sky + @oai/browser-desktop)." data-zh="把任何 MCP Agent 或 shell 脚本接到 Codex 已安装的 cua_repl（@oai/cua + @oai/sky + @oai/browser-desktop）。">Connects any MCP agent or shell script to Codex's installed <b>cua_repl</b> (@oai/cua + @oai/sky + @oai/browser-desktop).</span></li>
+            <li><span data-en="Unified cua Target API: listWindows, getApp({windowId}), launch_app(), listBrowsers, getTab(), shared getAXStateAndScreenshot, click(elementIndex | [x,y]), drag, scroll, pressKey and typeText." data-zh="统一的 cua Target API：listWindows、getApp({windowId})、launch_app()、listBrowsers、getTab()，以及共享的 getAXStateAndScreenshot、click(elementIndex | [x,y])、drag、scroll、pressKey、typeText。">Unified <b>cua Target API</b>: listWindows, getApp({windowId}), launch_app(), listBrowsers, getTab(), shared getAXStateAndScreenshot, click(elementIndex | [x,y]), drag, scroll, pressKey and typeText.</span></li>
+            <li><span data-en="Full-duplex, cancel-safe JSON-RPC stdio relay with bidirectional elicitation/create application approval passthrough." data-zh="全双工、可安全取消的 JSON-RPC stdio 中继，双向透传 elicitation/create 应用授权。">Full-duplex, cancel-safe JSON-RPC stdio relay with bidirectional <b>elicitation/create</b> application approval passthrough.</span></li>
+            <li><span data-en="turn_ended execution-context cleanup, then Windows Job Object / Unix process-group teardown. Timed-out calls are never replayed." data-zh="turn_ended 执行上下文清理，随后以 Windows Job Object / Unix 进程组收尾。超时的调用绝不重放。">turn_ended execution-context cleanup, then <b>Windows Job Object / Unix process-group</b> teardown. Timed-out calls are never replayed.</span></li>
+            <li><span data-en="Preserves the host launch row: env, env_vars, timeouts, enabled_tools and disabled_tools — the bridge never rewrites your config." data-zh="完整保留宿主启动行：env、env_vars、超时、enabled_tools 与 disabled_tools——桥接器从不改写你的配置。">Preserves the host launch row: env, env_vars, timeouts, enabled_tools and disabled_tools — the bridge never rewrites your config.</span></li>
+          </ul>
+          <div class="s-foot">
+            <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md">
+              <span data-en="Read the native guide" data-zh="阅读原生指南">Read the native guide</span> <span aria-hidden="true">→</span>
+            </a>
+          </div>
+        </article>
+
+        <!-- browser -->
+        <article class="surface browser">
+          <div class="s-top">
+            <span class="s-tag">--surface browser</span>
+            <span class="s-status" data-en="Default" data-zh="默认表面">Default</span>
+          </div>
+          <h3><span data-en="Direct Chromium pipe," data-zh="直连 Chromium 管道，">Direct Chromium pipe,</span><br><span data-en="66 tools deep." data-zh="66 个工具全开。">66 tools deep.</span></h3>
+          <p class="s-copy" data-en="Native-messaging straight into your logged-in Chrome or Edge profile. No Codex desktop app required, no new extension, no remote debugging port." data-zh="原生消息直连你已登录的 Chrome / Edge 配置。不需要运行 Codex 桌面应用，不装新扩展，不开远程调试端口。">Native-messaging straight into your logged-in Chrome or Edge profile. No Codex desktop app required, no new extension, no remote debugging port.</p>
+          <div class="s-code"><span class="d">// transport discovery</span>
+Windows  \\.\pipe\codex-browser-use\*
+Linux    /tmp/codex-browser-use/*.sock
+         <span class="d">$XDG_RUNTIME_DIR/codex-browser-use</span></div>
+          <ul class="s-list">
+            <li><span data-en="Direct native-messaging pipe or Unix socket to the extension — the bridge is the client, not a second runtime." data-zh="原生消息命名管道或 Unix socket 直连扩展——桥接器是客户端，不是第二个运行时。">Direct native-messaging <b>pipe or Unix socket</b> to the extension — the bridge is the client, not a second runtime.</span></li>
+            <li><span data-en="Background focus emulation (Emulation.setFocusEmulationEnabled): input and screenshots never steal your foreground focus." data-zh="后台焦点模拟（Emulation.setFocusEmulationEnabled）：输入与截图不会抢走你的前台焦点。">Background focus emulation (<b>Emulation.setFocusEmulationEnabled</b>): input and screenshots never steal your foreground focus.</span></li>
+            <li><span data-en="codex_observe with networkidle, url_glob, safe url_regex and level-filtered logs — explicit cursors, explicit gaps." data-zh="codex_observe 支持 networkidle、url_glob、安全 url_regex 与按级别过滤的日志——游标显式，缺口显式。">codex_observe with <b>networkidle</b>, url_glob, safe url_regex and level-filtered logs — explicit cursors, explicit gaps.</span></li>
+            <li><span data-en="codex_locator composes and / or / has / has_not with exact select descriptors and element_info inspection." data-zh="codex_locator 组合 and / or / has / has_not，支持精确选项描述符与 element_info 检查。">codex_locator composes <b>and / or / has / has_not</b> with exact select descriptors and element_info inspection.</span></li>
+            <li><span data-en="Tabs.selected resolution, same-origin iframe DOM snapshots, and failure-safe input that is never replayed." data-zh="Tabs.selected 定位、同源 iframe DOM 快照，以及绝不重放的失败安全输入。"><b>Tabs.selected</b> resolution, same-origin iframe DOM snapshots, and failure-safe input that is never replayed.</span></li>
+          </ul>
+          <div class="s-foot">
+            <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md">
+              <span data-en="Inspect the parity matrix" data-zh="查看对照矩阵">Inspect the parity matrix</span> <span aria-hidden="true">→</span>
+            </a>
+          </div>
+        </article>
+      </div>
+
+      <div class="arch" aria-label="Architecture">
+        <div class="arch-flow">
+          <div class="arch-node">
+            <div class="t" data-en="Clients" data-zh="客户端">Clients</div>
+            <div class="v">Claude Code · Cursor<br>OpenClaw · shell</div>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">→</div>
+          <div class="arch-node hot">
+            <div class="t" data-en="The bridge" data-zh="桥接器">The bridge</div>
+            <div class="v">codex-browser-bridge<br>one Rust binary · stdio</div>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">→</div>
+          <div class="arch-node">
+            <div class="t">--surface browser</div>
+            <div class="v" data-en="pipe / socket → extension → Chromium" data-zh="管道 / socket → 扩展 → Chromium">pipe / socket → extension → Chromium</div>
+          </div>
+          <div class="arch-arrow" aria-hidden="true">→</div>
+          <div class="arch-node">
+            <div class="t">--surface computer</div>
+            <div class="v" data-en="stdio relay → cua_repl → desktop + tabs" data-zh="stdio 中继 → cua_repl → 桌面 + 标签页">stdio relay → cua_repl → desktop + tabs</div>
+          </div>
+        </div>
+        <div class="arch-note" data-en="Both surfaces can be registered side by side in the same MCP client. Codex itself controls these runtimes natively; the bridge exists for every other agent." data-zh="两个表面可以并排注册在同一个 MCP 客户端里。Codex 自身原生控制这些运行时；桥接器服务于其他所有 Agent。">Both surfaces can be registered side by side in the same MCP client. Codex itself controls these runtimes natively; the bridge exists for every other agent.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= CODE ================= -->
+  <section class="sec" id="code">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker"><span class="hash">//</span><span data-en="Three ways in" data-zh="三种接入方式">Three ways in</span></div>
+        <h2 data-en="Plug it in. Then hand it real work." data-zh="接上它，然后把真实工作交给它。">Plug it in. Then hand it real work.</h2>
+        <p data-en="The Claude plugin wires the browser surface automatically. Add the native surface only when you want desktop automation — the two entries coexist." data-zh="Claude 插件会自动接好浏览器表面。只有需要桌面自动化时再添加原生表面——两个条目可以共存。">The Claude plugin wires the browser surface automatically. Add the native surface only when you want desktop automation — the two entries coexist.</p>
+      </div>
+
+      <div class="code-shell">
+        <div class="tabs" role="tablist" aria-label="Code examples">
+          <button class="tab" role="tab" id="tab-1" aria-controls="panel-1" aria-selected="true" data-tab="1">
+            <span class="idx">01</span><span data-en="Claude &amp; MCP config" data-zh="Claude 与 MCP 配置">Claude &amp; MCP config</span>
+          </button>
+          <button class="tab" role="tab" id="tab-2" aria-controls="panel-2" aria-selected="false" tabindex="-1" data-tab="2">
+            <span class="idx">02</span><span data-en="Native Computer Use" data-zh="原生 Computer Use">Native Computer Use</span>
+          </button>
+          <button class="tab" role="tab" id="tab-3" aria-controls="panel-3" aria-selected="false" tabindex="-1" data-tab="3">
+            <span class="idx">03</span><span data-en="Browser Use" data-zh="浏览器操作">Browser Use</span>
+          </button>
+        </div>
+
+        <!-- panel 1 -->
+        <div class="panel active" id="panel-1" role="tabpanel" aria-labelledby="tab-1">
+          <div class="panel-head">
+            <div>
+              <h3 data-en="Zero-config for Claude Code, explicit everywhere else" data-zh="Claude Code 零配置，其他客户端显式接入">Zero-config for Claude Code, explicit everywhere else</h3>
+              <p data-en="The plugin installs the skill and MCP server together. Manual clients get the same binary over stdio — the plugin is a wrapper, not a different implementation." data-zh="插件同时安装 skill 与 MCP 服务器。手动客户端通过 stdio 使用同一二进制——插件只是包装，不是另一套实现。">The plugin installs the skill and MCP server together. Manual clients get the same binary over stdio — the plugin is a wrapper, not a different implementation.</p>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="block-bar">
+              <span class="fname">terminal</span><span class="kind">shell</span>
+              <button class="copy" type="button" data-copy="#code-install">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>
+                <span data-en="Copy" data-zh="复制">Copy</span>
+              </button>
+            </div>
+<pre class="code" id="code-install"><span class="tk-c"># marketplace + plugin + skill in one step</span>
+claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
+
+<span class="tk-c"># standalone binary or npm, if you prefer</span>
+npm i -g @delicious233/codex-browser-bridge</pre>
+          </div>
+
+          <div class="block">
+            <div class="block-bar">
+              <span class="fname">mcp.json</span><span class="kind">json</span>
+              <button class="copy" type="button" data-copy="#code-mcp">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>
+                <span data-en="Copy" data-zh="复制">Copy</span>
+              </button>
+            </div>
+<pre class="code" id="code-mcp">{
+  <span class="tk-p">"mcpServers"</span>: {
+    <span class="tk-p">"codex-browser"</span>: {
+      <span class="tk-p">"command"</span>: <span class="tk-s">"codex-browser-bridge"</span>,
+      <span class="tk-p">"args"</span>: [<span class="tk-s">"--mode"</span>, <span class="tk-s">"mcp"</span>, <span class="tk-s">"--profile"</span>, <span class="tk-s">"full"</span>],
+      <span class="tk-p">"transport"</span>: <span class="tk-s">"stdio"</span>,
+      <span class="tk-p">"env"</span>: {
+        <span class="tk-p">"CODEX_BRIDGE_BROWSER_FAMILY"</span>: <span class="tk-s">"edge"</span>
+      }
+    },
+    <span class="tk-p">"codex-computer"</span>: {
+      <span class="tk-p">"command"</span>: <span class="tk-s">"codex-browser-bridge"</span>,
+      <span class="tk-p">"args"</span>: [<span class="tk-s">"--surface"</span>, <span class="tk-s">"computer"</span>, <span class="tk-s">"--mode"</span>, <span class="tk-s">"mcp"</span>]
+    }
+  }
+}</pre>
+          </div>
+          <div class="panel-note"><span class="i">!</span><span data-en="The default plugin registers the browser surface only. Add codex-computer when you want desktop automation; both entries can live in the same client." data-zh="默认插件只注册浏览器表面。需要桌面自动化时再加 codex-computer；两个条目可以并存于同一客户端。">The default plugin registers the browser surface only. Add codex-computer when you want desktop automation; both entries can live in the same client.</span></div>
+        </div>
+
+        <!-- panel 2 -->
+        <div class="panel" id="panel-2" role="tabpanel" aria-labelledby="tab-2" hidden>
+          <div class="panel-head">
+            <div>
+              <h3 data-en="Drive a desktop window from any MCP host" data-zh="从任何 MCP 宿主操控桌面窗口">Drive a desktop window from any MCP host</h3>
+              <p data-en="Discovery reads [mcp_servers.cua_repl] from your Codex config, else the latest unified-computer-use .mcp.json. Call js, read the returned docs and state, then act." data-zh="发现逻辑先读 Codex 配置中的 [mcp_servers.cua_repl]，否则回退到最新的 unified-computer-use .mcp.json。先调用 js，读取返回的文档与状态，再执行动作。">Discovery reads [mcp_servers.cua_repl] from your Codex config, else the latest unified-computer-use .mcp.json. Call js, read the returned docs and state, then act.</p>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="block-bar">
+              <span class="fname">MCP · tools/call → js</span><span class="kind">javascript</span>
+              <button class="copy" type="button" data-copy="#code-native">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>
+                <span data-en="Copy" data-zh="复制">Copy</span>
+              </button>
+            </div>
+<pre class="code" id="code-native"><span class="tk-c">// arguments.code for one tools/call → name: "js"</span>
+<span class="tk-k">const</span> wins = <span class="tk-k">await</span> cua.<span class="tk-f">listWindows</span>();
+<span class="tk-k">const</span> app = <span class="tk-k">await</span> cua.<span class="tk-f">getApp</span>({ windowId: wins[<span class="tk-n">0</span>].windowId });
+<span class="tk-k">const</span> state = <span class="tk-k">await</span> app.<span class="tk-f">getAXStateAndScreenshot</span>();
+console.<span class="tk-f">log</span>(state.elements?.<span class="tk-f">slice</span>(<span class="tk-n">0</span>, <span class="tk-n">8</span>));
+<span class="tk-k">await</span> app.<span class="tk-f">click</span>(state.elements[<span class="tk-n">0</span>].index);
+<span class="tk-k">await</span> app.<span class="tk-f">typeText</span>(<span class="tk-s">"hello from the bridge"</span>);</pre>
+          </div>
+
+          <div class="block">
+            <div class="block-bar">
+              <span class="fname">batch · image artifacts</span><span class="kind">shell</span>
+              <button class="copy" type="button" data-copy="#code-batch">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>
+                <span data-en="Copy" data-zh="复制">Copy</span>
+              </button>
+            </div>
+<pre class="code" id="code-batch"><span class="tk-c"># validate discovery first, then run a stateful batch</span>
+codex-browser-bridge --surface computer --mode doctor
+
+codex-browser-bridge --surface computer --image-dir ./captures batch &lt;&lt;'JSONL'
+{"name":"js","arguments":{"code":"const wins = await cua.listWindows(); console.log(wins.map(w => w.title));"}}
+{"name":"js","arguments":{"code":"await cua.computer.launch_app({ name: 'Calculator' });"}}
+JSONL</pre>
+          </div>
+          <div class="panel-note"><span class="i">!</span><span data-en="Application approval requires an MCP host that supports elicitation. The CLI is non-interactive and rejects elicitation/create with a JSON-RPC error." data-zh="应用授权需要支持 elicitation 的 MCP 宿主。CLI 是非交互式的，会以 JSON-RPC 错误拒绝 elicitation/create。">Application approval requires an MCP host that supports elicitation. The CLI is non-interactive and rejects elicitation/create with a JSON-RPC error.</span></div>
+        </div>
+
+        <!-- panel 3 -->
+        <div class="panel" id="panel-3" role="tabpanel" aria-labelledby="tab-3" hidden>
+          <div class="panel-head">
+            <div>
+              <h3 data-en="Observe, locate, capture — with no replay" data-zh="观察、定位、截图——绝不重放">Observe, locate, capture — with no replay</h3>
+              <p data-en="Arm observation before the action so early events are not lost. Locators compose declaratively; a dispatched input is never retried behind your back. Same tab, three JSONL steps." data-zh="在动作之前开启观察，避免丢失早期事件。定位器以声明式组合；已发出的输入绝不会在背后重试。同一个标签页，三步 JSONL。">Arm observation before the action so early events are not lost. Locators compose declaratively; a dispatched input is never retried behind your back. Same tab, three JSONL steps.</p>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="block-bar">
+              <span class="fname">codex-browser-bridge batch</span><span class="kind">jsonl</span>
+              <button class="copy" type="button" data-copy="#code-browser">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>
+                <span data-en="Copy" data-zh="复制">Copy</span>
+              </button>
+            </div>
+<pre class="code" id="code-browser"><span class="tk-c">// 1 · observe before acting: frames, dialogs, events, logs, explicit gaps</span>
+{"name":"codex_observe","arguments":{"tab_id":42,"action":"start","wait_until":"networkidle"}}
+
+<span class="tk-c">// 2 · declarative locator: role + accessible name, composed with has_text</span>
+{"name":"codex_locator","arguments":{"tab_id":42,"action":"click","role":"link","name":"Invoices","has_text":{"regex":"^Invoices"}}}
+
+<span class="tk-c">// 3 · capture one element with structural metadata</span>
+{"name":"codex_screenshot_element","arguments":{"tab_id":42,"selector":"#invoice-total","include_info":true}}</pre>
+          </div>
+          <div class="panel-note"><span class="i">!</span><span data-en="Use --profile basic (46 tools) when context is tight, network (65) for cookies and CDP, full (66) by default in the plugin. Tabs are owned per session and released on turn end." data-zh="上下文紧张时用 --profile basic（46 工具），需要 Cookie 与 CDP 时用 network（65），插件默认 full（66）。标签页按会话持有，回合结束时释放。">Use --profile basic (46 tools) when context is tight, network (65) for cookies and CDP, full (66) by default in the plugin. Tabs are owned per session and released on turn end.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= TOOLS ================= -->
+  <section class="sec" id="tools">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker"><span class="hash">//</span><span data-en="Tool explorer" data-zh="工具浏览">Tool explorer</span></div>
+        <h2 data-en="Every tool, on this page. No manual required." data-zh="全部工具都在这一页，无需翻手册。">Every tool, on this page. No manual required.</h2>
+        <p data-en="66 browser tools plus the 4 native cua methods. Filter by surface, or search a name and a keyword in either language." data-zh="66 个浏览器工具，外加 4 个原生 cua 方法。按表面筛选，或用任意语言搜索名称与关键词。">66 browser tools plus the 4 native cua methods. Filter by surface, or search a name and a keyword in either language.</p>
+      </div>
+
+      <div class="tools-top">
+        <div class="tool-controls">
+          <label class="search">
+            <span class="sr-only" data-en="Search tools" data-zh="搜索工具">Search tools</span>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+            <input type="search" id="toolSearch" autocomplete="off" spellcheck="false" data-ph-en="Search tools, keywords…" data-ph-zh="搜索工具、关键词……">
+            <kbd>/</kbd>
+          </label>
+          <div class="count" id="toolCount" aria-live="polite"></div>
+        </div>
+        <div class="chips" id="chips" role="group" aria-label="Tool categories"></div>
+      </div>
+
+      <div class="tool-grid" id="toolGrid"></div>
+      <div class="empty" id="toolEmpty" hidden>
+        <span data-en="No tool matches that filter. Try a shorter keyword." data-zh="没有匹配该筛选的工具。试试更短的关键词。">No tool matches that filter. Try a shorter keyword.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= TRUST ================= -->
+  <section class="sec" id="trust">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker"><span class="hash">//</span><span data-en="Trust model" data-zh="可信边界">Trust model</span></div>
+        <h2 data-en="Thin adapter. Hard boundaries." data-zh="薄适配层，硬边界。">Thin adapter. Hard boundaries.</h2>
+        <p data-en="This binary holds the keys to a logged-in browser and a desktop session. Every design choice assumes that." data-zh="这个二进制握着你已登录浏览器和桌面会话的钥匙。每一个设计选择都以此为前提。">This binary holds the keys to a logged-in browser and a desktop session. Every design choice assumes that.</p>
+      </div>
+
+      <div class="trust-grid">
+        <div class="trust">
+          <div class="ti"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M8 1.5 13 3.5v4c0 3.3-2.1 6.1-5 7-2.9-.9-5-3.7-5-7v-4l5-2Z"/><path d="m5.8 7.7 1.5 1.5 3-3"/></svg></div>
+          <h3 data-en="No profile copy, no second extension" data-zh="不复制配置，不装第二扩展">No profile copy, no second extension</h3>
+          <p data-en="The bridge is a client of the transports your extension already opened. A pipe name is transport metadata; the extension instance ID is identity." data-zh="桥接器只是你扩展已打开的传输通道的客户端。管道名是传输元数据，扩展实例 ID 才是身份。">The bridge is a client of the transports your extension already opened. A pipe name is transport metadata; the extension instance ID is identity.</p>
+        </div>
+        <div class="trust">
+          <div class="ti"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2.5" y="7" width="11" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 0 1 6 0v2"/></svg></div>
+          <h3 data-en="Bounded by default" data-zh="默认有界">Bounded by default</h3>
+          <p data-en="Text and image byte budgets with explicit truncation markers. Oversized screenshots return a summary, never partial base64." data-zh="文本与图片有字节预算，截断处有显式标记。超限截图返回摘要，绝不返回残缺 base64。">Text and image byte budgets with explicit truncation markers. Oversized screenshots return a summary, never partial base64.</p>
+        </div>
+        <div class="trust">
+          <div class="ti"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M3 4.5h4.5a4 4 0 0 1 0 8H3"/><path d="m6 2-2.5 2.5L6 7"/><path d="M13 11.5H8.5a4 4 0 0 1 0-8H13"/></svg></div>
+          <h3 data-en="Never replay input" data-zh="绝不重放输入">Never replay input</h3>
+          <p data-en="A timeout is an unknown outcome, not a retry token. Inspect the page, then decide. Pointer moves and scrolls are dispatched once." data-zh="超时是未知结果，不是重试许可。先检查页面，再做决定。指针移动与滚动只派发一次。">A timeout is an unknown outcome, not a retry token. Inspect the page, then decide. Pointer moves and scrolls are dispatched once.</p>
+        </div>
+        <div class="trust">
+          <div class="ti"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 8h3l1.5-4 2 8 1.5-4h3"/></svg></div>
+          <h3 data-en="Deterministic cleanup" data-zh="确定性收尾">Deterministic cleanup</h3>
+          <p data-en="EOF, SIGINT and SIGTERM cancel in-flight work, send turn_ended, close stdin, then tear down the owned process tree — Job Object on Windows." data-zh="EOF、SIGINT、SIGTERM 会取消进行中的任务，发送 turn_ended，关闭 stdin，然后收掉自有的进程树——Windows 上使用 Job Object。">EOF, SIGINT and SIGTERM cancel in-flight work, send turn_ended, close stdin, then tear down the owned process tree — Job Object on Windows.</p>
+        </div>
+        <div class="trust">
+          <div class="ti"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 4.5h11v7h-11z"/><path d="M5 7h2M5 9.2h4"/><path d="M10.5 2.5v2M12.5 2.5v2"/></svg></div>
+          <h3 data-en="Dual-era MCP" data-zh="双时代 MCP">Dual-era MCP</h3>
+          <p data-en="Legacy initialize negotiation from 2024-11-05 through 2025-11-25, plus stateless 2026-07-28 with server/discover, resultType and cache hints." data-zh="支持 2024-11-05 至 2025-11-25 的传统 initialize 协商，也支持 2026-07-28 无状态协议，含 server/discover、resultType 与缓存提示。">Legacy initialize negotiation from 2024-11-05 through 2025-11-25, plus stateless 2026-07-28 with server/discover, resultType and cache hints.</p>
+        </div>
+        <div class="trust">
+          <div class="ti"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M8 1.8 13.5 4v4.1c0 3.2-2.3 5.6-5.5 6.6-3.2-1-5.5-3.4-5.5-6.6V4L8 1.8Z"/></svg></div>
+          <h3 data-en="Local-only by design" data-zh="设计上仅限本地">Local-only by design</h3>
+          <p data-en="No network port, no telemetry, no hidden fallback runtime. Raw CDP is an allowlisted diagnostic escape hatch, not a second control plane." data-zh="不开网络端口，无遥测，无隐藏回退运行时。原始 CDP 是白名单诊断通道，不是第二控制面。">No network port, no telemetry, no hidden fallback runtime. Raw CDP is an allowlisted diagnostic escape hatch, not a second control plane.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= CTA ================= -->
+  <section class="sec" id="install" style="padding-top:0">
+    <div class="wrap">
+      <div class="cta">
+        <div class="cta-grid">
+        <div>
+        <h2 data-en="Your browser is already logged in. Use it." data-zh="你的浏览器已经登录好了。直接用。">Your browser is already logged in. Use it.</h2>
+        <p data-en="Install the plugin, restart your client, and ask for the tabs. For desktop work, add the native surface and let cua_repl do what it was built for." data-zh="安装插件，重启客户端，然后让它列出标签页。桌面工作则加上原生表面，让 cua_repl 做它本来该做的事。">Install the plugin, restart your client, and ask for the tabs. For desktop work, add the native surface and let cua_repl do what it was built for.</p>
+        <div class="cmd">
+          <span class="prompt" aria-hidden="true">$</span>
+          <code id="installCmd2"><span>claude plugin install codex-browser --marketplace</span> <span class="nowrap">DeliciousBuding/codex-browser-bridge</span></code>
+          <button class="copy" type="button" data-copy="#installCmd2">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>
+            <span data-en="Copy" data-zh="复制">Copy</span>
+          </button>
+        </div>
+        <div class="cta-links">
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/releases">Releases</a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md" data-en="Parity matrix" data-zh="对照矩阵">Parity matrix</a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md" data-en="Native guide" data-zh="原生指南">Native guide</a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/issues" data-en="Issues" data-zh="问题反馈">Issues</a>
+        </div>
+        </div>
+        <aside class="cta-side" aria-hidden="true">
+          <div class="h" data-en="At a glance" data-zh="速览">At a glance</div>
+          <div class="cta-row"><span>version</span><b>v2.1.1</b></div>
+          <div class="cta-row"><span>browser</span><b>66 tools</b></div>
+          <div class="cta-row"><span>computer</span><b>4 methods</b></div>
+          <div class="cta-row"><span>MCP</span><b>dual-era</b></div>
+          <div class="cta-row"><span>license</span><b>MIT</b></div>
+        </aside>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div class="foot-l">
+        <div class="foot-brand">
+          <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" fill="#0b0e14" stroke="#1f2634"/><path d="M9 11h8.5a5 5 0 0 1 0 10H9" fill="none" stroke="#7aa2ff" stroke-width="2.2" stroke-linecap="round"/><path d="M9 21h8.5a5 5 0 0 0 0-10H9" fill="none" stroke="#5eead4" stroke-width="2.2" stroke-linecap="round"/></svg>
+          codex-browser-bridge
+        </div>
+        <p data-en="MCP and CLI access to the installed Codex browser and Computer Use runtimes. MIT licensed. Not affiliated with OpenAI." data-zh="以 MCP 与 CLI 访问已安装的 Codex 浏览器与 Computer Use 运行时。MIT 许可。与 OpenAI 无隶属关系。">MCP and CLI access to the installed Codex browser and Computer Use runtimes. MIT licensed. Not affiliated with OpenAI.</p>
+      </div>
+      <div class="foot-links">
+        <div class="fcol">
+          <div class="h" data-en="Project" data-zh="项目">Project</div>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge" data-en="Repository" data-zh="代码仓库">Repository</a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/releases" data-en="Releases" data-zh="版本发布">Releases</a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/CHANGELOG.md" data-en="Changelog" data-zh="更新日志">Changelog</a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/LICENSE" data-en="License" data-zh="许可证">License</a>
+        </div>
+        <div class="fcol">
+          <div class="h" data-en="Docs" data-zh="文档">Docs</div>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/README.md">README</a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/README.zh-CN.md" data-en="README (中文)" data-zh="README（中文）">README (中文)</a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md" data-en="Native Computer Use" data-zh="原生 Computer Use">Native Computer Use</a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md" data-en="Official parity" data-zh="官方对照">Official parity</a>
+        </div>
+        <div class="fcol">
+          <div class="h" data-en="Support" data-zh="支持">Support</div>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/issues" data-en="Issues" data-zh="问题">Issues</a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/SECURITY.md" data-en="Security policy" data-zh="安全策略">Security policy</a>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/CONTRIBUTING.md" data-en="Contributing" data-zh="参与贡献">Contributing</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© 2026 DeliciousBuding · MIT</span>
+      <span data-en="v2.1.1 · one binary · no telemetry" data-zh="v2.1.1 · 单一二进制 · 无遥测">v2.1.1 · one binary · no telemetry</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ------------------------------------------------------------------ */
+  /* Data: 70 tools (66 browser + 4 native cua)                          */
+  /* ------------------------------------------------------------------ */
+  var CATS = [
+    { key: "all",       en: "All",                      zh: "全部",        color: "#7aa2ff" },
+    { key: "native",    en: "Native Computer Use",      zh: "原生电脑操作", color: "#b49bff" },
+    { key: "tabs",      en: "Browser & Tabs",           zh: "浏览器与标签页", color: "#4ade80" },
+    { key: "nav",       en: "Navigation & Observation", zh: "导航与观察",   color: "#5eead4" },
+    { key: "dom",       en: "Locator & DOM",            zh: "定位器与 DOM", color: "#f0b878" },
+    { key: "page",      en: "Page & Capture",           zh: "页面与截图",   color: "#8fd0ea" },
+    { key: "input",     en: "CUA & Input",              zh: "CUA 与输入",   color: "#f472b6" },
+    { key: "net",       en: "Network & State",          zh: "网络与状态",   color: "#a3e635" },
+    { key: "session",   en: "Session & Diagnostics",    zh: "会话与诊断",   color: "#c4b5fd" }
+  ];
+
+  var TOOLS = [
+    /* native · 4 */
+    ["js", "native", "Run stateful JavaScript in the persistent cua_repl runtime; one Target API spans desktop windows and browser tabs.", "在持久化的 cua_repl 运行时中执行有状态 JavaScript；同一个 Target API 同时覆盖桌面窗口与浏览器标签页。"],
+    ["js_reset", "native", "Clear JavaScript bindings in the owned worker without closing the user's applications.", "清空自有 worker 中的 JavaScript 绑定，但不关闭用户的应用。"],
+    ["js_add_node_module_dir", "native", "Register an additional Node module directory for the native runtime.", "为原生运行时注册额外的 Node 模块目录。"],
+    ["turn_ended", "native", "Execution-context cleanup hook; Stop or Interrupt is sent with a fresh callId and no progressToken.", "执行上下文清理钩子；以新的 callId、不带 progressToken 发送 Stop 或 Interrupt。"],
+
+    /* browser & tabs · 14 */
+    ["codex_list_browsers", "tabs", "List live extension instances with browser_id, family, profile, version, capabilities and transport.", "列出在线扩展实例，含 browser_id、浏览器族、配置、版本、能力与传输方式。"],
+    ["codex_bind_browser", "tabs", "Bind this session to one exact browser_id; family-only binding requires a single live match.", "将会话绑定到唯一的 browser_id；仅按浏览器族绑定要求只有一个在线实例。"],
+    ["codex_browser_history", "tabs", "Read browser history with queries, date bounds and a result limit.", "读取浏览器历史，支持查询词、日期范围与结果上限。"],
+    ["codex_browser_management", "tabs", "Official windows, tabs, tab groups and bookmarks management; delete and clear need confirm=true.", "官方窗口、标签页、标签组与书签管理；删除与清空操作需要 confirm=true。"],
+    ["codex_browser_viewport", "tabs", "Set or reset the official browser viewport override.", "设置或重置官方浏览器视口覆盖。"],
+    ["codex_browser_visibility", "tabs", "Query or set browser visibility when the extension advertises the capability.", "当扩展声明支持时，查询或设置浏览器可见性。"],
+    ["codex_list_tabs", "tabs", "List tabs owned by this session, or resolve the active owned tab with selected_only (Tabs.selected).", "列出本会话持有的标签页；selected_only 可定位当前活动标签页（Tabs.selected）。"],
+    ["codex_create_tab", "tabs", "Create a new blank tab owned by this bridge session.", "创建一个归本桥接会话所有的新空白标签页。"],
+    ["codex_close_tab", "tabs", "Close an owned tab by ID.", "按 ID 关闭自有标签页。"],
+    ["codex_user_tabs", "tabs", "List every browser tab, including tabs not yet claimed by the bridge.", "列出浏览器中的全部标签页，包括尚未被桥接器认领的。"],
+    ["codex_claim_tab", "tabs", "Claim a user tab using the exact title and URL from a fresh enumeration.", "用最新枚举得到的精确标题与 URL 认领用户标签页。"],
+    ["codex_mark_tab", "tabs", "Mark an owned tab as a deliverable or a later-turn handoff.", "将自有标签页标记为交付物或后续回合的交接页。"],
+    ["codex_observe", "tabs", "Arm bounded observation for frames, dialogs, events and logs: networkidle, url_glob, safe url_regex, level filters.", "启动有界观察，采集帧、对话框、事件与日志：支持 networkidle、url_glob、安全 url_regex 与级别过滤。"],
+    ["codex_file_chooser", "tabs", "Capture a modal file chooser and its document-bound ID; uploads need an upload root and a colocated browser.", "捕获模态文件选择器及其文档绑定 ID；上传需要配置上传根目录且浏览器同机。"],
+
+    /* navigation & observation · 8 */
+    ["codex_navigate", "nav", "Navigate the tab to an http(s) URL.", "将标签页导航到 http(s) URL。"],
+    ["codex_reload", "nav", "Reload the current page.", "重新加载当前页面。"],
+    ["codex_navigate_back", "nav", "Go back one history entry.", "后退一个历史记录。"],
+    ["codex_navigate_forward", "nav", "Go forward one history entry.", "前进一个历史记录。"],
+    ["codex_wait_for_load", "nav", "Poll document.readyState until the page completes loading.", "轮询 document.readyState 直到页面加载完成。"],
+    ["codex_nav_and_wait", "nav", "Navigate and wait in one call, with commit, domcontentloaded, load or networkidle.", "一次调用完成导航与等待，可选 commit、domcontentloaded、load 或 networkidle。"],
+    ["codex_wait_for_element", "nav", "Poll a CSS selector until it matches — built for SPAs.", "轮询 CSS 选择器直到命中——为单页应用设计。"],
+    ["codex_wait_for_url", "nav", "Poll until the URL matches a substring, exact URL, glob or safe regex.", "轮询直到 URL 匹配子串、精确地址、glob 或安全正则。"],
+
+    /* locator & dom · 6 */
+    ["codex_dom_snapshot", "dom", "Full accessibility tree with optional same-origin iframe expansion; actions use backendDOMNodeId.", "完整可访问性树，可选展开同源 iframe；动作使用 backendDOMNodeId。"],
+    ["codex_dom_get_visible", "dom", "Human-readable visible DOM tree for the page.", "返回页面可读的可见 DOM 树。"],
+    ["codex_dom_click", "dom", "Click by accessibility backend DOM node ID.", "按可访问性后端 DOM 节点 ID 点击。"],
+    ["codex_find_element", "dom", "Find elements by ARIA role and accessible name.", "按 ARIA 角色与可访问名称查找元素。"],
+    ["codex_click_element", "dom", "Click an element returned by codex_find_element.", "点击 codex_find_element 返回的元素。"],
+    ["codex_locator", "dom", "Declarative CSS, role and text locators with and, or, has, has_not, safe regex and element_info; input is never replayed.", "声明式 CSS、角色与文本定位，支持 and、or、has、has_not、安全正则与 element_info；输入绝不重放。"],
+
+    /* page & capture · 12 */
+    ["codex_get_url", "page", "Read the current tab URL.", "读取当前标签页 URL。"],
+    ["codex_get_title", "page", "Read the current page title.", "读取当前页面标题。"],
+    ["codex_evaluate", "page", "Execute bounded page JavaScript and return JSON.", "执行有界的页面 JavaScript 并返回 JSON。"],
+    ["codex_page_assets", "page", "List page resources and fetch bounded known-size content.", "列出页面资源，并按已知大小抓取有界内容。"],
+    ["codex_console_logs", "page", "Capture console output for a window.", "捕获某个窗口的控制台输出。"],
+    ["codex_emulate_device", "page", "Emulate a mobile viewport; reset=true clears the override.", "模拟移动端视口；reset=true 可清除覆盖。"],
+    ["codex_screenshot", "page", "Capture a viewport screenshot; oversized images return a summary.", "截取视口截图；超限图片返回摘要。"],
+    ["codex_screenshot_element", "page", "Capture one element by selector with optional padding and element_info metadata.", "按选择器截取单个元素，可加内边距并附带 element_info 元数据。"],
+    ["codex_print_pdf", "page", "Render the page to PDF through a bounded CDP stream; returns a size summary.", "通过有界 CDP 流将页面渲染为 PDF；返回体积摘要。"],
+    ["codex_bring_to_front", "page", "Explicitly activate a tab when the user wants to watch the work.", "当用户想观看过程时，显式把标签页置前。"],
+    ["codex_dialog", "page", "Handle alert, confirm and prompt dialogs.", "处理 alert、confirm 与 prompt 对话框。"],
+    ["codex_performance_metrics", "page", "Inspect DOM node counts, JS heap and event listeners.", "查看 DOM 节点数、JS 堆与事件监听器。"],
+
+    /* cua & input · 13 */
+    ["codex_click", "input", "Resolve the first CSS match and click with a trusted CDP pointer.", "解析首个 CSS 匹配并用受信任的 CDP 指针点击。"],
+    ["codex_fill", "input", "Fill an input by CSS selector.", "按 CSS 选择器填充输入框。"],
+    ["codex_hover", "input", "Move a trusted CDP pointer over the first CSS match.", "将受信任的 CDP 指针移到首个 CSS 匹配上。"],
+    ["codex_select_option", "input", "Select an exact existing option through the shared locator engine.", "通过共享定位引擎选择精确存在的选项。"],
+    ["codex_drag", "input", "Drag through every supplied point with the CUA pointer path.", "沿 CUA 指针路径拖拽经过每一个给定点。"],
+    ["codex_cua_click", "input", "Coordinate click with button 1–5, held modifiers and click_count=2 double-click.", "坐标点击，支持按钮 1–5、按住修饰键与 click_count=2 双击。"],
+    ["codex_cua_move", "input", "Move the CUA pointer with optional held modifiers.", "移动 CUA 指针，可选按住修饰键。"],
+    ["codex_cua_type", "input", "Type text at the current focus.", "在当前焦点处输入文本。"],
+    ["codex_cua_keypress", "input", "Press a key sequence such as Enter or Ctrl+C.", "按键序列，例如 Enter 或 Ctrl+C。"],
+    ["codex_cua_scroll", "input", "Scroll with scrollX/scrollY and optional modifiers.", "以 scrollX/scrollY 滚动，可加修饰键。"],
+    ["codex_click_and_wait", "input", "Click and wait for the resulting page load in one call.", "一次调用完成点击并等待页面加载。"],
+    ["codex_form_fill", "input", "Fill multiple fields from a selector-to-value map.", "用选择器到值的映射批量填充字段。"],
+    ["codex_file_input", "input", "Upload files to an input type=file inside the configured upload root.", "向配置上传根目录内的 input type=file 上传文件。"],
+
+    /* network & state · 6 */
+    ["codex_network_cookies", "net", "Read cookies with values redacted by default.", "读取 Cookie，默认隐藏值。"],
+    ["codex_network_set_cookie", "net", "Set a browser cookie.", "设置浏览器 Cookie。"],
+    ["codex_delete_cookies", "net", "Delete cookies by name.", "按名称删除 Cookie。"],
+    ["codex_storage", "net", "Get or set localStorage.", "读取或设置 localStorage。"],
+    ["codex_network_monitor", "net", "Pair requests with responses into a structured list.", "将请求与响应配对为结构化列表。"],
+    ["codex_execute_cdp", "net", "Run explicitly allowlisted CDP diagnostics only.", "仅执行显式白名单内的 CDP 诊断。"],
+
+    /* session & diagnostics · 7 */
+    ["codex_name_session", "session", "Name the current bridge session.", "为当前桥接会话命名。"],
+    ["codex_finalize", "session", "Send the official turnEnded; marked deliverable and handoff tabs survive cleanup.", "发送官方 turnEnded；已标记的交付/交接标签页会保留。"],
+    ["codex_get_info", "session", "Read bridge runtime and extension backend metadata.", "读取桥接运行时与扩展后端元数据。"],
+    ["codex_doctor", "session", "Self-diagnose pipe health, latency and version.", "自检管道健康、延迟与版本。"],
+    ["codex_clipboard", "session", "Session-virtual clipboard with bounded data and paste integration.", "会话虚拟剪贴板，数据有界并集成粘贴。"],
+    ["codex_webmcp", "session", "Experimental top-document WebMCP registration and invocation.", "实验性的顶层文档 WebMCP 注册与调用。"],
+    ["codex_content_export", "session", "Bounded local GSuite and YouTube exports with bridge-host path scope.", "有界的本地 GSuite 与 YouTube 导出，路径范围限定在桥接主机。"]
+  ].map(function (t) {
+    return { name: t[0], cat: t[1], en: t[2], zh: t[3] };
+  });
+
+  var CAT_BY_KEY = {};
+  CATS.forEach(function (c) { CAT_BY_KEY[c.key] = c; });
+
+  /* ------------------------------------------------------------------ */
+  /* i18n                                                                */
+  /* ------------------------------------------------------------------ */
+  var STORE_KEY = "cbb-lang";
+  var state = { lang: "en", cat: "all", query: "" };
+
+  function detectLang() {
+    try {
+      var saved = localStorage.getItem(STORE_KEY);
+      if (saved === "en" || saved === "zh") return saved;
+    } catch (e) {}
+    var nav = (navigator.language || "en").toLowerCase();
+    return nav.indexOf("zh") === 0 ? "zh" : "en";
+  }
+
+  function t(en, zh) { return state.lang === "zh" ? zh : en; }
+
+  function applyLang(lang, persist) {
+    state.lang = lang;
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    document.documentElement.setAttribute("data-lang", lang);
+
+    var nodes = document.querySelectorAll("[data-en]");
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      el.textContent = lang === "zh" ? el.getAttribute("data-zh") : el.getAttribute("data-en");
+    }
+
+    var btns = document.querySelectorAll("[data-lang-btn]");
+    for (var j = 0; j < btns.length; j++) {
+      var b = btns[j];
+      var on = b.getAttribute("data-lang-btn") === lang;
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+
+    var input = document.getElementById("toolSearch");
+    if (input) {
+      input.placeholder = lang === "zh" ? input.getAttribute("data-ph-zh") : input.getAttribute("data-ph-en");
+    }
+
+    var copyBtns = document.querySelectorAll("[data-copy]");
+    for (var k = 0; k < copyBtns.length; k++) {
+      if (copyBtns[k].classList.contains("copied")) continue;
+    }
+
+    if (persist) {
+      try { localStorage.setItem(STORE_KEY, lang); } catch (e) {}
+    }
+
+    renderChips();
+    renderTools();
+    renderCopyLabels();
+  }
+
+  function renderCopyLabels() {
+    var btns = document.querySelectorAll("[data-copy]");
+    for (var i = 0; i < btns.length; i++) {
+      var btn = btns[i];
+      if (btn.classList.contains("copied")) continue;
+      var label = btn.querySelector("span");
+      if (label) label.textContent = t("Copy", "复制");
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Tools explorer                                                      */
+  /* ------------------------------------------------------------------ */
+  function catCount(key) {
+    if (key === "all") return TOOLS.length;
+    var n = 0;
+    for (var i = 0; i < TOOLS.length; i++) if (TOOLS[i].cat === key) n++;
+    return n;
+  }
+
+  function renderChips() {
+    var host = document.getElementById("chips");
+    if (!host) return;
+    host.innerHTML = "";
+    CATS.forEach(function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.setAttribute("aria-pressed", state.cat === c.key ? "true" : "false");
+      b.style.setProperty("--cc", c.color);
+      b.setAttribute("data-cat", c.key);
+
+      var dot = document.createElement("span");
+      dot.className = "cd";
+      dot.setAttribute("aria-hidden", "true");
+      b.appendChild(dot);
+
+      var label = document.createElement("span");
+      label.textContent = state.lang === "zh" ? c.zh : c.en;
+      b.appendChild(label);
+
+      var count = document.createElement("span");
+      count.className = "c";
+      count.textContent = String(catCount(c.key));
+      b.appendChild(count);
+
+      b.addEventListener("click", function () {
+        state.cat = c.key;
+        renderChips();
+        renderTools();
+      });
+      host.appendChild(b);
+    });
+  }
+
+  function matches(tool, q) {
+    if (!q) return true;
+    var hay = (tool.name + " " + tool.en + " " + tool.zh + " " + CAT_BY_KEY[tool.cat].en + " " + CAT_BY_KEY[tool.cat].zh).toLowerCase();
+    return hay.indexOf(q) !== -1;
+  }
+
+  function highlight(text, q) {
+    if (!q) return null;
+    var idx = text.toLowerCase().indexOf(q);
+    if (idx < 0) return null;
+    return [text.slice(0, idx), text.slice(idx, idx + q.length), text.slice(idx + q.length)];
+  }
+
+  function makeDesc(tool, q) {
+    var desc = state.lang === "zh" ? tool.zh : tool.en;
+    var p = document.createElement("p");
+    p.className = "tool-desc";
+    var h = highlight(desc, q);
+    if (h) {
+      p.appendChild(document.createTextNode(h[0]));
+      var mk = document.createElement("mark");
+      mk.textContent = h[1];
+      p.appendChild(mk);
+      p.appendChild(document.createTextNode(h[2]));
+    } else {
+      p.textContent = desc;
+    }
+    return p;
+  }
+
+  function renderTools() {
+    var grid = document.getElementById("toolGrid");
+    var empty = document.getElementById("toolEmpty");
+    var countEl = document.getElementById("toolCount");
+    if (!grid) return;
+
+    var q = state.query.trim().toLowerCase();
+    var filtered = TOOLS.filter(function (tool) {
+      if (state.cat !== "all" && tool.cat !== state.cat) return false;
+      return matches(tool, q);
+    });
+
+    grid.innerHTML = "";
+
+    filtered.forEach(function (tool) {
+      var cat = CAT_BY_KEY[tool.cat];
+      var card = document.createElement("article");
+      card.className = "tool";
+      card.style.setProperty("--cc", cat.color);
+
+      var top = document.createElement("div");
+      top.className = "tool-top";
+
+      var dot = document.createElement("span");
+      dot.className = "cd";
+      dot.setAttribute("aria-hidden", "true");
+      top.appendChild(dot);
+
+      var name = document.createElement("span");
+      name.className = "tool-name";
+      var nameH = highlight(tool.name, q);
+      if (nameH) {
+        name.appendChild(document.createTextNode(nameH[0]));
+        var mk = document.createElement("mark");
+        mk.textContent = nameH[1];
+        name.appendChild(mk);
+        name.appendChild(document.createTextNode(nameH[2]));
+      } else {
+        name.textContent = tool.name;
+      }
+      top.appendChild(name);
+
+      var catEl = document.createElement("span");
+      catEl.className = "tool-cat";
+      catEl.textContent = state.lang === "zh" ? cat.zh : cat.en;
+      top.appendChild(catEl);
+
+      card.appendChild(top);
+      card.appendChild(makeDesc(tool, q));
+      grid.appendChild(card);
+    });
+
+    empty.hidden = filtered.length !== 0;
+    if (countEl) {
+      countEl.innerHTML = "";
+      var b = document.createElement("b");
+      b.textContent = String(filtered.length);
+      countEl.appendChild(document.createTextNode(t("Showing ", "显示 ")));
+      countEl.appendChild(b);
+      countEl.appendChild(document.createTextNode(t(" of " + TOOLS.length + " tools", " / " + TOOLS.length + " 个工具")));
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Copy buttons                                                        */
+  /* ------------------------------------------------------------------ */
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.top = "-1000px";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        var ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        ok ? resolve() : reject(new Error("copy failed"));
+      } catch (err) {
+        document.body.removeChild(ta);
+        reject(err);
+      }
+    });
+  }
+
+  document.addEventListener("click", function (ev) {
+    var btn = ev.target.closest ? ev.target.closest("[data-copy]") : null;
+    if (!btn) return;
+    var sel = btn.getAttribute("data-copy");
+    var target = document.querySelector(sel);
+    if (!target) return;
+    copyText(target.textContent).then(function () {
+      var label = btn.querySelector("span");
+      btn.classList.add("copied");
+      if (label) label.textContent = t("Copied", "已复制");
+      window.setTimeout(function () {
+        btn.classList.remove("copied");
+        if (label) label.textContent = t("Copy", "复制");
+      }, 1600);
+    }).catch(function () {
+      var label = btn.querySelector("span");
+      if (label) label.textContent = t("Press Ctrl+C", "请按 Ctrl+C");
+      window.setTimeout(function () {
+        if (label) label.textContent = t("Copy", "复制");
+      }, 2200);
+    });
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* Tabs                                                                */
+  /* ------------------------------------------------------------------ */
+  function selectTab(id) {
+    var tabs = document.querySelectorAll("[data-tab]");
+    var panels = document.querySelectorAll(".panel");
+    for (var i = 0; i < tabs.length; i++) {
+      var active = tabs[i].getAttribute("data-tab") === id;
+      tabs[i].setAttribute("aria-selected", active ? "true" : "false");
+      tabs[i].tabIndex = active ? 0 : -1;
+    }
+    for (var j = 0; j < panels.length; j++) {
+      var on = panels[j].id === "panel-" + id;
+      panels[j].classList.toggle("active", on);
+      if (on) panels[j].removeAttribute("hidden");
+      else panels[j].setAttribute("hidden", "");
+    }
+  }
+
+  var tabList = document.querySelector(".tabs");
+  if (tabList) {
+    tabList.addEventListener("click", function (ev) {
+      var tab = ev.target.closest ? ev.target.closest("[data-tab]") : null;
+      if (!tab) return;
+      selectTab(tab.getAttribute("data-tab"));
+    });
+    tabList.addEventListener("keydown", function (ev) {
+      var keys = ["ArrowRight", "ArrowLeft", "Home", "End"];
+      if (keys.indexOf(ev.key) === -1) return;
+      ev.preventDefault();
+      var tabs = Array.prototype.slice.call(document.querySelectorAll("[data-tab]"));
+      var current = tabs.indexOf(document.activeElement);
+      if (current < 0) current = 0;
+      var next = current;
+      if (ev.key === "ArrowRight") next = (current + 1) % tabs.length;
+      if (ev.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+      if (ev.key === "Home") next = 0;
+      if (ev.key === "End") next = tabs.length - 1;
+      tabs[next].focus();
+      selectTab(tabs[next].getAttribute("data-tab"));
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Language buttons + search + more                                    */
+  /* ------------------------------------------------------------------ */
+  var langBtns = document.querySelectorAll("[data-lang-btn]");
+  for (var i = 0; i < langBtns.length; i++) {
+    langBtns[i].addEventListener("click", function () {
+      applyLang(this.getAttribute("data-lang-btn"), true);
+    });
+  }
+
+  var search = document.getElementById("toolSearch");
+  if (search) {
+    search.addEventListener("input", function () {
+      state.query = search.value || "";
+      renderTools();
+    });
+  }
+
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key !== "/" || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    var tag = (document.activeElement && document.activeElement.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    if (!search) return;
+    ev.preventDefault();
+    search.focus();
+    search.scrollIntoView({ block: "center", behavior: "smooth" });
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* Boot                                                                */
+  /* ------------------------------------------------------------------ */
+  applyLang(detectLang(), false);
+})();
+</script>
+</body>
+</html>

@@ -19,6 +19,7 @@ const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(300);
 const END_TIMEOUT: Duration = Duration::from_secs(8);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_RELAY_OUTBOUND_FRAMES: usize = 256;
+const MAX_RELAY_OUTBOUND_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CLI_LINE_BYTES: usize = 1024 * 1024;
 const MAX_NATIVE_CATALOG_PAGES: usize = 100;
 const MAX_NATIVE_CATALOG_ITEMS: usize = 2048;
@@ -526,12 +527,14 @@ impl<R: AsyncRead + Unpin> JsonReader<R> {
 struct JsonWriter<W> {
     writer: W,
     outbound: VecDeque<OutboundFrame>,
+    outbound_bytes: usize,
 }
 
 impl<W: AsyncWrite + Unpin> JsonWriter<W> {
     fn enqueue(&mut self, row: Value, cancelled_id: Option<String>) -> Result<()> {
         let mut bytes = serde_json::to_vec(&row)?;
         bytes.push(b'\n');
+        self.outbound_bytes = self.outbound_bytes.saturating_add(bytes.len());
         self.outbound.push_back(OutboundFrame {
             bytes,
             written: 0,
@@ -547,6 +550,7 @@ impl<W: AsyncWrite + Unpin> JsonWriter<W> {
 
     fn can_accept_outbound(&self) -> bool {
         self.outbound.len() < MAX_RELAY_OUTBOUND_FRAMES
+            && self.outbound_bytes < MAX_RELAY_OUTBOUND_BYTES
     }
 
     fn has_active_write(&self) -> bool {
@@ -576,6 +580,7 @@ impl<W: AsyncWrite + Unpin> JsonWriter<W> {
             .await
             .map_err(|_| anyhow::anyhow!("{timeout_context}"))??;
         let completed = self.outbound.pop_front().expect("front frame existed");
+        self.outbound_bytes = self.outbound_bytes.saturating_sub(completed.bytes.len());
         Ok(completed.cancelled_id)
     }
 }
@@ -599,6 +604,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> JsonTransport<R, W> {
             writer: JsonWriter {
                 writer,
                 outbound: VecDeque::new(),
+                outbound_bytes: 0,
             },
         }
     }
@@ -896,9 +902,9 @@ where
                             tool_lists.remove(&id);
                         }
                         Ok(None) => {}
-                        Err(_) => {
+                        Err(error) => {
                             write_failed = true;
-                            bail!("native transport write failed; outcome unknown and not replayed");
+                            bail!("native transport write failed; outcome unknown and not replayed: {error:#}");
                         }
                     }
                 }
@@ -906,11 +912,11 @@ where
                     flushed?;
                 }
                 _ = &mut stop => {
-                    if native_writer.has_active_write() || native_writer.has_outbound() {
+                    if native_writer.has_active_write() {
                         write_failed = true;
                         bail!("native action interrupted during write; outcome unknown and not replayed");
                     }
-                    if host_writer.has_active_write() || host_writer.has_outbound() {
+                    if host_writer.has_active_write() {
                         bail!("native action interrupted during client write; client stream may be truncated");
                     }
                     return Ok("Interrupt");

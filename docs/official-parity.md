@@ -203,7 +203,7 @@ invalidate cursors. Earlier logs are available only after start (including CDP
 enable replay), not a complete historical browser log. Child-session events are
 raw evidence, not implemented OOPIF routing. Navigation composites arm before
 the action and wait for `commit`, `domcontentloaded`, `load`, or `networkidle`
-(500ms quiet window with zero in-flight top-document requests); redirects may
+(500ms quiet window with zero same-target in-flight requests); redirects may
 change the final URL. Exact `url`, `url_glob`, and safe `url_regex` waiting are
 supported on both `codex_observe(action="wait_navigation")` and
 `codex_wait_for_url`.

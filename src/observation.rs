@@ -91,7 +91,7 @@ pub struct TabSnapshot {
     pub url: Option<String>,
     pub domcontentloaded: bool,
     pub load: bool,
-    /// Top-document requests started but not yet finished.
+    /// Same-target requests started but not yet finished.
     pub inflight_network_requests: usize,
     pub frames: Vec<FrameSnapshot>,
     pub frames_truncated: bool,
@@ -137,10 +137,11 @@ struct TabState {
     dropped_count: u64,
     /// Highest lost sequence, including oversize events that were not retained.
     lost_through: u64,
-    /// Request IDs in flight for the current top document, bounded by
+    /// Request IDs in flight for the current target session, bounded by
     /// `MAX_INFLIGHT_REQUESTS` and cleared by a main-frame navigation commit.
     inflight_requests: HashSet<String>,
-    /// Last moment the top document's network state changed; the `networkidle`
+    inflight_overflowed: bool,
+    /// Last moment the target's network state changed; the `networkidle`
     /// quiet window is measured from here.
     last_network_change: Instant,
     notify: Arc<Notify>,
@@ -166,6 +167,7 @@ impl TabState {
             dropped_count: 0,
             lost_through: 0,
             inflight_requests: HashSet::new(),
+            inflight_overflowed: false,
             last_network_change: Instant::now(),
             notify: Arc::new(Notify::new()),
         }
@@ -245,6 +247,7 @@ impl TabState {
                 self.frames.clear();
                 self.frames_truncated = false;
                 self.inflight_requests.clear();
+                self.inflight_overflowed = false;
                 self.last_network_change = Instant::now();
             }
             self.main_frame_id = Some(id.into());
@@ -369,6 +372,7 @@ impl TabState {
             return;
         }
         if self.inflight_requests.len() >= MAX_INFLIGHT_REQUESTS {
+            self.inflight_overflowed = true;
             return;
         }
         self.inflight_requests.insert(id);
@@ -655,8 +659,8 @@ impl ObservationStore {
 pub enum UrlMatcher {
     Exact(String),
     Substring(String),
-    /// Translated glob source (`^...$` regex), validated at parse time.
-    Glob(String),
+    /// Compiled glob (`^...$` regex), validated at parse time.
+    Glob(Regex),
     Regex(Regex),
 }
 
@@ -687,11 +691,11 @@ impl UrlMatcher {
                 )));
             }
             let pattern = glob_to_regex(glob);
-            RegexBuilder::new(&pattern)
+            let compiled = RegexBuilder::new(&pattern)
                 .size_limit(REGEX_SIZE_LIMIT)
                 .build()
                 .map_err(|_| BridgeError::User("url_glob is not a usable pattern".into()))?;
-            return Ok(Some(Self::Glob(pattern)));
+            return Ok(Some(Self::Glob(compiled)));
         }
         let Some(spec) = url_regex else {
             return Ok(None);
@@ -703,13 +707,7 @@ impl UrlMatcher {
         match self {
             Self::Exact(url) => candidate == url,
             Self::Substring(needle) => candidate.contains(needle.as_str()),
-            // The translated source is bounded at parse time, so compiling on
-            // demand stays cheap and keeps the matcher simple to clone.
-            Self::Glob(pattern) => RegexBuilder::new(pattern)
-                .size_limit(REGEX_SIZE_LIMIT)
-                .build()
-                .is_ok_and(|regex| regex.is_match(candidate)),
-            Self::Regex(regex) => regex.is_match(candidate),
+            Self::Glob(regex) | Self::Regex(regex) => regex.is_match(candidate),
         }
     }
 }
@@ -932,7 +930,11 @@ pub(crate) async fn wait_for_navigation_with_matcher(
                     LoadState::Commit => true,
                     LoadState::DomContentLoaded => snapshot.domcontentloaded,
                     LoadState::Load => snapshot.load,
-                    LoadState::NetworkIdle => snapshot.load && tab.inflight_requests.is_empty(),
+                    LoadState::NetworkIdle => {
+                        snapshot.load
+                            && !tab.inflight_overflowed
+                            && tab.inflight_requests.is_empty()
+                    }
                 };
                 let matched = matcher.is_none_or(|matcher| {
                     snapshot

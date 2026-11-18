@@ -572,11 +572,11 @@ const FRAME_WALK_TEMPLATE: &str = r#"(() => {
     }
     out.push({
       index: index,
-      id: String(frame.id || ''),
-      name: String(frame.name || ''),
-      src: String(frame.src || ''),
+      id: String(frame.id || '').slice(0, 512),
+      name: String(frame.name || '').slice(0, 512),
+      src: String(frame.src || '').slice(0, 2048),
       same_origin: sameOrigin,
-      title: title,
+      title: title.slice(0, 512),
       text: text
     });
   }
@@ -1201,9 +1201,17 @@ const MAX_ELEMENT_SCREENSHOT_PADDING: f64 = 256.0;
 /// element is actually visible and enabled, and a stable selector suggestion.
 const ELEMENT_PROBE_TEMPLATE: &str = r#"(() => {
   const selector = __SELECTOR__;
+  const strict = __STRICT__;
   try {
-    const el = document.querySelector(selector);
-    if (!el) return JSON.stringify({ found: false });
+    const matches = document.querySelectorAll(selector);
+    if (!matches || matches.length === 0) return JSON.stringify({ found: false });
+    if (strict && matches.length > 1) {
+      return JSON.stringify({
+        found: false,
+        error: 'strict mode violation: selector matched ' + matches.length + ' elements; pass strict=false or refine selector'
+      });
+    }
+    const el = matches[0];
     const rect = el.getBoundingClientRect();
     const style = window.getComputedStyle(el);
     const opacity = Number(style.opacity);
@@ -1234,13 +1242,13 @@ const ELEMENT_PROBE_TEMPLATE: &str = r#"(() => {
     return JSON.stringify({
       found: true,
       tag: el.tagName.toLowerCase(),
-      id: el.id || '',
-      classes: Array.prototype.slice.call(el.classList),
-      role: el.getAttribute('role') || '',
-      name: name,
+      id: String(el.id || '').slice(0, 512),
+      classes: Array.prototype.slice.call(el.classList, 0, 32).map((c) => String(c).slice(0, 128)),
+      role: String(el.getAttribute('role') || '').slice(0, 128),
+      name: name.slice(0, 512),
       visible: visible,
       enabled: !disabled,
-      selector_suggestion: suggestion,
+      selector_suggestion: suggestion.slice(0, 512),
       rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
     });
   } catch (error) {
@@ -1248,8 +1256,10 @@ const ELEMENT_PROBE_TEMPLATE: &str = r#"(() => {
   }
 })()"#;
 
-fn element_probe_script(selector: &str) -> String {
-    ELEMENT_PROBE_TEMPLATE.replace("__SELECTOR__", &json_escaped(selector))
+fn element_probe_script(selector: &str, strict: bool) -> String {
+    ELEMENT_PROBE_TEMPLATE
+        .replace("__SELECTOR__", &json_escaped(selector))
+        .replace("__STRICT__", if strict { "true" } else { "false" })
 }
 
 fn require_selector<'a>(action: &str, selector: &'a str) -> Result<&'a str> {
@@ -1442,13 +1452,14 @@ async fn read_element_probe(
     id: i64,
     action: &str,
     selector: &str,
+    strict: bool,
 ) -> Result<ElementProbe> {
     let raw = client
         .execute_cdp(
             id,
             "Runtime.evaluate",
             Some(json!({
-                "expression": element_probe_script(selector),
+                "expression": element_probe_script(selector, strict),
                 "returnByValue": true
             })),
         )
@@ -1477,10 +1488,19 @@ async fn read_element_probe(
 /// zero-size) fall back to the probe's viewport rect, and an all-zero rect
 /// when even that is missing; `visible` stays authoritative.
 pub async fn element_info(client: &Client, tab_id: &str, selector: &str) -> Result<Value> {
+    element_info_with_strict(client, tab_id, selector, false).await
+}
+
+pub async fn element_info_with_strict(
+    client: &Client,
+    tab_id: &str,
+    selector: &str,
+    strict: bool,
+) -> Result<Value> {
     let id = parse_tab_id("element_info", tab_id)?;
     let selector = require_selector("element_info", selector)?;
     let element = resolve_dom_element(client, id, "element_info", selector).await?;
-    let probe = read_element_probe(client, id, "element_info", selector).await?;
+    let probe = read_element_probe(client, id, "element_info", selector, strict).await?;
     let rect = match client
         .execute_cdp(
             id,
@@ -1501,7 +1521,11 @@ pub async fn element_info(client: &Client, tab_id: &str, selector: &str) -> Resu
 
     let element_id = dom_attribute(&element.attributes, "id").unwrap_or(&probe.id);
     let classes: Vec<String> = match dom_attribute(&element.attributes, "class") {
-        Some(class) => class.split_whitespace().map(str::to_string).collect(),
+        Some(class) => class
+            .split_whitespace()
+            .take(32)
+            .map(|c| c.chars().take(128).collect())
+            .collect(),
         None => probe.classes.clone(),
     };
     let role = if probe.role.is_empty() {
@@ -1532,45 +1556,11 @@ pub async fn element_info(client: &Client, tab_id: &str, selector: &str) -> Resu
     }))
 }
 
-/// Screenshot a single element by clipping to its bounding rect.
+/// Screenshot a single element by clipping to its page-coordinate border box.
 pub async fn screenshot_element(client: &Client, tab_id: &str, selector: &str) -> Result<String> {
-    let id = parse_tab_id("screenshot_element", tab_id)?;
-    let sel = serde_json::to_string(selector).unwrap_or_else(|_| "null".into());
-    let expr = format!(
-        "(function(){{var e=document.querySelector({sel});if(!e)return null;var r=e.getBoundingClientRect();if(r.width===0||r.height===0)return null;return JSON.stringify({{x:r.x,y:r.y,width:r.width,height:r.height}})}})()"
-    );
-    let raw = client
-        .execute_cdp(
-            id,
-            "Runtime.evaluate",
-            Some(json!({ "expression": expr, "returnByValue": true })),
-        )
-        .await?;
-    let rect_str = runtime_value_string(&raw)?
-        .filter(|s| s != "null")
-        .ok_or_else(|| {
-            BridgeError::User(format!("element {selector:?} not found or has zero size"))
-        })?;
-    #[derive(Deserialize)]
-    struct Rect {
-        x: f64,
-        y: f64,
-        width: f64,
-        height: f64,
-    }
-    let rect: Rect = serde_json::from_str(&rect_str)
-        .map_err(|err| BridgeError::Protocol(format!("parse element rect: {err}")))?;
-    let raw = client
-        .execute_cdp(
-            id,
-            "Page.captureScreenshot",
-            Some(json!({
-                "format": "png",
-                "clip": { "x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height, "scale": 1.0 }
-            })),
-        )
-        .await?;
-    screenshot_data(&raw)
+    screenshot_element_with_options(client, tab_id, selector, 0.0)
+        .await
+        .map(|(data, _)| data)
 }
 
 /// Annotated element screenshot (`PlaywrightAPI.elementScreenshot`): capture
