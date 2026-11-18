@@ -1222,13 +1222,19 @@ impl Client {
         .and_then(|result| result);
         if result.is_err() {
             self.inner.observations.lock().unwrap().remove(tab_id);
-            self.inner.attached_tabs.lock().await.remove(&tab_id);
-            let cleanup_deadline = Instant::now() + Duration::from_millis(500);
-            let _ = timeout_at(
-                cleanup_deadline,
-                self.detach_tab_until(tab_id, cleanup_deadline),
-            )
-            .await;
+            if self.inner.connection_epoch.load(Ordering::Acquire) == epoch {
+                let mut attached = self.inner.attached_tabs.lock().await;
+                if attached.get(&tab_id) == Some(&epoch) {
+                    attached.remove(&tab_id);
+                }
+                drop(attached);
+                let cleanup_deadline = Instant::now() + Duration::from_millis(500);
+                let _ = timeout_at(
+                    cleanup_deadline,
+                    self.detach_tab_until(tab_id, cleanup_deadline),
+                )
+                .await;
+            }
         }
         result
     }

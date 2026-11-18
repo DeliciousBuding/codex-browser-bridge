@@ -1,46 +1,84 @@
 # ROADMAP
 
-## Current direction
+## Architecture and scope
 
-Expose reliable Chromium-extension outcomes to non-Codex MCP clients, without
-cloning app-private auth, Guardian, artifact libraries or policy. Tool counts
-are distribution facts, not parity. Source contracts and remaining differences:
-[official-parity.md](docs/official-parity.md). Release history:
+`codex-browser-bridge` is a thin transport and protocol adapter with two explicit
+surfaces:
+
+- **`--surface browser` (default)**: connects directly to the Codex Browser Use
+  Chromium extension native-messaging endpoint (`\\.\pipe\codex-browser-use\*` or
+  `/tmp/codex-browser-use/*.sock`) and exposes 66 structured `codex_*` MCP tools
+  and CLI commands without requiring the Codex desktop app.
+- **`--surface computer`**: discovers and launches the installed Codex `cua_repl`
+  MCP service (`[mcp_servers.cua_repl]` or bundled `unified-computer-use`),
+  relaying `js`, `js_reset`, `js_add_node_module_dir`, `turn_ended`, and
+  bidirectional `elicitation/create` app approvals while owning worker
+  process-tree cleanup.
+
+Detailed contracts and status matrices:
+[docs/official-parity.md](docs/official-parity.md),
+[docs/native-computer-use.md](docs/native-computer-use.md), and
 [CHANGELOG.md](CHANGELOG.md).
 
-## Implemented in current source
+## Delivered (`v2.0.0` – `v2.1.1`)
 
-- Exact browser binding, no-replay input/navigation/dialog mutations, bounded
-  turn/session cleanup and truthful failures.
-- Instance-bound CLI v2 continuation, OS single-owner locks, strict selector
-  configuration, exact tab-claim snapshots and serialized rebind/finalize.
-  Completed delivery and verification: [#40](https://github.com/DeliciousBuding/codex-browser-bridge/issues/40).
-- Opt-in tab/document observation with frame/loader state, dialog/chooser IDs,
-  bounded persistent event/log cursors, explicit gaps and action-before-wait.
-- Shared declarative locator composition, trusted checked-state transitions,
-  exact option descriptors, bounded actionability/trial/force and typing.
-- One controlled bridge-host file-result boundary with atomic no-overwrite
-  publication; bounded colocated file chooser uploads, not remote-path guesses.
-- Windows and Linux GNU x64/arm64 packaging; existing pinned plugin/npm workflow.
+- **Browser session & transport (`#40`)**: deterministic browser selection
+  (`--pipe`, `--browser-family`, `--browser-instance`), OS single-owner locks,
+  instance-bound CLI v2 session continuation, exact tab-claim snapshots,
+  serialized rebind/finalize, and background focus emulation
+  (`Emulation.setFocusEmulationEnabled`) on tab attach.
+- **Browser observation, locators & files (`#40`)**: opt-in per-tab observation
+  with frame/loader state, dialog/file-chooser IDs, bounded event/log cursors,
+  shared declarative locators with actionability/trial/force, trusted
+  checked-state transitions, viewport/full-page/bounded-`clip` screenshots,
+  colocated file-chooser uploads, and atomic host file output.
+- **Native Computer Use adapter (`#57`, `v2.1.0` – `v2.1.1`)**: host launch-row
+  discovery, Codex CLI environment and Windows `PATH`/`PATHEXT` parity, unified
+  cancel-safe JSON-RPC stdio transport across `--mode mcp` and CLI/doctor
+  (`call`, `batch`, `tools`, `--image-dir`), `enabled_tools`/`disabled_tools`
+  filtering, `turn_ended` execution-context cleanup, and Windows JobObject /
+  Unix process-group teardown.
+- **Supply chain & distribution**: zero-exception `cargo-deny` gate (`rmcp`
+  removed), checksummed Windows/Linux x64 and arm64 binaries with GitHub
+  artifact attestations, npm Trusted Publishing, and Claude Code plugin
+  packaging.
 
-## Remaining supported-path gaps
+## Next iterations
 
-- Cross-origin/OOPIF and transformed-frame input routing; complete ARIA name
-  computation. Existing same-origin resolver is deliberately not Playwright.
-- Backend-authorized browser download completion/path and remote upload transfer.
-  Host/CDP cached resource export does not satisfy that contract.
-- Full official navigation URL matchers/networkidle, level-filtered log APIs,
-  unrestricted safe regex and persistent visible-DOM reference epochs.
-- Optional typed result schemas and performance traces, only when explicitly
-  justified by a client contract. Raw privileged CDP remains blocked.
-- Expand synthetic live acceptance beyond current tested tool families; native
-  compilation/CI does not establish runtime support for untested endpoints.
+### 1. Browser surface — official `26.1111.21308` parity gaps
 
-## Explicitly deferred
+Tracked against [docs/official-parity.md](docs/official-parity.md):
 
-- macOS until a real Darwin endpoint is available and tested.
-- winget/scoop: npm already delivers checksummed native binaries.
-- App-private secure auth, cloud takeover, telemetry and artifact library.
+- **`Tabs.selected`**: resolve the currently active owned tab directly instead
+  of inferring from `codex_list_tabs`.
+- **Element inspection & annotated capture**: `PlaywrightAPI.elementInfo` and
+  `PlaywrightAPI.elementScreenshot` (CDP DOM hit-testing, backend node IDs,
+  selector generation, and annotated bounding-box screenshots).
+- **Frame-expanded DOM & OOPIF routing**: `PlaywrightAPI.domSnapshot`
+  iframe-expanded text snapshots, cross-origin/OOPIF frame coordinate routing,
+  and fuller ARIA accessible-name computation.
+- **Navigation & log filters**: `waitForLoadState("networkidle")`, glob/regex
+  matchers in `waitForURL`, and level-filtered console/page error reads.
 
-WSL sockets and Windows interop pipes are distinct transports; no automatic
-cross-OS discovery is claimed.
+### 2. Native Computer Use surface — runtime & platform coverage
+
+Tracked in [issue #57](https://github.com/DeliciousBuding/codex-browser-bridge/issues/57):
+
+- **Relay full-duplex write queueing**: decouple client-to-native and
+  native-to-client writes so a backpressured peer cannot stall the opposite
+  direction up to `WRITE_TIMEOUT` (10s).
+- **Desktop interaction edge cases**: physical held-input release verification
+  on interrupt, user takeover during active runs, and multi-display / DPI /
+  clipboard coverage on Windows x64 and Linux X11.
+- **Platform acceptance matrix**: live GUI verification on Windows ARM64,
+  Linux x64, and Linux Wayland.
+
+## Out of scope
+
+- Reimplementing OpenAI's proprietary GUI executor (`@oai/sky` / `cua-sparkle`),
+  app-private OAuth/Guardian tokens, cloud takeover, telemetry, or remote
+  artifact storage.
+- Backend-authorized browser download/upload streaming (`BrowserUseAPI` host
+  endpoints that depend on Codex app-private backend services).
+- Prebuilt macOS release binaries until a Darwin GUI/TCC endpoint is verified.
+- Automatic cross-OS pipe/socket bridging between WSL and Windows.

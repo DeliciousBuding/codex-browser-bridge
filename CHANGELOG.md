@@ -31,6 +31,14 @@ All notable changes to this project will be documented in this file.
 - Apply the host's `enabled_tools`/`disabled_tools` policy consistently to
   advertised catalogs, direct `tools/call` requests, and internal `turn_ended`
   cleanup across both MCP relay and CLI modes.
+- Close child `stdin` before terminating a failed native CLI/doctor worker
+  startup, preserve the underlying error chain when CLI/doctor cleanup is not
+  confirmed, and fail the MCP relay when the native child closes `stdout`
+  unexpectedly.
+- Re-verify tab attachment before modifier-key release cleanup in
+  `input::keypress`, bound `pointer::scroll` (`mouseMoved` plus
+  `Input.synthesizeScrollGesture`) to a single operation deadline, and guard
+  `start_observation` failure rollback by connection epoch.
 
 ## [2.1.0] - 2026-11-18
 

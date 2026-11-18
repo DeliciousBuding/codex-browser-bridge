@@ -87,7 +87,7 @@ None of these labels means every parameter or live browser build has passed.
 | `Tab.ax`, `capabilities`, `clipboard`, `content`, `cua`, `dev`, `dom_cua`, `id`, `playwright` | Properties | Namespace references; `Tab.ax` itself is excluded from the extension default |
 | `Tab.back`, `close`, `forward`, `goto`, `reload`, `title`, `url` | Native / CDP | Existing operations; navigation readiness/error semantics still differ from Playwright |
 | `Tab.markDeliverable`, `markHandoff` | Native | `markTab`, followed by authoritative `turnEnded`; latest mark wins |
-| `Tab.screenshot` | CDP partial | Viewport/full-page exist; official arbitrary `clip` still needs a bounded crop contract |
+| `Tab.screenshot` | CDP partial | Viewport, full-page, and bounded `clip` (`x`, `y`, `width`, `height`, `scale`; max 32M scaled pixels) are implemented; oversized payloads return a text summary instead of partial base64 |
 | `Tab.getJsDialog`; dialog `accept`/`dismiss` | CDP partial | Buffered dialog get and opaque IDs via opt-in observer; supplied IDs reject stale actions. Start before opening; legacy no-ID direct handling remains. |
 | `AlertDialog.type`, `BeforeUnloadDialog.type`, `ConfirmDialog.type`, `PromptDialog.type` | Properties | Discriminants, not functions |
 | `Tab.requestManualHandoff`, `requestUserTakeover` | Not extension baseline | Cloud/manual-control UI is app-private; extension handoff uses a marked user-visible tab |

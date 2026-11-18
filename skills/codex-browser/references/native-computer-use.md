@@ -7,7 +7,14 @@ Configure a separate MCP server entry running
 than the browser `codex_*` tools.
 
 1. Start with the native `js` tool instructions. Inspect the returned API
-   documentation and AX/screenshot state before sending UI input.
+   documentation and AX/screenshot state before sending UI input. Under
+   `unified-computer-use` (`CUA_REPL_ENABLED_SURFACES="browser,computer"`),
+   `cua` inside `js` exposes both desktop apps (`listApps`, `listWindows`,
+   `getApp`) and browser tabs (`listBrowsers`, `getBrowser`, `createBrowserTab`,
+   `getTab`, `listTabs`) via the shared `Target` interface (`getAXState`,
+   `getScreenshot`, `getAXStateAndScreenshot`, `click`, `drag`, `scroll`,
+   `selectText`, `setValue`, `performSecondaryAction`, `paste`, `pressKey`,
+   `typeText`).
 2. Keep native target identifier types: Windows and Linux `getApp({windowId})`
    use the exact `windowId` from `listWindows()`; macOS uses the native app
    name, path, or bundle ID.

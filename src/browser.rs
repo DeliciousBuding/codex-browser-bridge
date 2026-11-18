@@ -579,12 +579,9 @@ fn content_size(raw: &RawValue) -> Result<(f64, f64)> {
     }
 }
 
-/// Bring a tab to the foreground via `Page.bringToFront`.
-///
-/// Needed when a background tab has been throttled or discarded by Chrome — CDP
-/// calls (especially screenshot) on a suspended tab can time out silently.
-/// Calling this restores the tab's rendering pipeline so subsequent CDP calls
-/// respond normally. Does not navigate or change page state.
+/// Explicitly activate a tab via `Page.bringToFront` when the user wants to
+/// view it. Background CDP work already enables `Emulation.setFocusEmulationEnabled`
+/// on attach without foreground activation.
 pub async fn bring_to_front(client: &Client, tab_id: &str) -> Result<()> {
     let id = parse_tab_id("bring_to_front", tab_id)?;
     client

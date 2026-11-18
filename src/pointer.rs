@@ -302,7 +302,7 @@ pub async fn scroll(
     let deadline = Instant::now() + OP_TIMEOUT;
     client.prepare_input(tab, deadline).await?;
     // The native client always positions the pointer before scrolling, even
-    // with no modifiers. The gesture gets its own bounded dispatch window.
+    // with no modifiers.
     dispatch_move_until(
         client,
         tab,
@@ -330,7 +330,7 @@ pub async fn scroll(
             "preventFling": true,
             "speed": 8000
         }),
-        Instant::now() + OP_TIMEOUT,
+        deadline,
     )
     .await
 }

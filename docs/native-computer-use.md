@@ -75,7 +75,18 @@ separately when you want Computer Use.
 
 The standard `cua_repl` catalog exposes `js`, `js_reset`,
 `js_add_node_module_dir`, and `turn_ended`. Call `js` and read its returned
-documentation and state before issuing UI actions.
+documentation and state before issuing UI actions. When launched from
+`unified-computer-use` (`CUA_REPL_ENABLED_SURFACES="browser,computer"`), the
+persistent `cua` binding inside `js` covers both desktop applications
+(`cua.listApps()`, `cua.listWindows()`, `cua.getApp({windowId})`,
+`cua.computer.launch_app()`) and browser tabs (`cua.listBrowsers()`,
+`cua.getBrowser()`, `cua.createBrowserTab()`, `cua.getTab()`, `cua.listTabs()`)
+through a shared `Target` interface (`getAXState()`, `getScreenshot()`,
+`getAXStateAndScreenshot()`, `click(elementIndex | [x, y])`, `drag`, `scroll`,
+`selectText`, `setValue`, `performSecondaryAction`, `paste`, `pressKey`,
+`typeText`). Use `--surface browser` when you want standalone `codex_*` MCP
+tools over the Chromium extension pipe without running `cua_repl`; use
+`--surface computer` when you want the stateful `cua_repl` JavaScript runtime.
 
 `enabled_tools` is applied before `disabled_tools` across advertised catalogs,
 direct `tools/call` requests, and the end-of-session `turn_ended` cleanup hook.
