@@ -1,7 +1,7 @@
 //! Thin access to the installed native Computer Use MCP service.
 //! No app objects, input engine, permissions, or screenshots are reimplemented.
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     ffi::{OsStr, OsString},
     path::{Path, PathBuf},
     process::Stdio,
@@ -18,6 +18,7 @@ const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(300);
 const END_TIMEOUT: Duration = Duration::from_secs(8);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_RELAY_OUTBOUND_FRAMES: usize = 256;
 const MAX_CLI_LINE_BYTES: usize = 1024 * 1024;
 const MAX_NATIVE_CATALOG_PAGES: usize = 100;
 const MAX_NATIVE_CATALOG_ITEMS: usize = 2048;
@@ -495,24 +496,19 @@ impl Drop for OwnedProcess {
     }
 }
 
-/// Standard MCP stdio framing with untyped JSON preserves native extensions
-/// across both MCP relay and CLI/doctor modes. Keep the read buffer on the
-/// transport so select cancellation never discards a partial line.
-struct JsonTransport<R, W> {
+struct OutboundFrame {
+    bytes: Vec<u8>,
+    written: usize,
+    deadline: Option<tokio::time::Instant>,
+    cancelled_id: Option<String>,
+}
+
+struct JsonReader<R> {
     reader: BufReader<R>,
-    writer: W,
     buffer: Vec<u8>,
 }
 
-impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> JsonTransport<R, W> {
-    fn new(reader: R, writer: W) -> Self {
-        Self {
-            reader: BufReader::new(reader),
-            writer,
-            buffer: Vec::new(),
-        }
-    }
-
+impl<R: AsyncRead + Unpin> JsonReader<R> {
     async fn receive(&mut self) -> Result<Option<Value>> {
         let bytes = self.reader.read_until(b'\n', &mut self.buffer).await?;
         if bytes == 0 && self.buffer.is_empty() {
@@ -525,17 +521,102 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> JsonTransport<R, W> {
         }
         row.map(Some)
     }
+}
+
+struct JsonWriter<W> {
+    writer: W,
+    outbound: VecDeque<OutboundFrame>,
+}
+
+impl<W: AsyncWrite + Unpin> JsonWriter<W> {
+    fn enqueue(&mut self, row: Value, cancelled_id: Option<String>) -> Result<()> {
+        let mut bytes = serde_json::to_vec(&row)?;
+        bytes.push(b'\n');
+        self.outbound.push_back(OutboundFrame {
+            bytes,
+            written: 0,
+            deadline: None,
+            cancelled_id,
+        });
+        Ok(())
+    }
+
+    fn has_outbound(&self) -> bool {
+        !self.outbound.is_empty()
+    }
+
+    fn can_accept_outbound(&self) -> bool {
+        self.outbound.len() < MAX_RELAY_OUTBOUND_FRAMES
+    }
+
+    fn has_active_write(&self) -> bool {
+        self.outbound
+            .front()
+            .is_some_and(|frame| frame.written > 0 || frame.deadline.is_some())
+    }
+
+    async fn flush_next(&mut self, timeout_context: &'static str) -> Result<Option<String>> {
+        let Some(front) = self.outbound.front_mut() else {
+            return Ok(None);
+        };
+        let deadline = *front
+            .deadline
+            .get_or_insert_with(|| tokio::time::Instant::now() + WRITE_TIMEOUT);
+        while front.written < front.bytes.len() {
+            let count =
+                tokio::time::timeout_at(deadline, self.writer.write(&front.bytes[front.written..]))
+                    .await
+                    .map_err(|_| anyhow::anyhow!("{timeout_context}"))??;
+            if count == 0 {
+                bail!("transport closed during write");
+            }
+            front.written += count;
+        }
+        tokio::time::timeout_at(deadline, self.writer.flush())
+            .await
+            .map_err(|_| anyhow::anyhow!("{timeout_context}"))??;
+        let completed = self.outbound.pop_front().expect("front frame existed");
+        Ok(completed.cancelled_id)
+    }
+}
+
+/// Standard MCP stdio framing with untyped JSON preserves native extensions
+/// across both MCP relay and CLI/doctor modes. Keep the read buffer and queued
+/// outbound frames on disjoint halves so select cancellation never discards a
+/// partial line or partial write.
+struct JsonTransport<R, W> {
+    reader: JsonReader<R>,
+    writer: JsonWriter<W>,
+}
+
+impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> JsonTransport<R, W> {
+    fn new(reader: R, writer: W) -> Self {
+        Self {
+            reader: JsonReader {
+                reader: BufReader::new(reader),
+                buffer: Vec::new(),
+            },
+            writer: JsonWriter {
+                writer,
+                outbound: VecDeque::new(),
+            },
+        }
+    }
+
+    async fn receive(&mut self) -> Result<Option<Value>> {
+        self.reader.receive().await
+    }
 
     async fn send(&mut self, row: Value) -> Result<()> {
         let mut bytes = serde_json::to_vec(&row)?;
         bytes.push(b'\n');
-        self.writer.write_all(&bytes).await?;
-        self.writer.flush().await?;
+        self.writer.writer.write_all(&bytes).await?;
+        self.writer.writer.flush().await?;
         Ok(())
     }
 
     async fn close(&mut self) -> Result<()> {
-        self.writer.shutdown().await?;
+        self.writer.writer.shutdown().await?;
         Ok(())
     }
 }
@@ -722,13 +803,27 @@ where
     let mut active = BTreeMap::<String, Value>::new();
     let mut tool_lists = BTreeSet::<String>::new();
     let mut write_failed = false;
+    let mut host_eof = false;
     tokio::pin!(stop);
 
     let outcome = async {
+        let host_reader = &mut host.reader;
+        let host_writer = &mut host.writer;
+        let native_reader = &mut native.reader;
+        let native_writer = &mut native.writer;
         loop {
+            if host_eof && !native_writer.has_outbound() && !host_writer.has_outbound() {
+                return Ok::<_, anyhow::Error>("Stop");
+            }
             tokio::select! {
-                row = host.receive() => {
-                    let Some(mut row) = row? else { return Ok::<_, anyhow::Error>("Stop") };
+                row = host_reader.receive(), if !host_eof && native_writer.can_accept_outbound() && host_writer.can_accept_outbound() => {
+                    let Some(mut row) = row? else {
+                        host_eof = true;
+                        if !native_writer.has_outbound() && !host_writer.has_outbound() {
+                            return Ok("Stop");
+                        }
+                        continue;
+                    };
                     let request_id = row.get("id").cloned();
                     if row["method"] == "tools/call" {
                         if let Some(id) = request_id {
@@ -742,11 +837,7 @@ where
                                         "message": format!("tool '{tool_name}' is disabled for MCP server 'cua_repl'")
                                     }
                                 });
-                                tokio::select! {
-                                    result = tokio::time::timeout(WRITE_TIMEOUT, host.send(reply)) =>
-                                        result.context("client error response write timed out")??,
-                                    _ = &mut stop => bail!("native action interrupted during client write; client stream may be truncated"),
-                                }
+                                host_writer.enqueue(reply, None)?;
                                 continue;
                             }
                             if let Err(error) = prepare_call_meta(
@@ -761,11 +852,7 @@ where
                                     "id": id,
                                     "error": {"code": -32602, "message": error.to_string()}
                                 });
-                                tokio::select! {
-                                    result = tokio::time::timeout(WRITE_TIMEOUT, host.send(reply)) =>
-                                        result.context("client error response write timed out")??,
-                                    _ = &mut stop => bail!("native action interrupted during client write; client stream may be truncated"),
-                                }
+                                host_writer.enqueue(reply, None)?;
                                 continue;
                             }
                             active.insert(id.to_string(), id);
@@ -783,23 +870,9 @@ where
                     }
                     let cancelled_id = (row["method"] == "notifications/cancelled")
                         .then(|| row["params"]["requestId"].to_string());
-                    let sent = tokio::select! {
-                        result = tokio::time::timeout(WRITE_TIMEOUT, native.send(row)) => result,
-                        _ = &mut stop => {
-                            write_failed = true;
-                            bail!("native action interrupted during write; outcome unknown and not replayed");
-                        }
-                    };
-                    if !matches!(sent, Ok(Ok(()))) {
-                        write_failed = true;
-                        bail!("native transport write failed; outcome unknown and not replayed");
-                    }
-                    if let Some(id) = cancelled_id {
-                        active.remove(&id);
-                        tool_lists.remove(&id);
-                    }
+                    native_writer.enqueue(row, cancelled_id)?;
                 }
-                row = native.receive() => {
+                row = native_reader.receive(), if host_writer.can_accept_outbound() => {
                     let Some(mut row) = row? else {
                         write_failed = true;
                         bail!("native service closed connection");
@@ -814,13 +887,34 @@ where
                             }
                         }
                     }
-                    tokio::select! {
-                        result = tokio::time::timeout(WRITE_TIMEOUT, host.send(row)) =>
-                            result.map_err(|_| anyhow::anyhow!("client transport write timed out"))??,
-                        _ = &mut stop => bail!("native action interrupted during client write; client stream may be truncated"),
+                    host_writer.enqueue(row, None)?;
+                }
+                flushed = native_writer.flush_next("native transport write timed out"), if native_writer.has_outbound() => {
+                    match flushed {
+                        Ok(Some(id)) => {
+                            active.remove(&id);
+                            tool_lists.remove(&id);
+                        }
+                        Ok(None) => {}
+                        Err(_) => {
+                            write_failed = true;
+                            bail!("native transport write failed; outcome unknown and not replayed");
+                        }
                     }
                 }
-                _ = &mut stop => return Ok("Interrupt"),
+                flushed = host_writer.flush_next("client transport write timed out"), if host_writer.has_outbound() => {
+                    flushed?;
+                }
+                _ = &mut stop => {
+                    if native_writer.has_active_write() || native_writer.has_outbound() {
+                        write_failed = true;
+                        bail!("native action interrupted during write; outcome unknown and not replayed");
+                    }
+                    if host_writer.has_active_write() || host_writer.has_outbound() {
+                        bail!("native action interrupted during client write; client stream may be truncated");
+                    }
+                    return Ok("Interrupt");
+                }
             }
         }
     }
@@ -1992,6 +2086,54 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert!(error.to_string().contains("unknown and not replayed"));
+    }
+
+    #[tokio::test]
+    async fn relay_forwards_opposite_direction_while_one_write_is_backpressured() {
+        let (host_io, client_io) = tokio::io::duplex(64);
+        let (native_io, fixture_io) = tokio::io::duplex(32768);
+        let (hr, hw) = tokio::io::split(host_io);
+        let (nr, nw) = tokio::io::split(native_io);
+        let task = tokio::spawn(async move {
+            relay(
+                &mut JsonTransport::new(hr, hw),
+                &mut JsonTransport::new(nr, nw),
+                std::future::pending(),
+                &ToolPolicy::default(),
+            )
+            .await
+        });
+        let (cr, cw) = tokio::io::split(client_io);
+        let (fr, fw) = tokio::io::split(fixture_io);
+        let mut client = JsonTransport::new(cr, cw);
+        let mut fixture = JsonTransport::new(fr, fw);
+
+        // Native sends a large frame that saturates the 64-byte host duplex buffer.
+        let large_event = json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/native-event",
+            "params": {"payload": "x".repeat(4096)}
+        });
+        send(&mut fixture, large_event.clone()).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        // While host write is backpressured, client -> native frames must still flow immediately.
+        let cancel = json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {"requestId": 99, "reason": "user cancelled"}
+        });
+        send(&mut client, cancel.clone()).await;
+        assert_eq!(receive(&mut fixture).await, cancel);
+
+        // Now drain the large event from client and close cleanly.
+        assert_eq!(receive(&mut client).await, large_event);
+        drop(client);
+        tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]

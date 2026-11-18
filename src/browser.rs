@@ -39,6 +39,13 @@ pub struct Tab {
     pub url: String,
     #[serde(default)]
     pub title: String,
+    /// Selection state reported by the extension (`Tabs.selected` metadata).
+    /// Absent in older extension builds, so decoding must not require it and
+    /// serialization must not invent it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +62,10 @@ pub struct UserTab {
     pub last_opened: String,
     #[serde(default, rename = "tabGroup")]
     pub tab_group: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected: Option<bool>,
 }
 
 impl Tab {
@@ -78,6 +89,91 @@ impl UserTab {
 pub async fn list_tabs(client: &Client) -> Result<Vec<Tab>> {
     let raw = client.send_request("getTabs", None).await?;
     decode_tabs(&raw)
+}
+
+/// Upper bound on owned tabs probed when `getTabs` carries no selection
+/// metadata. Each probe costs one `Runtime.evaluate` round trip.
+const MAX_SELECTED_TAB_PROBES: usize = 16;
+/// Per-probe budget. A background-throttled tab must not stall selection.
+const SELECTED_TAB_PROBE_TIMEOUT: Duration = Duration::from_millis(750);
+
+/// Resolve the currently selected owned tab (`Tabs.selected`).
+///
+/// The extension may report `active`/`selected` on `getTabs`; when it does,
+/// that answer wins. Otherwise the bridge probes up to
+/// [`MAX_SELECTED_TAB_PROBES`] owned tabs for `visibilityState === "visible"`
+/// and `document.hasFocus()`, preferring a visible and focused tab and then
+/// the first visible one. A single owned tab is unambiguous even when it is
+/// backgrounded; with several unreadable tabs nothing is claimed.
+pub async fn selected_tab(client: &Client) -> Result<Option<Tab>> {
+    let tabs = list_tabs(client).await?;
+    if tabs.is_empty() {
+        return Ok(None);
+    }
+    if let Some(tab) = tabs
+        .iter()
+        .find(|tab| tab.active == Some(true) || tab.selected == Some(true))
+    {
+        return Ok(Some(tab.clone()));
+    }
+
+    let mut first_visible: Option<Tab> = None;
+    for tab in tabs.iter().take(MAX_SELECTED_TAB_PROBES) {
+        let Ok(id) = tab.id.parse::<i64>() else {
+            continue;
+        };
+        let Ok(raw) = client
+            .execute_cdp_with_timeout(
+                id,
+                "Runtime.evaluate",
+                Some(json!({
+                    "expression": "JSON.stringify({visible: document.visibilityState === 'visible', focused: document.hasFocus()})",
+                    "returnByValue": true
+                })),
+                SELECTED_TAB_PROBE_TIMEOUT,
+            )
+            .await
+        else {
+            continue;
+        };
+        let Some(state) = parse_tab_visibility(&raw) else {
+            continue;
+        };
+        if state.visible && state.focused {
+            let mut selected = tab.clone();
+            selected.selected = Some(true);
+            return Ok(Some(selected));
+        }
+        if state.visible && first_visible.is_none() {
+            first_visible = Some(tab.clone());
+        }
+    }
+
+    if let Some(mut tab) = first_visible {
+        tab.selected = Some(true);
+        return Ok(Some(tab));
+    }
+    if tabs.len() == 1 {
+        let mut tab = tabs.into_iter().next().expect("length checked above");
+        tab.selected = Some(true);
+        return Ok(Some(tab));
+    }
+    Ok(None)
+}
+
+#[derive(Deserialize)]
+struct TabVisibility {
+    #[serde(default)]
+    visible: bool,
+    #[serde(default)]
+    focused: bool,
+}
+
+/// Probe payloads are advisory: an unparsable answer only means "not known",
+/// so the caller keeps probing instead of failing the selection.
+fn parse_tab_visibility(raw: &RawValue) -> Option<TabVisibility> {
+    let text = runtime_value_string(raw).ok()??;
+    serde_json::from_str(&text).ok()
 }
 
 pub async fn create_tab(client: &Client) -> Result<String> {
@@ -175,6 +271,8 @@ pub async fn claim_user_tab(
         raw_id: tab.id,
         title: tab.title,
         url: tab.url,
+        active: None,
+        selected: None,
     }
     .normalize())
 }
@@ -437,12 +535,86 @@ pub async fn wait_for_load(client: &Client, tab_id: &str, timeout_ms: u64) -> Re
 }
 
 pub async fn dom_snapshot(client: &Client, tab_id: &str) -> Result<String> {
+    dom_snapshot_with_options(client, tab_id, false).await
+}
+
+const MAX_SNAPSHOT_FRAMES: usize = 16;
+const MAX_FRAME_TEXT_CHARS: usize = 8 * 1024;
+const MAX_FRAMES_TEXT_CHARS: usize = 64 * 1024;
+
+/// Same-origin frame walker for `dom_snapshot_with_options`. Bounds are
+/// substituted through placeholders so the Rust constants stay the single
+/// source of truth.
+const FRAME_WALK_TEMPLATE: &str = r#"(() => {
+  const MAX_FRAMES = __MAX_FRAMES__;
+  const MAX_FRAME_TEXT = __MAX_FRAME_TEXT__;
+  const MAX_TOTAL_TEXT = __MAX_TOTAL_TEXT__;
+  const frames = Array.prototype.slice.call(document.querySelectorAll('iframe, frame'), 0, MAX_FRAMES);
+  let total = 0;
+  const out = [];
+  for (let index = 0; index < frames.length; index++) {
+    const frame = frames[index];
+    let doc = null;
+    try { doc = frame.contentDocument; } catch (error) { doc = null; }
+    const sameOrigin = !!doc;
+    let title = '';
+    let text = '';
+    if (doc) {
+      try { title = String(doc.title || ''); } catch (error) { title = ''; }
+      try {
+        const body = doc.body;
+        text = body && typeof body.innerText === 'string' ? body.innerText : '';
+      } catch (error) { text = ''; }
+      if (text.length > MAX_FRAME_TEXT) text = text.slice(0, MAX_FRAME_TEXT);
+      const remaining = MAX_TOTAL_TEXT - total;
+      if (text.length > remaining) text = text.slice(0, Math.max(0, remaining));
+      total += text.length;
+    }
+    out.push({
+      index: index,
+      id: String(frame.id || ''),
+      name: String(frame.name || ''),
+      src: String(frame.src || ''),
+      same_origin: sameOrigin,
+      title: title,
+      text: text
+    });
+  }
+  return JSON.stringify(out);
+})()"#;
+
+fn frame_walk_script() -> String {
+    FRAME_WALK_TEMPLATE
+        .replace("__MAX_FRAMES__", &MAX_SNAPSHOT_FRAMES.to_string())
+        .replace("__MAX_FRAME_TEXT__", &MAX_FRAME_TEXT_CHARS.to_string())
+        .replace("__MAX_TOTAL_TEXT__", &MAX_FRAMES_TEXT_CHARS.to_string())
+}
+
+/// Snapshot the page, optionally expanding same-origin iframes.
+///
+/// `include_iframes = false` keeps the historical raw AX-tree behavior (or
+/// the structured text fallback when the AX tree is unavailable). When frames
+/// are requested, a bounded same-origin walker adds `"frames"` alongside the
+/// existing snapshot fields; cross-origin frames are reported with
+/// `same_origin: false` and no text.
+pub async fn dom_snapshot_with_options(
+    client: &Client,
+    tab_id: &str,
+    include_iframes: bool,
+) -> Result<String> {
     let id = parse_tab_id("snapshot", tab_id)?;
     match client
         .execute_cdp(id, "Accessibility.getFullAXTree", None)
         .await
     {
-        Ok(raw) => Ok(raw.get().to_string()),
+        Ok(raw) => {
+            let snapshot = raw.get().to_string();
+            if !include_iframes {
+                return Ok(snapshot);
+            }
+            let frames = read_snapshot_frames(client, id).await?;
+            Ok(attach_frames(snapshot, frames))
+        }
         Err(primary) => {
             let fallback = client
                 .execute_cdp(
@@ -459,13 +631,69 @@ pub async fn dom_snapshot(client: &Client, tab_id: &str) -> Result<String> {
                 })?;
             let text =
                 runtime_value_string(&fallback)?.unwrap_or_else(|| fallback.get().to_string());
-            Ok(json!({
-                "mode": "text-fallback",
-                "text": text,
-                "primary_error": primary.to_string()
-            })
-            .to_string())
+            if include_iframes {
+                let frames = read_snapshot_frames(client, id).await?;
+                Ok(json!({
+                    "mode": "text-fallback",
+                    "text": text,
+                    "primary_error": primary.to_string(),
+                    "frames": frames
+                })
+                .to_string())
+            } else {
+                Ok(json!({
+                    "mode": "text-fallback",
+                    "text": text,
+                    "primary_error": primary.to_string()
+                })
+                .to_string())
+            }
         }
+    }
+}
+
+async fn read_snapshot_frames(client: &Client, id: i64) -> Result<Vec<Value>> {
+    let raw = client
+        .execute_cdp(
+            id,
+            "Runtime.evaluate",
+            Some(json!({
+                "expression": frame_walk_script(),
+                "returnByValue": true
+            })),
+        )
+        .await?;
+    parse_snapshot_frames(&raw)
+}
+
+fn parse_snapshot_frames(raw: &RawValue) -> Result<Vec<Value>> {
+    let Some(text) = runtime_value_string(raw)? else {
+        return Ok(Vec::new());
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed == "null" {
+        return Ok(Vec::new());
+    }
+    match serde_json::from_str::<Value>(trimmed)
+        .map_err(|err| BridgeError::Protocol(format!("decode frame walk: {err}")))?
+    {
+        Value::Array(frames) => Ok(frames),
+        _ => Err(BridgeError::Protocol(
+            "frame walk did not return a JSON array".into(),
+        )),
+    }
+}
+
+/// Attach frames without hiding existing snapshot fields: an AX-tree object
+/// keeps its top-level members (notably `"nodes"`), anything else is wrapped
+/// so the raw snapshot is still readable.
+fn attach_frames(snapshot: String, frames: Vec<Value>) -> String {
+    match serde_json::from_str::<Value>(&snapshot) {
+        Ok(Value::Object(mut object)) => {
+            object.insert("frames".into(), Value::Array(frames));
+            Value::Object(object).to_string()
+        }
+        _ => json!({ "snapshot": snapshot, "frames": frames }).to_string(),
     }
 }
 
@@ -667,29 +895,44 @@ pub async fn wait_for_url(
     pattern: &str,
     timeout_ms: u64,
 ) -> Result<()> {
+    wait_for_url_with_matcher(
+        client,
+        tab_id,
+        &crate::observation::UrlMatcher::Substring(pattern.to_string()),
+        &format!("contain {pattern:?}"),
+        timeout_ms,
+    )
+    .await
+}
+
+pub async fn wait_for_url_with_matcher(
+    client: &Client,
+    tab_id: &str,
+    matcher: &crate::observation::UrlMatcher,
+    description: &str,
+    timeout_ms: u64,
+) -> Result<()> {
     let id = parse_tab_id("wait_for_url", tab_id)?;
     let timeout_ms = bounded_duration_ms("timeout_ms", timeout_ms, 10_000, MAX_WAIT_MS)?;
     let deadline = deadline_from_now(timeout_ms)?;
-    let pat_json = serde_json::to_string(pattern).unwrap_or_else(|_| "null".into());
-    let expr = format!("location.href.indexOf({pat_json}) >= 0");
 
     loop {
         if Instant::now() >= deadline {
             return Err(BridgeError::Timeout(format!(
-                "URL did not contain {pattern:?} after {timeout_ms}ms"
+                "URL did not {description} after {timeout_ms}ms"
             )));
         }
         match client
             .execute_cdp(
                 id,
                 "Runtime.evaluate",
-                Some(json!({ "expression": expr, "returnByValue": true })),
+                Some(json!({ "expression": "location.href", "returnByValue": true })),
             )
             .await
         {
             Ok(raw) => {
-                if let Some(found) = runtime_value_string(&raw)? {
-                    if found == "true" {
+                if let Some(current) = runtime_value_string(&raw)? {
+                    if matcher.matches(&current) {
                         return Ok(());
                     }
                 }
@@ -950,6 +1193,345 @@ pub async fn drag_path(
     crate::pointer::drag(client, id, &path, keys).await
 }
 
+/// Largest padding around an annotated element screenshot, in CSS pixels.
+const MAX_ELEMENT_SCREENSHOT_PADDING: f64 = 256.0;
+
+/// Bounded page probe backing `element_info` and `screenshot_element_with_options`
+/// diagnostics. Computed style answers what CDP's DOM domain cannot: whether the
+/// element is actually visible and enabled, and a stable selector suggestion.
+const ELEMENT_PROBE_TEMPLATE: &str = r#"(() => {
+  const selector = __SELECTOR__;
+  try {
+    const el = document.querySelector(selector);
+    if (!el) return JSON.stringify({ found: false });
+    const rect = el.getBoundingClientRect();
+    const style = window.getComputedStyle(el);
+    const opacity = Number(style.opacity);
+    const visible = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && opacity !== 0;
+    const disabled = el.disabled === true || el.getAttribute('aria-disabled') === 'true';
+    let name = (el.getAttribute('aria-label') || '').trim();
+    if (!name) {
+      const labelledBy = el.getAttribute('aria-labelledby');
+      if (labelledBy) {
+        name = labelledBy.split(/\s+/).map((ref) => {
+          const node = document.getElementById(ref);
+          return node ? String(node.innerText || node.textContent || '') : '';
+        }).join(' ').trim();
+      }
+    }
+    if (!name) name = (el.getAttribute('title') || '').trim();
+    if (!name) name = String(el.innerText || el.textContent || '').trim().slice(0, 120);
+    let suggestion = '';
+    if (el.id) {
+      suggestion = '#' + CSS.escape(el.id);
+    } else {
+      const tag = el.tagName.toLowerCase();
+      const classes = Array.prototype.slice.call(el.classList, 0, 3).filter((name) => /^[A-Za-z][\w-]{0,40}$/.test(name));
+      suggestion = tag + classes.map((name) => '.' + CSS.escape(name)).join('');
+      const role = el.getAttribute('role');
+      if (role) suggestion += '[role="' + role.replace(/"/g, '') + '"]';
+    }
+    return JSON.stringify({
+      found: true,
+      tag: el.tagName.toLowerCase(),
+      id: el.id || '',
+      classes: Array.prototype.slice.call(el.classList),
+      role: el.getAttribute('role') || '',
+      name: name,
+      visible: visible,
+      enabled: !disabled,
+      selector_suggestion: suggestion,
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    });
+  } catch (error) {
+    return JSON.stringify({ found: false, error: String(error) });
+  }
+})()"#;
+
+fn element_probe_script(selector: &str) -> String {
+    ELEMENT_PROBE_TEMPLATE.replace("__SELECTOR__", &json_escaped(selector))
+}
+
+fn require_selector<'a>(action: &str, selector: &'a str) -> Result<&'a str> {
+    if selector.trim().is_empty() {
+        return Err(BridgeError::User(format!(
+            "{action} requires a non-empty selector"
+        )));
+    }
+    Ok(selector)
+}
+
+#[derive(Deserialize)]
+struct DomNode {
+    #[serde(rename = "nodeId", default)]
+    node_id: i64,
+    #[serde(rename = "backendNodeId", default)]
+    backend_node_id: i64,
+    #[serde(rename = "nodeName", default)]
+    node_name: String,
+    #[serde(rename = "localName", default)]
+    local_name: String,
+    #[serde(default)]
+    attributes: Vec<String>,
+}
+
+struct DomElement {
+    node_id: i64,
+    backend_node_id: i64,
+    node_name: String,
+    local_name: String,
+    attributes: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct ElementProbe {
+    #[serde(default)]
+    found: bool,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    classes: Vec<String>,
+    #[serde(default)]
+    role: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    visible: bool,
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    selector_suggestion: String,
+    #[serde(default)]
+    rect: Option<ProbeRect>,
+}
+
+#[derive(Deserialize)]
+struct ProbeRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+/// Resolve a CSS selector through the DOM domain. `nodeId` is used for
+/// follow-up box queries; `backendNodeId` is the ID callers pass to
+/// `codex_dom_click` and friends.
+async fn resolve_dom_element(
+    client: &Client,
+    id: i64,
+    action: &str,
+    selector: &str,
+) -> Result<DomElement> {
+    let document = client
+        .execute_cdp(
+            id,
+            "DOM.getDocument",
+            Some(json!({ "depth": 0, "pierce": true })),
+        )
+        .await?;
+    #[derive(Deserialize)]
+    struct Document {
+        root: DomNode,
+    }
+    let document: Document = serde_json::from_str(document.get())
+        .map_err(|err| BridgeError::Protocol(format!("decode {action} DOM.getDocument: {err}")))?;
+    if document.root.node_id == 0 {
+        return Err(BridgeError::Protocol(format!(
+            "{action}: DOM.getDocument returned no root node"
+        )));
+    }
+
+    let query = client
+        .execute_cdp(
+            id,
+            "DOM.querySelector",
+            Some(json!({ "nodeId": document.root.node_id, "selector": selector })),
+        )
+        .await?;
+    #[derive(Deserialize)]
+    struct Query {
+        #[serde(rename = "nodeId", default)]
+        node_id: i64,
+    }
+    let query: Query = serde_json::from_str(query.get()).map_err(|err| {
+        BridgeError::Protocol(format!("decode {action} DOM.querySelector: {err}"))
+    })?;
+    if query.node_id == 0 {
+        return Err(BridgeError::User(format!(
+            "{action}: element {selector:?} not found"
+        )));
+    }
+
+    let described = client
+        .execute_cdp(
+            id,
+            "DOM.describeNode",
+            Some(json!({ "nodeId": query.node_id, "depth": 0 })),
+        )
+        .await?;
+    #[derive(Deserialize)]
+    struct Described {
+        node: DomNode,
+    }
+    let described: Described = serde_json::from_str(described.get())
+        .map_err(|err| BridgeError::Protocol(format!("decode {action} DOM.describeNode: {err}")))?;
+    Ok(DomElement {
+        node_id: query.node_id,
+        backend_node_id: described.node.backend_node_id,
+        node_name: described.node.node_name,
+        local_name: described.node.local_name,
+        attributes: described.node.attributes,
+    })
+}
+
+fn dom_attribute<'a>(attributes: &'a [String], name: &str) -> Option<&'a str> {
+    attributes
+        .chunks_exact(2)
+        .find(|pair| pair[0] == name)
+        .map(|pair| pair[1].as_str())
+}
+
+/// Element rectangle from `DOM.getBoxModel`, preferring the border box so the
+/// result covers the full painted element. The quad is reduced to its
+/// axis-aligned bounding box; rotations are not modelled.
+fn box_model_rect(raw: &RawValue) -> Result<(f64, f64, f64, f64)> {
+    #[derive(Deserialize)]
+    struct BoxResponse {
+        model: BoxModel,
+    }
+
+    #[derive(Deserialize)]
+    struct BoxModel {
+        #[serde(default)]
+        border: Vec<f64>,
+        #[serde(default)]
+        content: Vec<f64>,
+    }
+
+    let result: BoxResponse = serde_json::from_str(raw.get())
+        .map_err(|err| BridgeError::Protocol(format!("parse box model: {err}")))?;
+    let quad = if result.model.border.len() >= 8 {
+        &result.model.border
+    } else {
+        &result.model.content
+    };
+    if quad.len() < 8 {
+        return Err(BridgeError::Protocol(format!(
+            "box model has insufficient quads: got {} elements",
+            quad.len()
+        )));
+    }
+    if quad.iter().any(|value| !value.is_finite()) {
+        return Err(BridgeError::Protocol(
+            "box model contained non-finite coordinates".into(),
+        ));
+    }
+    let xs = [quad[0], quad[2], quad[4], quad[6]];
+    let ys = [quad[1], quad[3], quad[5], quad[7]];
+    let min_x = xs.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_x = xs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let min_y = ys.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_y = ys.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    Ok((min_x, min_y, max_x - min_x, max_y - min_y))
+}
+
+async fn read_element_probe(
+    client: &Client,
+    id: i64,
+    action: &str,
+    selector: &str,
+) -> Result<ElementProbe> {
+    let raw = client
+        .execute_cdp(
+            id,
+            "Runtime.evaluate",
+            Some(json!({
+                "expression": element_probe_script(selector),
+                "returnByValue": true
+            })),
+        )
+        .await?;
+    let text = runtime_value_string(&raw)?.ok_or_else(|| {
+        BridgeError::Protocol(format!("{action}: element probe returned no value"))
+    })?;
+    let probe: ElementProbe = serde_json::from_str(&text)
+        .map_err(|err| BridgeError::Protocol(format!("decode {action} element probe: {err}")))?;
+    if !probe.found {
+        return match probe.error {
+            Some(error) => Err(BridgeError::User(format!("{action}: {error}"))),
+            None => Err(BridgeError::User(format!(
+                "{action}: element {selector:?} not found"
+            ))),
+        };
+    }
+    Ok(probe)
+}
+
+/// `PlaywrightAPI.elementInfo`: structural identity from the DOM domain plus a
+/// bounded page probe for visibility, accessible name and selector hints.
+///
+/// `rect`/`center` use page coordinates (border box) so they line up with
+/// `Page.captureScreenshot` clips. Elements without a box model (hidden or
+/// zero-size) fall back to the probe's viewport rect, and an all-zero rect
+/// when even that is missing; `visible` stays authoritative.
+pub async fn element_info(client: &Client, tab_id: &str, selector: &str) -> Result<Value> {
+    let id = parse_tab_id("element_info", tab_id)?;
+    let selector = require_selector("element_info", selector)?;
+    let element = resolve_dom_element(client, id, "element_info", selector).await?;
+    let probe = read_element_probe(client, id, "element_info", selector).await?;
+    let rect = match client
+        .execute_cdp(
+            id,
+            "DOM.getBoxModel",
+            Some(json!({ "nodeId": element.node_id })),
+        )
+        .await
+    {
+        Ok(raw) => box_model_rect(&raw)?,
+        Err(BridgeError::Cdp { .. }) => probe
+            .rect
+            .as_ref()
+            .map(|rect| (rect.x, rect.y, rect.width, rect.height))
+            .unwrap_or((0.0, 0.0, 0.0, 0.0)),
+        Err(err) => return Err(err),
+    };
+    let (x, y, width, height) = rect;
+
+    let element_id = dom_attribute(&element.attributes, "id").unwrap_or(&probe.id);
+    let classes: Vec<String> = match dom_attribute(&element.attributes, "class") {
+        Some(class) => class.split_whitespace().map(str::to_string).collect(),
+        None => probe.classes.clone(),
+    };
+    let role = if probe.role.is_empty() {
+        dom_attribute(&element.attributes, "role").unwrap_or_default()
+    } else {
+        probe.role.as_str()
+    };
+    let tag = if element.local_name.is_empty() {
+        element.node_name.to_ascii_lowercase()
+    } else {
+        element.local_name
+    };
+
+    Ok(json!({
+        "selector": selector,
+        "node_id": element.node_id,
+        "backend_node_id": element.backend_node_id,
+        "tag": tag,
+        "id": element_id,
+        "classes": classes,
+        "role": role,
+        "name": probe.name,
+        "visible": probe.visible,
+        "enabled": probe.enabled,
+        "rect": { "x": x, "y": y, "width": width, "height": height },
+        "center": { "x": x + width / 2.0, "y": y + height / 2.0 },
+        "selector_suggestion": probe.selector_suggestion
+    }))
+}
+
 /// Screenshot a single element by clipping to its bounding rect.
 pub async fn screenshot_element(client: &Client, tab_id: &str, selector: &str) -> Result<String> {
     let id = parse_tab_id("screenshot_element", tab_id)?;
@@ -989,6 +1571,70 @@ pub async fn screenshot_element(client: &Client, tab_id: &str, selector: &str) -
         )
         .await?;
     screenshot_data(&raw)
+}
+
+/// Annotated element screenshot (`PlaywrightAPI.elementScreenshot`): capture
+/// the element's border box plus symmetric padding, and return the exact rect
+/// and clip that were used so callers can draw annotations over it.
+///
+/// Coordinates come from `DOM.getBoxModel`, i.e. page coordinates, and the
+/// capture enables `captureBeyondViewport` so off-screen elements still work.
+pub async fn screenshot_element_with_options(
+    client: &Client,
+    tab_id: &str,
+    selector: &str,
+    padding: f64,
+) -> Result<(String, Value)> {
+    let id = parse_tab_id("screenshot_element", tab_id)?;
+    let selector = require_selector("screenshot_element", selector)?;
+    if !padding.is_finite() || !(0.0..=MAX_ELEMENT_SCREENSHOT_PADDING).contains(&padding) {
+        return Err(BridgeError::User(format!(
+            "padding must be a finite number between 0 and {MAX_ELEMENT_SCREENSHOT_PADDING} pixels"
+        )));
+    }
+
+    let element = resolve_dom_element(client, id, "screenshot_element", selector).await?;
+    let raw = client
+        .execute_cdp(
+            id,
+            "DOM.getBoxModel",
+            Some(json!({ "nodeId": element.node_id })),
+        )
+        .await?;
+    let (x, y, width, height) = box_model_rect(&raw)?;
+    if width <= 0.0 || height <= 0.0 {
+        return Err(BridgeError::User(format!(
+            "element {selector:?} has zero size"
+        )));
+    }
+
+    let clip = json!({
+        "x": (x - padding).max(0.0),
+        "y": (y - padding).max(0.0),
+        "width": width + 2.0 * padding,
+        "height": height + 2.0 * padding,
+        "scale": 1.0
+    });
+    validate_screenshot_clip(&clip)?;
+    let raw = client
+        .execute_cdp(
+            id,
+            "Page.captureScreenshot",
+            Some(json!({
+                "format": "png",
+                "captureBeyondViewport": true,
+                "clip": clip
+            })),
+        )
+        .await?;
+    let data = screenshot_data(&raw)?;
+    Ok((
+        data,
+        json!({
+            "rect": { "x": x, "y": y, "width": width, "height": height },
+            "clip": clip
+        }),
+    ))
 }
 
 /// Delete cookies by name (optionally scoped by url/domain/path).
@@ -2615,6 +3261,559 @@ mod tests {
         ] {
             assert!(validate_generic_cdp_method(method).is_ok(), "{method}");
         }
+    }
+
+    // ── Tabs.selected, frame-expanded snapshots, element inspection ──
+    //
+    // These drive the real request path through an in-memory mock pipe. The
+    // mock answers the attach preamble so `execute_cdp` behaves exactly as it
+    // does against the extension.
+
+    use crate::protocol::{decode_frame, encode_frame};
+    use tokio::io::{duplex, DuplexStream};
+    use tokio::time::timeout;
+
+    const MOCK_BOUND: Duration = Duration::from_secs(3);
+    const NO_FRAME_GRACE: Duration = Duration::from_millis(80);
+
+    fn mock_client() -> (Client, DuplexStream) {
+        let (stream, peer) = duplex(64 * 1024);
+        (Client::from_stream(stream).expect("mock client"), peer)
+    }
+
+    async fn mock_frame(peer: &mut DuplexStream) -> Value {
+        serde_json::from_slice(
+            &timeout(MOCK_BOUND, decode_frame(peer))
+                .await
+                .expect("mock request deadline")
+                .expect("mock request frame"),
+        )
+        .expect("mock request json")
+    }
+
+    async fn mock_reply(peer: &mut DuplexStream, request: &Value, result: Value) {
+        timeout(
+            MOCK_BOUND,
+            encode_frame(peer, &json!({ "id": request["id"], "result": result })),
+        )
+        .await
+        .expect("mock reply deadline")
+        .expect("mock reply frame");
+    }
+
+    /// Answer the attach preamble (`detach`, `attach`, focus emulation) and
+    /// return the next command with its CDP method name.
+    async fn mock_cdp(peer: &mut DuplexStream) -> (Value, String) {
+        loop {
+            let request = mock_frame(peer).await;
+            match request["method"].as_str().unwrap_or_default() {
+                "detach" | "attach" => mock_reply(peer, &request, json!({})).await,
+                "executeCdp" => {
+                    let cdp = request["params"]["method"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string();
+                    if cdp == "Emulation.setFocusEmulationEnabled" {
+                        mock_reply(peer, &request, json!({})).await;
+                    } else {
+                        return (request, cdp);
+                    }
+                }
+                other => panic!("unexpected mock request {other}"),
+            }
+        }
+    }
+
+    fn cdp_json_value(text: &str) -> Value {
+        json!({ "result": { "value": text } })
+    }
+
+    async fn no_further_frame(peer: &mut DuplexStream) {
+        assert!(
+            timeout(NO_FRAME_GRACE, decode_frame(peer)).await.is_err(),
+            "unexpected extra request"
+        );
+    }
+
+    #[test]
+    fn tab_selection_metadata_decodes_and_round_trips_without_inventing_fields() {
+        let raw = RawValue::from_string(
+            r#"[{"id":"7","url":"https://example.com/a","title":"A","active":true},{"id":"8","url":"https://example.com/b","title":"B"}]"#
+                .into(),
+        )
+        .unwrap();
+        let tabs = decode_tabs(&raw).unwrap();
+        assert_eq!(tabs[0].active, Some(true));
+        assert_eq!(tabs[0].selected, None);
+        assert_eq!(tabs[1].active, None);
+        assert_eq!(tabs[1].selected, None);
+
+        let wrapped = RawValue::from_string(
+            r#"{"tabs":[{"id":3,"url":"https://example.com","title":"T","lastOpened":"2026-11-18","tabGroup":"g","selected":true}]}"#
+                .into(),
+        )
+        .unwrap();
+        let user_tabs = decode_user_tabs(&wrapped).unwrap();
+        assert_eq!(user_tabs[0].selected, Some(true));
+        assert_eq!(user_tabs[0].active, None);
+        assert_eq!(user_tabs[0].tab_group, "g");
+
+        // Legacy payloads decode unchanged, and serialization must not add the
+        // optional keys back.
+        let plain = RawValue::from_string(r#"[{"id":9,"title":"plain"}]"#.into()).unwrap();
+        let plain = decode_tabs(&plain).unwrap();
+        assert_eq!(plain[0].active, None);
+        assert_eq!(plain[0].selected, None);
+        let encoded = serde_json::to_value(&plain[0]).unwrap();
+        assert!(encoded.get("active").is_none());
+        assert!(encoded.get("selected").is_none());
+    }
+
+    #[tokio::test]
+    async fn selected_tab_prefers_reported_active_metadata() {
+        let (client, mut peer) = mock_client();
+        let worker = client.clone();
+        let task = tokio::spawn(async move { selected_tab(&worker).await });
+
+        let request = mock_frame(&mut peer).await;
+        assert_eq!(request["method"], "getTabs");
+        mock_reply(
+            &mut peer,
+            &request,
+            json!([
+                {"id": 7, "url": "https://example.com/a", "title": "A"},
+                {"id": 8, "url": "https://example.com/b", "title": "B", "active": true}
+            ]),
+        )
+        .await;
+        // Reported metadata short-circuits the CDP probe walk.
+        no_further_frame(&mut peer).await;
+
+        let selected = timeout(MOCK_BOUND, task)
+            .await
+            .expect("selected_tab deadline")
+            .expect("selected_tab task")
+            .expect("selected_tab result")
+            .expect("one selected tab");
+        assert_eq!(selected.id, "8");
+        assert_eq!(selected.active, Some(true));
+    }
+
+    #[tokio::test]
+    async fn selected_tab_probes_owned_tabs_for_visibility_and_focus() {
+        let (client, mut peer) = mock_client();
+        let worker = client.clone();
+        let task = tokio::spawn(async move { selected_tab(&worker).await });
+
+        let request = mock_frame(&mut peer).await;
+        assert_eq!(request["method"], "getTabs");
+        mock_reply(
+            &mut peer,
+            &request,
+            json!([
+                {"id": 7, "url": "https://example.com/a", "title": "A"},
+                {"id": 8, "url": "https://example.com/b", "title": "B"}
+            ]),
+        )
+        .await;
+
+        let (probe, method) = mock_cdp(&mut peer).await;
+        assert_eq!(method, "Runtime.evaluate");
+        assert_eq!(probe["params"]["target"]["tabId"], 7);
+        let expression = probe["params"]["commandParams"]["expression"]
+            .as_str()
+            .expect("probe expression");
+        assert!(expression.contains("document.visibilityState"));
+        assert!(expression.contains("document.hasFocus()"));
+        mock_reply(
+            &mut peer,
+            &probe,
+            cdp_json_value(r#"{"visible":true,"focused":false}"#),
+        )
+        .await;
+
+        let (probe, method) = mock_cdp(&mut peer).await;
+        assert_eq!(method, "Runtime.evaluate");
+        assert_eq!(probe["params"]["target"]["tabId"], 8);
+        mock_reply(
+            &mut peer,
+            &probe,
+            cdp_json_value(r#"{"visible":true,"focused":true}"#),
+        )
+        .await;
+
+        let selected = timeout(MOCK_BOUND, task)
+            .await
+            .expect("selected_tab deadline")
+            .expect("selected_tab task")
+            .expect("selected_tab result")
+            .expect("one selected tab");
+        assert_eq!(selected.id, "8");
+        assert_eq!(selected.selected, Some(true));
+    }
+
+    #[tokio::test]
+    async fn selected_tab_falls_back_to_single_or_first_visible_tab() {
+        for (probe_state, expected) in [
+            (r#"{"visible":false,"focused":false}"#, "7"),
+            (r#"{"visible":true,"focused":false}"#, "7"),
+        ] {
+            let (client, mut peer) = mock_client();
+            let worker = client.clone();
+            let task = tokio::spawn(async move { selected_tab(&worker).await });
+
+            let request = mock_frame(&mut peer).await;
+            mock_reply(
+                &mut peer,
+                &request,
+                json!([{"id": 7, "url": "https://example.com", "title": "Only"}]),
+            )
+            .await;
+            let (probe, _) = mock_cdp(&mut peer).await;
+            mock_reply(&mut peer, &probe, cdp_json_value(probe_state)).await;
+
+            let selected = timeout(MOCK_BOUND, task)
+                .await
+                .expect("selected_tab deadline")
+                .expect("selected_tab task")
+                .expect("selected_tab result")
+                .expect("single owned tab is unambiguous");
+            assert_eq!(selected.id, expected);
+            assert_eq!(selected.selected, Some(true));
+        }
+    }
+
+    #[tokio::test]
+    async fn selected_tab_declines_ambiguous_background_tabs() {
+        let (client, mut peer) = mock_client();
+        let worker = client.clone();
+        let task = tokio::spawn(async move { selected_tab(&worker).await });
+
+        let request = mock_frame(&mut peer).await;
+        mock_reply(
+            &mut peer,
+            &request,
+            json!([
+                {"id": 7, "url": "https://example.com/a", "title": "A"},
+                {"id": 8, "url": "https://example.com/b", "title": "B"}
+            ]),
+        )
+        .await;
+        for _ in 0..2 {
+            let (probe, _) = mock_cdp(&mut peer).await;
+            mock_reply(
+                &mut peer,
+                &probe,
+                cdp_json_value(r#"{"visible":false,"focused":false}"#),
+            )
+            .await;
+        }
+
+        let selected = timeout(MOCK_BOUND, task)
+            .await
+            .expect("selected_tab deadline")
+            .expect("selected_tab task")
+            .expect("selected_tab result");
+        assert!(selected.is_none());
+    }
+
+    #[tokio::test]
+    async fn dom_snapshot_default_keeps_raw_ax_tree() {
+        let (client, mut peer) = mock_client();
+        let worker = client.clone();
+        let task = tokio::spawn(async move { dom_snapshot(&worker, "7").await });
+
+        let (ax, method) = mock_cdp(&mut peer).await;
+        assert_eq!(method, "Accessibility.getFullAXTree");
+        mock_reply(&mut peer, &ax, json!({ "nodes": [{ "nodeId": "1" }] })).await;
+
+        let snapshot = timeout(MOCK_BOUND, task)
+            .await
+            .expect("snapshot deadline")
+            .expect("snapshot task")
+            .expect("snapshot result");
+        let snapshot: Value = serde_json::from_str(&snapshot).unwrap();
+        assert!(snapshot.get("nodes").is_some());
+        assert!(snapshot.get("frames").is_none());
+    }
+
+    #[tokio::test]
+    async fn dom_snapshot_with_iframes_attaches_same_origin_frames() {
+        let (client, mut peer) = mock_client();
+        let worker = client.clone();
+        let task = tokio::spawn(async move { dom_snapshot_with_options(&worker, "7", true).await });
+
+        let (ax, method) = mock_cdp(&mut peer).await;
+        assert_eq!(method, "Accessibility.getFullAXTree");
+        mock_reply(
+            &mut peer,
+            &ax,
+            json!({ "nodes": [{ "nodeId": "1", "role": { "value": "button" } }] }),
+        )
+        .await;
+
+        let (frames, method) = mock_cdp(&mut peer).await;
+        assert_eq!(method, "Runtime.evaluate");
+        let expression = frames["params"]["commandParams"]["expression"]
+            .as_str()
+            .expect("frame walker expression");
+        assert!(expression.contains("iframe, frame"));
+        assert!(expression.contains("contentDocument"));
+        assert_eq!(frames["params"]["commandParams"]["returnByValue"], true);
+        mock_reply(
+            &mut peer,
+            &frames,
+            cdp_json_value(
+                r#"[{"index":0,"id":"inner","name":"","src":"https://example.com/frame","same_origin":true,"title":"Inner","text":"hello"},{"index":1,"id":"","name":"third","src":"https://other.example/f","same_origin":false,"title":"","text":""}]"#,
+            ),
+        )
+        .await;
+
+        let snapshot = timeout(MOCK_BOUND, task)
+            .await
+            .expect("snapshot deadline")
+            .expect("snapshot task")
+            .expect("snapshot result");
+        let snapshot: Value = serde_json::from_str(&snapshot).unwrap();
+        // Existing AX fields stay at the top level.
+        assert_eq!(snapshot["nodes"][0]["nodeId"], "1");
+        assert_eq!(snapshot["frames"][0]["same_origin"], true);
+        assert_eq!(snapshot["frames"][0]["text"], "hello");
+        assert_eq!(snapshot["frames"][1]["same_origin"], false);
+        assert_eq!(snapshot["frames"][1]["text"], "");
+    }
+
+    #[tokio::test]
+    async fn dom_snapshot_text_fallback_carries_frames() {
+        let (client, mut peer) = mock_client();
+        let worker = client.clone();
+        let task = tokio::spawn(async move { dom_snapshot_with_options(&worker, "7", true).await });
+
+        let (ax, _) = mock_cdp(&mut peer).await;
+        mock_reply(
+            &mut peer,
+            &ax,
+            json!({ "error": { "code": -32000, "message": "AX disabled" } }),
+        )
+        .await;
+
+        let (text, method) = mock_cdp(&mut peer).await;
+        assert_eq!(method, "Runtime.evaluate");
+        assert!(text["params"]["commandParams"]["expression"]
+            .as_str()
+            .unwrap()
+            .contains("innerText"));
+        mock_reply(&mut peer, &text, cdp_json_value("body text")).await;
+
+        let (frames, method) = mock_cdp(&mut peer).await;
+        assert_eq!(method, "Runtime.evaluate");
+        mock_reply(&mut peer, &frames, cdp_json_value("[]")).await;
+
+        let snapshot = timeout(MOCK_BOUND, task)
+            .await
+            .expect("snapshot deadline")
+            .expect("snapshot task")
+            .expect("snapshot result");
+        let snapshot: Value = serde_json::from_str(&snapshot).unwrap();
+        assert_eq!(snapshot["mode"], "text-fallback");
+        assert_eq!(snapshot["text"], "body text");
+        assert!(snapshot["primary_error"]
+            .as_str()
+            .unwrap()
+            .contains("AX disabled"));
+        assert_eq!(snapshot["frames"], json!([]));
+    }
+
+    #[test]
+    fn box_model_rect_prefers_border_quad() {
+        let raw = RawValue::from_string(
+            r#"{"model":{"border":[10,20,40,20,40,60,10,60],"content":[11,21,39,21,39,59,11,59]}}"#
+                .into(),
+        )
+        .unwrap();
+        assert_eq!(box_model_rect(&raw).unwrap(), (10.0, 20.0, 30.0, 40.0));
+
+        let content_only =
+            RawValue::from_string(r#"{"model":{"content":[0,0,4,0,4,8,0,8]}}"#.into()).unwrap();
+        assert_eq!(box_model_rect(&content_only).unwrap(), (0.0, 0.0, 4.0, 8.0));
+
+        let empty = RawValue::from_string(r#"{"model":{}}"#.into()).unwrap();
+        assert!(box_model_rect(&empty).is_err());
+    }
+
+    async fn serve_element_identity(peer: &mut DuplexStream) {
+        let (document, method) = mock_cdp(peer).await;
+        assert_eq!(method, "DOM.getDocument");
+        mock_reply(
+            peer,
+            &document,
+            json!({ "root": { "nodeId": 1, "nodeName": "#document", "localName": "" } }),
+        )
+        .await;
+
+        let (query, method) = mock_cdp(peer).await;
+        assert_eq!(method, "DOM.querySelector");
+        assert_eq!(query["params"]["commandParams"]["nodeId"], 1);
+        assert_eq!(
+            query["params"]["commandParams"]["selector"],
+            "button.submit"
+        );
+        mock_reply(peer, &query, json!({ "nodeId": 5 })).await;
+
+        let (described, method) = mock_cdp(peer).await;
+        assert_eq!(method, "DOM.describeNode");
+        assert_eq!(described["params"]["commandParams"]["nodeId"], 5);
+        mock_reply(
+            peer,
+            &described,
+            json!({ "node": {
+                "nodeId": 5,
+                "backendNodeId": 11,
+                "nodeName": "BUTTON",
+                "localName": "button",
+                "attributes": ["id", "submit", "class", "btn  primary", "role", "button"]
+            } }),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn element_info_merges_dom_identity_with_page_probe() {
+        let (client, mut peer) = mock_client();
+        let worker = client.clone();
+        let task = tokio::spawn(async move { element_info(&worker, "7", "button.submit").await });
+
+        serve_element_identity(&mut peer).await;
+
+        let (probe, method) = mock_cdp(&mut peer).await;
+        assert_eq!(method, "Runtime.evaluate");
+        let expression = probe["params"]["commandParams"]["expression"]
+            .as_str()
+            .expect("probe expression");
+        assert!(expression.contains("button.submit"));
+        mock_reply(
+            &mut peer,
+            &probe,
+            cdp_json_value(
+                r##"{"found":true,"tag":"button","id":"submit","classes":["btn","primary"],"role":"button","name":"Submit order","visible":true,"enabled":true,"selector_suggestion":"#submit","rect":{"x":100,"y":50,"width":200,"height":100}}"##,
+            ),
+        )
+        .await;
+
+        let (box_model, method) = mock_cdp(&mut peer).await;
+        assert_eq!(method, "DOM.getBoxModel");
+        assert_eq!(box_model["params"]["commandParams"]["nodeId"], 5);
+        mock_reply(
+            &mut peer,
+            &box_model,
+            json!({ "model": { "border": [100, 50, 300, 50, 300, 150, 100, 150] } }),
+        )
+        .await;
+
+        let info = timeout(MOCK_BOUND, task)
+            .await
+            .expect("element_info deadline")
+            .expect("element_info task")
+            .expect("element_info result");
+        assert_eq!(info["selector"], "button.submit");
+        assert_eq!(info["node_id"], 5);
+        assert_eq!(info["backend_node_id"], 11);
+        assert_eq!(info["tag"], "button");
+        assert_eq!(info["id"], "submit");
+        assert_eq!(info["classes"], json!(["btn", "primary"]));
+        assert_eq!(info["role"], "button");
+        assert_eq!(info["name"], "Submit order");
+        assert_eq!(info["visible"], true);
+        assert_eq!(info["enabled"], true);
+        assert_eq!(
+            info["rect"],
+            json!({"x": 100.0, "y": 50.0, "width": 200.0, "height": 100.0})
+        );
+        assert_eq!(info["center"], json!({"x": 200.0, "y": 100.0}));
+        assert_eq!(info["selector_suggestion"], "#submit");
+    }
+
+    #[tokio::test]
+    async fn element_info_rejects_selector_without_a_node() {
+        let (client, mut peer) = mock_client();
+        let worker = client.clone();
+        let task = tokio::spawn(async move { element_info(&worker, "7", "#missing").await });
+
+        let (document, _) = mock_cdp(&mut peer).await;
+        mock_reply(&mut peer, &document, json!({ "root": { "nodeId": 1 } })).await;
+        let (query, _) = mock_cdp(&mut peer).await;
+        mock_reply(&mut peer, &query, json!({ "nodeId": 0 })).await;
+
+        let err = timeout(MOCK_BOUND, task)
+            .await
+            .expect("element_info deadline")
+            .expect("element_info task")
+            .expect_err("unknown element must fail");
+        assert!(matches!(err, BridgeError::User(_)), "{err}");
+        assert!(err.to_string().contains("not found"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn screenshot_element_with_options_pads_clip_and_reports_bounds() {
+        let (client, mut peer) = mock_client();
+        let worker = client.clone();
+        let task = tokio::spawn(async move {
+            screenshot_element_with_options(&worker, "7", "button.submit", 10.0).await
+        });
+
+        serve_element_identity(&mut peer).await;
+
+        let (box_model, method) = mock_cdp(&mut peer).await;
+        assert_eq!(method, "DOM.getBoxModel");
+        mock_reply(
+            &mut peer,
+            &box_model,
+            json!({ "model": { "border": [100, 50, 300, 50, 300, 150, 100, 150] } }),
+        )
+        .await;
+
+        let (capture, method) = mock_cdp(&mut peer).await;
+        assert_eq!(method, "Page.captureScreenshot");
+        let params = &capture["params"]["commandParams"];
+        assert_eq!(params["format"], "png");
+        assert_eq!(params["captureBeyondViewport"], true);
+        assert_eq!(
+            params["clip"],
+            json!({"x": 90.0, "y": 40.0, "width": 220.0, "height": 120.0, "scale": 1.0})
+        );
+        mock_reply(&mut peer, &capture, json!({ "data": "iVBORw0KGgo=" })).await;
+
+        let (data, metadata) = timeout(MOCK_BOUND, task)
+            .await
+            .expect("screenshot deadline")
+            .expect("screenshot task")
+            .expect("screenshot result");
+        assert_eq!(data, "iVBORw0KGgo=");
+        assert_eq!(
+            metadata["rect"],
+            json!({"x": 100.0, "y": 50.0, "width": 200.0, "height": 100.0})
+        );
+        assert_eq!(
+            metadata["clip"],
+            json!({"x": 90.0, "y": 40.0, "width": 220.0, "height": 120.0, "scale": 1.0})
+        );
+    }
+
+    #[tokio::test]
+    async fn screenshot_element_with_options_rejects_bad_input_before_touching_pipe() {
+        let (client, mut peer) = mock_client();
+
+        for padding in [-1.0, 256.5, f64::NAN, f64::INFINITY] {
+            let err = screenshot_element_with_options(&client, "7", "#hero", padding)
+                .await
+                .expect_err("padding must be bounded");
+            assert!(matches!(err, BridgeError::User(_)), "{err}");
+        }
+        let err = element_info(&client, "7", "  ")
+            .await
+            .expect_err("empty selector must be rejected");
+        assert!(matches!(err, BridgeError::User(_)), "{err}");
+        no_further_frame(&mut peer).await;
     }
 }
 

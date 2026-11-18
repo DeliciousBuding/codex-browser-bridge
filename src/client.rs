@@ -1412,6 +1412,25 @@ impl Client {
         .await
     }
 
+    pub async fn wait_for_observed_navigation_with_matcher(
+        &self,
+        tab_id: i64,
+        cursor: &ObservationCursor,
+        matcher: Option<&crate::observation::UrlMatcher>,
+        wait_until: LoadState,
+        wait_timeout: Duration,
+    ) -> Result<TabSnapshot> {
+        crate::observation::wait_for_navigation_with_matcher(
+            &self.inner.observations,
+            tab_id,
+            cursor,
+            matcher,
+            wait_until,
+            wait_timeout,
+        )
+        .await
+    }
+
     pub async fn execute_cdp(
         &self,
         tab_id: i64,

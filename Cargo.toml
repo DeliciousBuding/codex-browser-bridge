@@ -25,6 +25,7 @@ uuid = { version = "1.11", features = ["v4"] }
 toml = "0.8"
 fs2 = "0.4.3"
 process-wrap = { version = "=10.0.1", features = ["tokio1"] }
+regex = "1.12"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

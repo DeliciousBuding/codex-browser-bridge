@@ -82,7 +82,7 @@ None of these labels means every parameter or live browser build has passed.
 | `BrowserUser.openTabs`, `claimTab` | Native | Owned tabs and user tabs are distinct; preserve lastOpened/order/metadata when supplied |
 | `BrowserUser.getTabContext` | Not extension baseline | Bounded read without claiming is excluded for extension; a separate implementation must preserve ownership and expected URL |
 | `Tabs.get`, `list`, `new` | Native | Handle construction/get is a client abstraction; validate owned IDs against current binding |
-| `Tabs.selected` | Implementable | Resolve the active owned tab, not any active user tab |
+| `Tabs.selected` | Native / CDP | `codex_list_tabs(selected_only=true)` prefers extension-reported `active`/`selected` metadata and falls back to bounded `visibilityState`/`hasFocus()` probing across owned tabs |
 | `Tabs.content` | Not extension baseline | Temporary background URL extraction is useful but would be a bridge extension, with bounded load and cleanup |
 | `Tab.ax`, `capabilities`, `clipboard`, `content`, `cua`, `dev`, `dom_cua`, `id`, `playwright` | Properties | Namespace references; `Tab.ax` itself is excluded from the extension default |
 | `Tab.back`, `close`, `forward`, `goto`, `reload`, `title`, `url` | Native / CDP | Existing operations; navigation readiness/error semantics still differ from Playwright |
@@ -140,9 +140,9 @@ matching remains normalized, case-insensitive substring matching unless exact.
 | `PlaywrightLocator.press`, `type`, `pressSequentially` | CDP partial / implementable | Shared chord dispatcher and append semantics; Unicode insertText is not physical-key parity. |
 | `PlaywrightLocator.waitFor` | CDP partial | Attached/detached/visible/hidden probes respect nth/strict; visibility approximations and fixed polling differ from official auto-wait |
 | `PlaywrightLocator.evaluate`, `evaluateAll`; `PlaywrightAPI.evaluate` | Different contract | Current `codex_evaluate` runs unrestricted page JS and has no locator-scoped/read-only mode; it is not an official Playwright evaluate implementation |
-| `PlaywrightAPI.domSnapshot` | Implementable | Existing raw AX tree and depth-limited visible DOM are not the official iframe-expanded DOM text snapshot |
-| `PlaywrightAPI.elementInfo`, `elementScreenshot` | Implementable | CDP DOM hit testing, backend IDs, selector suggestions and annotated screenshot bounds |
-| `PlaywrightAPI.expectNavigation`, `waitForLoadState`, `waitForURL` | CDP partial | Observer arms before action; loader-bound commit/domcontentloaded/load, redirects and exact URL. networkidle/full URL matcher remain. |
+| `PlaywrightAPI.domSnapshot` | CDP partial | `codex_dom_snapshot(include_iframes=true)` expands bounded same-origin `iframe`/`frame` text snapshots alongside the top document snapshot; cross-origin frames report `same_origin=false` |
+| `PlaywrightAPI.elementInfo`, `elementScreenshot` | CDP partial | `codex_locator(action="element_info")` and `codex_screenshot_element(padding, include_info=true)` return DOM identity (`node_id`, `backend_node_id`), visibility/enabled state, selector suggestions, and padded bounding-box clips |
+| `PlaywrightAPI.expectNavigation`, `waitForLoadState`, `waitForURL` | CDP partial | Observer arms before action; loader-bound `commit`/`domcontentloaded`/`load`/`networkidle` (500ms quiet window) and `url` / `url_glob` / safe `url_regex` matching are implemented |
 | `PlaywrightAPI.waitForTimeout` | Client utility | Bounded delay, not browser capability coverage |
 | `PlaywrightAPI.waitForEvent`; `PlaywrightDownload.path`; `PlaywrightFileChooser.isMultiple`, `setFiles` | CDP partial / transport-dependent | Explicit chooser IDs/multiple and bounded colocated upload. Remote paths/OOPIF/completed downloads unsupported. |
 | `PlaywrightLocator.downloadMedia` | Implementable, transport-dependent | Resolve a current observed media/link target, apply download permissions and return the browser-visible saved path; a generic host HTTP fetch is not equivalent |
@@ -161,7 +161,7 @@ implementation of an action does not establish full locator parity.
 | `DomCUAAPI.get_visible_dom`, `scroll`, `downloadMedia` | Implementable | Current visible DOM text has no actionable refs; add document/frame-bound refs, node-targeted scroll and media resolution |
 | `AXAPI.click`, `drag`, `get`, `write`, `paste`, `performSecondaryAction`, `pressKey`, `scroll`, `selectText`, `setValue`, `typeText` | Not extension baseline namespace | `Tab.ax` is excluded by default for extension. CDP AX snapshot/find/click are useful separate features; they do not reproduce AX index/diff state, secondary actions or the official model-display `write()` surface |
 | `TabClipboardAPI.read`, `readText`, `write`, `writeText` | Bridge-native partial | `codex_clipboard` stores bounded session-virtual MIME items and integrates Ctrl/Cmd+V paste. It never reads the OS clipboard or invents Ctrl/Cmd+C/X capture |
-| `TabDevAPI.logs` | CDP partial | Opt-in persistent Runtime/Log journal with rendered message and cursor; pre-start history incomplete and no full official filter API. |
+| `TabDevAPI.logs` | CDP partial | Opt-in persistent Runtime/Log journal with rendered message, cursor, and `levels` filtering (`debug`, `info`, `warning`/`warn`, `error`); pre-start history remains bounded to CDP enable replay. |
 
 Keyboard correctness is shared work: `keys: ["Control", "c"]` means a held
 combination, not Control-down/up followed by c-down/up. Copy/cut/paste must use
@@ -202,8 +202,11 @@ explicit gap/truncation and byte/count limits. Reconnect, retire and turn cleanu
 invalidate cursors. Earlier logs are available only after start (including CDP
 enable replay), not a complete historical browser log. Child-session events are
 raw evidence, not implemented OOPIF routing. Navigation composites arm before
-the action and wait for commit, DOMContentLoaded or load; redirects may change
-the final URL. Exact-URL waiting is a separate optional observer condition.
+the action and wait for `commit`, `domcontentloaded`, `load`, or `networkidle`
+(500ms quiet window with zero in-flight top-document requests); redirects may
+change the final URL. Exact `url`, `url_glob`, and safe `url_regex` waiting are
+supported on both `codex_observe(action="wait_navigation")` and
+`codex_wait_for_url`.
 
 Locator composition now supports `and`, `or`, `has`, `has_not` and `all` with
 bounded declarative specs. Base predicates union with `or` branches; results are

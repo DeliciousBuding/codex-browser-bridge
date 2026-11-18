@@ -227,6 +227,7 @@ dependencies = [
  "libc",
  "predicates",
  "process-wrap",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

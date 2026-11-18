@@ -89,24 +89,64 @@ impl super::Server {
                 )?;
                 let mut result = serde_json::to_value(&batch)?;
                 if action == "logs" {
-                    let logs: Vec<Value> = batch.events.iter().map(|entry| {
-                        let event = &entry.event;
-                        if event["method"] == "Log.entryAdded" {
-                            json!({"sequence": entry.sequence, "document_epoch": entry.document_epoch,
-                                "level": event.pointer("/params/entry/level"),
-                                "timestamp": event.pointer("/params/entry/timestamp"),
-                                "text": event.pointer("/params/entry/text")})
-                        } else {
-                            let args = event.pointer("/params/args").and_then(Value::as_array);
-                            let text = args.into_iter().flatten().map(|arg| {
-                                arg.get("value").map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string()))
-                                    .or_else(|| arg.get("description").and_then(Value::as_str).map(str::to_owned))
-                                    .unwrap_or_else(|| "[unserializable]".into())
-                            }).collect::<Vec<_>>().join(" ");
-                            json!({"sequence":entry.sequence,"document_epoch":entry.document_epoch,
-                                "level":event.pointer("/params/type"),"timestamp":event.pointer("/params/timestamp"),"text":text})
-                        }
-                    }).collect();
+                    let levels = optional_str_array(&args, "levels")?.unwrap_or_default();
+                    if levels.len() > 8 {
+                        anyhow::bail!("levels permits at most 8 log level names");
+                    }
+                    let logs: Vec<Value> = batch
+                        .events
+                        .iter()
+                        .filter_map(|entry| {
+                            let event = &entry.event;
+                            let (raw_level, item) = if event["method"] == "Log.entryAdded" {
+                                let level = event.pointer("/params/entry/level");
+                                (
+                                    level.and_then(Value::as_str),
+                                    json!({
+                                        "sequence": entry.sequence,
+                                        "document_epoch": entry.document_epoch,
+                                        "level": level,
+                                        "timestamp": event.pointer("/params/entry/timestamp"),
+                                        "text": event.pointer("/params/entry/text")
+                                    }),
+                                )
+                            } else {
+                                let args = event.pointer("/params/args").and_then(Value::as_array);
+                                let text = args
+                                    .into_iter()
+                                    .flatten()
+                                    .map(|arg| {
+                                        arg.get("value")
+                                            .map(|v| {
+                                                v.as_str()
+                                                    .map(str::to_owned)
+                                                    .unwrap_or_else(|| v.to_string())
+                                            })
+                                            .or_else(|| {
+                                                arg.get("description")
+                                                    .and_then(Value::as_str)
+                                                    .map(str::to_owned)
+                                            })
+                                            .unwrap_or_else(|| "[unserializable]".into())
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                let level = event.pointer("/params/type");
+                                (
+                                    level.and_then(Value::as_str),
+                                    json!({
+                                        "sequence": entry.sequence,
+                                        "document_epoch": entry.document_epoch,
+                                        "level": level,
+                                        "timestamp": event.pointer("/params/timestamp"),
+                                        "text": text
+                                    }),
+                                )
+                            };
+                            crate::observation::log_level_matches(raw_level, &levels)
+                                .then_some(item)
+                        })
+                        .collect();
                     result["logs"] = json!(logs);
                 }
                 result
@@ -129,12 +169,21 @@ impl super::Server {
                             .ok_or_else(|| anyhow::anyhow!("url must be a string"))
                     })
                     .transpose()?;
+                let url_glob = args
+                    .get("url_glob")
+                    .map(|v| {
+                        v.as_str()
+                            .ok_or_else(|| anyhow::anyhow!("url_glob must be a string"))
+                    })
+                    .transpose()?;
+                let matcher =
+                    crate::observation::UrlMatcher::parse(url, url_glob, args.get("url_regex"))?;
                 serde_json::to_value(
                     client
-                        .wait_for_observed_navigation(
+                        .wait_for_observed_navigation_with_matcher(
                             tab_id,
                             cursor,
-                            url,
+                            matcher.as_ref(),
                             wait_until,
                             Duration::from_millis(timeout_ms),
                         )
@@ -309,7 +358,7 @@ impl super::Server {
             ToolHandler::Clipboard => self.handle_clipboard(args).await,
             ToolHandler::WebMcp => self.handle_webmcp(args).await,
             ToolHandler::ContentExport => self.handle_content_export(args).await,
-            ToolHandler::ListTabs => self.handle_list_tabs().await,
+            ToolHandler::ListTabs => self.handle_list_tabs(args).await,
             ToolHandler::CreateTab => self.handle_create_tab().await,
             ToolHandler::CloseTab => self.handle_close_tab(args).await,
             ToolHandler::UserTabs => self.handle_user_tabs().await,
@@ -500,8 +549,14 @@ impl super::Server {
         }))?)])
     }
 
-    async fn handle_list_tabs(&self) -> anyhow::Result<Vec<Content>> {
+    async fn handle_list_tabs(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let client = self.client_snapshot();
+        if optional_bool(&args, "selected_only")?.unwrap_or(false) {
+            let selected = browser::selected_tab(&client).await?;
+            return Ok(vec![Content::text(serde_json::to_string_pretty(
+                &selected,
+            )?)]);
+        }
         let tabs = browser::list_tabs(&client).await?;
         Ok(vec![Content::text(serde_json::to_string_pretty(&tabs)?)])
     }
@@ -726,7 +781,10 @@ impl super::Server {
 
     async fn handle_dom_snapshot(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
-        let snapshot = browser::dom_snapshot(&self.client_snapshot(), tab_id).await?;
+        let include_iframes = optional_bool(&args, "include_iframes")?.unwrap_or(false);
+        let snapshot =
+            browser::dom_snapshot_with_options(&self.client_snapshot(), tab_id, include_iframes)
+                .await?;
         Ok(vec![Content::text(snapshot)])
     }
 
@@ -1326,8 +1384,13 @@ impl super::Server {
     async fn handle_locator(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
         let action = required_str(&args, "action")?;
-        crate::locator::validate_spec(&args)?;
         let client = self.client_snapshot();
+        if action == "element_info" {
+            let selector = required_str(&args, "selector")?;
+            let info = browser::element_info(&client, tab_id, selector).await?;
+            return Ok(vec![Content::text(serde_json::to_string(&info)?)]);
+        }
+        crate::locator::validate_spec(&args)?;
         if action == "wait" {
             let timeout_ms =
                 optional_duration_ms(&args, "timeout_ms", MAX_WAIT_MS)?.unwrap_or(10_000);
@@ -1584,7 +1647,32 @@ impl super::Server {
     async fn handle_screenshot_element(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
         let selector = required_str(&args, "selector")?;
-        let data = browser::screenshot_element(&self.client_snapshot(), tab_id, selector).await?;
+        let padding = args
+            .get("padding")
+            .map(|v| {
+                v.as_f64()
+                    .ok_or_else(|| anyhow::anyhow!("padding must be a number"))
+            })
+            .transpose()?;
+        let include_info = optional_bool(&args, "include_info")?.unwrap_or(false);
+        let client = self.client_snapshot();
+        if padding.is_some() || include_info {
+            let (data, mut meta) = browser::screenshot_element_with_options(
+                &client,
+                tab_id,
+                selector,
+                padding.unwrap_or(0.0),
+            )
+            .await?;
+            if include_info {
+                meta["element_info"] = browser::element_info(&client, tab_id, selector).await?;
+            }
+            return Ok(vec![
+                Content::image_or_summary(data.clone(), "image/png", "Element screenshot"),
+                Content::text(serde_json::to_string(&meta)?),
+            ]);
+        }
+        let data = browser::screenshot_element(&client, tab_id, selector).await?;
         Ok(vec![
             Content::image_or_summary(data.clone(), "image/png", "Element screenshot"),
             Content::text(format!(
@@ -1687,12 +1775,51 @@ impl super::Server {
 
     async fn handle_wait_for_url(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let tab_id = required_str(&args, "tab_id")?;
-        let pattern = required_str(&args, "pattern")?;
         let timeout_ms = optional_duration_ms(&args, "timeout_ms", MAX_WAIT_MS)?.unwrap_or(10_000);
-        browser::wait_for_url(&self.client_snapshot(), tab_id, pattern, timeout_ms).await?;
-        Ok(vec![Content::text(format!(
-            "URL matched {pattern} in tab {tab_id}"
-        ))])
+        let pattern = args
+            .get("pattern")
+            .map(|v| {
+                v.as_str()
+                    .ok_or_else(|| anyhow::anyhow!("pattern must be a string"))
+            })
+            .transpose()?;
+        let url = args
+            .get("url")
+            .map(|v| {
+                v.as_str()
+                    .ok_or_else(|| anyhow::anyhow!("url must be a string"))
+            })
+            .transpose()?;
+        let url_glob = args
+            .get("url_glob")
+            .map(|v| {
+                v.as_str()
+                    .ok_or_else(|| anyhow::anyhow!("url_glob must be a string"))
+            })
+            .transpose()?;
+        let url_regex = args.get("url_regex");
+        if let Some(pattern) = pattern {
+            if url.is_some() || url_glob.is_some() || url_regex.is_some() {
+                anyhow::bail!("pattern cannot be combined with url, url_glob, or url_regex");
+            }
+            browser::wait_for_url(&self.client_snapshot(), tab_id, pattern, timeout_ms).await?;
+            return Ok(vec![Content::text(format!(
+                "URL matched {pattern} in tab {tab_id}"
+            ))]);
+        }
+        let matcher =
+            crate::observation::UrlMatcher::parse(url, url_glob, url_regex)?.ok_or_else(|| {
+                anyhow::anyhow!("wait_for_url requires one of pattern, url, url_glob, or url_regex")
+            })?;
+        browser::wait_for_url_with_matcher(
+            &self.client_snapshot(),
+            tab_id,
+            &matcher,
+            "match expected pattern",
+            timeout_ms,
+        )
+        .await?;
+        Ok(vec![Content::text(format!("URL matched in tab {tab_id}"))])
     }
 
     async fn handle_performance_metrics(&self, args: Value) -> anyhow::Result<Vec<Content>> {

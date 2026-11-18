@@ -27,17 +27,22 @@ Detailed contracts and status matrices:
   instance-bound CLI v2 session continuation, exact tab-claim snapshots,
   serialized rebind/finalize, and background focus emulation
   (`Emulation.setFocusEmulationEnabled`) on tab attach.
-- **Browser observation, locators & files (`#40`)**: opt-in per-tab observation
-  with frame/loader state, dialog/file-chooser IDs, bounded event/log cursors,
+- **Browser observation, locators & files (`#40`, `v2.1.1`)**: opt-in per-tab
+  observation with frame/loader state, `commit`/`domcontentloaded`/`load`/`networkidle`
+  navigation waits, `url`/`url_glob`/safe-`url_regex` matchers, level-filtered
+  event/log cursors, dialog/file-chooser IDs, `codex_list_tabs(selected_only=true)`
+  (`Tabs.selected`), `codex_dom_snapshot(include_iframes=true)`,
+  `codex_locator(action="element_info")`, padded/annotated
+  `codex_screenshot_element`, viewport/full-page/bounded-`clip` screenshots,
   shared declarative locators with actionability/trial/force, trusted
-  checked-state transitions, viewport/full-page/bounded-`clip` screenshots,
-  colocated file-chooser uploads, and atomic host file output.
+  checked-state transitions, colocated file-chooser uploads, and atomic host
+  file output.
 - **Native Computer Use adapter (`#57`, `v2.1.0` – `v2.1.1`)**: host launch-row
   discovery, Codex CLI environment and Windows `PATH`/`PATHEXT` parity, unified
-  cancel-safe JSON-RPC stdio transport across `--mode mcp` and CLI/doctor
-  (`call`, `batch`, `tools`, `--image-dir`), `enabled_tools`/`disabled_tools`
-  filtering, `turn_ended` execution-context cleanup, and Windows JobObject /
-  Unix process-group teardown.
+  cancel-safe full-duplex JSON-RPC stdio transport across `--mode mcp` and
+  CLI/doctor (`call`, `batch`, `tools`, `--image-dir`),
+  `enabled_tools`/`disabled_tools` filtering, `turn_ended` execution-context
+  cleanup, and Windows JobObject / Unix process-group teardown.
 - **Supply chain & distribution**: zero-exception `cargo-deny` gate (`rmcp`
   removed), checksummed Windows/Linux x64 and arm64 binaries with GitHub
   artifact attestations, npm Trusted Publishing, and Claude Code plugin
@@ -49,24 +54,17 @@ Detailed contracts and status matrices:
 
 Tracked against [docs/official-parity.md](docs/official-parity.md):
 
-- **`Tabs.selected`**: resolve the currently active owned tab directly instead
-  of inferring from `codex_list_tabs`.
-- **Element inspection & annotated capture**: `PlaywrightAPI.elementInfo` and
-  `PlaywrightAPI.elementScreenshot` (CDP DOM hit-testing, backend node IDs,
-  selector generation, and annotated bounding-box screenshots).
-- **Frame-expanded DOM & OOPIF routing**: `PlaywrightAPI.domSnapshot`
-  iframe-expanded text snapshots, cross-origin/OOPIF frame coordinate routing,
-  and fuller ARIA accessible-name computation.
-- **Navigation & log filters**: `waitForLoadState("networkidle")`, glob/regex
-  matchers in `waitForURL`, and level-filtered console/page error reads.
+- **Cross-origin / OOPIF routing & transformed frames**: child-target CDP
+  `sessionId` routing for cross-origin iframes, transformed-frame pointer
+  geometry, and fuller ARIA accessible-name computation.
+- **Actionable visible-DOM references**: document-epoch-bound visible-DOM
+  actionable refs and node-targeted scroll (`DomCUAAPI.get_visible_dom` /
+  `DomCUAAPI.scroll`).
 
 ### 2. Native Computer Use surface — runtime & platform coverage
 
 Tracked in [issue #57](https://github.com/DeliciousBuding/codex-browser-bridge/issues/57):
 
-- **Relay full-duplex write queueing**: decouple client-to-native and
-  native-to-client writes so a backpressured peer cannot stall the opposite
-  direction up to `WRITE_TIMEOUT` (10s).
 - **Desktop interaction edge cases**: physical held-input release verification
   on interrupt, user takeover during active runs, and multi-display / DPI /
   clipboard coverage on Windows x64 and Linux X11.

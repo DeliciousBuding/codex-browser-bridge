@@ -1,8 +1,9 @@
 //! Bounded, opt-in observation of one owned tab. Events are never attributed
 //! from an untagged transport, and cursors cannot cross a reconnect or turn.
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
+use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Notify;
@@ -17,6 +18,16 @@ const MAX_BYTES: usize = 1024 * 1024;
 const MAX_EVENT_BYTES: usize = 64 * 1024;
 const MAX_FRAMES: usize = 256;
 const MAX_STATE_TEXT: usize = 4 * 1024;
+/// In-flight request IDs tracked per tab. A runaway page that never finishes
+/// requests must not grow memory without limit; a full set simply never reads
+/// as idle until the next main-frame commit clears it.
+const MAX_INFLIGHT_REQUESTS: usize = 1024;
+/// Quiet window after the last network state change before `networkidle`.
+const NETWORK_IDLE_QUIET: Duration = Duration::from_millis(500);
+const MAX_URL_GLOB_BYTES: usize = 512;
+/// Same ceiling as the locator regex subset.
+const MAX_URL_REGEX_BYTES: usize = 256;
+const REGEX_SIZE_LIMIT: usize = 64 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ObservationCursor {
@@ -80,6 +91,8 @@ pub struct TabSnapshot {
     pub url: Option<String>,
     pub domcontentloaded: bool,
     pub load: bool,
+    /// Top-document requests started but not yet finished.
+    pub inflight_network_requests: usize,
     pub frames: Vec<FrameSnapshot>,
     pub frames_truncated: bool,
     pub dialog: Option<DialogSnapshot>,
@@ -94,6 +107,9 @@ pub enum LoadState {
     Commit,
     DomContentLoaded,
     Load,
+    /// `load` plus no in-flight top-document request and a quiet window since
+    /// the last network state change.
+    NetworkIdle,
 }
 
 /// All allocations have per-tab and global bounds. No receiver/task is created
@@ -121,6 +137,12 @@ struct TabState {
     dropped_count: u64,
     /// Highest lost sequence, including oversize events that were not retained.
     lost_through: u64,
+    /// Request IDs in flight for the current top document, bounded by
+    /// `MAX_INFLIGHT_REQUESTS` and cleared by a main-frame navigation commit.
+    inflight_requests: HashSet<String>,
+    /// Last moment the top document's network state changed; the `networkidle`
+    /// quiet window is measured from here.
+    last_network_change: Instant,
     notify: Arc<Notify>,
 }
 
@@ -143,6 +165,8 @@ impl TabState {
             event_bytes: 0,
             dropped_count: 0,
             lost_through: 0,
+            inflight_requests: HashSet::new(),
+            last_network_change: Instant::now(),
             notify: Arc::new(Notify::new()),
         }
     }
@@ -169,6 +193,7 @@ impl TabState {
                 .map(|f| f.url.clone()),
             domcontentloaded: self.domcontentloaded,
             load: self.load,
+            inflight_network_requests: self.inflight_requests.len(),
             frames: self.frames.values().cloned().collect(),
             frames_truncated: self.frames_truncated,
             dialog: self.dialog.clone(),
@@ -215,9 +240,12 @@ impl TabState {
                 self.load = false;
                 self.dialog = None;
                 self.file_chooser = None;
-                // A main-document commit invalidates its previous descendants.
+                // A main-document commit invalidates its previous descendants
+                // and every request still counted for the previous document.
                 self.frames.clear();
                 self.frames_truncated = false;
+                self.inflight_requests.clear();
+                self.last_network_change = Instant::now();
             }
             self.main_frame_id = Some(id.into());
         }
@@ -292,6 +320,18 @@ impl TabState {
                     _ => {}
                 }
             }
+            "Network.requestWillBeSent" => {
+                if let Some(id) = bounded_string(params.get("requestId")) {
+                    self.track_request(id);
+                }
+            }
+            "Network.loadingFinished" | "Network.loadingFailed" => {
+                if let Some(id) = params.get("requestId").and_then(Value::as_str) {
+                    if self.inflight_requests.remove(id) {
+                        self.last_network_change = Instant::now();
+                    }
+                }
+            }
             "Page.javascriptDialogOpening" => {
                 self.dialog = Some(DialogSnapshot {
                     id: Uuid::new_v4().to_string(),
@@ -321,6 +361,18 @@ impl TabState {
             }
             _ => {}
         }
+    }
+
+    fn track_request(&mut self, id: String) {
+        if self.inflight_requests.contains(&id) {
+            self.last_network_change = Instant::now();
+            return;
+        }
+        if self.inflight_requests.len() >= MAX_INFLIGHT_REQUESTS {
+            return;
+        }
+        self.inflight_requests.insert(id);
+        self.last_network_change = Instant::now();
     }
 
     fn remove_frame(&mut self, id: &str) {
@@ -596,14 +648,260 @@ impl ObservationStore {
     }
 }
 
+/// URL predicate for `wait_navigation` and `wait_url`. `Exact` keeps the
+/// original contract; `Glob` and `Regex` are opt-in and validated up front so
+/// an untrusted pattern never reaches an unrestricted matcher.
+#[derive(Clone, Debug)]
+pub enum UrlMatcher {
+    Exact(String),
+    Substring(String),
+    /// Translated glob source (`^...$` regex), validated at parse time.
+    Glob(String),
+    Regex(Regex),
+}
+
+impl UrlMatcher {
+    /// Build a matcher from at most one of `url`, `url_glob` and `url_regex`.
+    /// Returns `None` when none is supplied.
+    pub fn parse(
+        url: Option<&str>,
+        url_glob: Option<&str>,
+        url_regex: Option<&Value>,
+    ) -> Result<Option<Self>> {
+        let provided = [url.is_some(), url_glob.is_some(), url_regex.is_some()]
+            .into_iter()
+            .filter(|present| *present)
+            .count();
+        if provided > 1 {
+            return Err(BridgeError::User(
+                "url matching accepts at most one of url, url_glob and url_regex".into(),
+            ));
+        }
+        if let Some(url) = url {
+            return Ok(Some(Self::Exact(url.to_string())));
+        }
+        if let Some(glob) = url_glob {
+            if glob.len() > MAX_URL_GLOB_BYTES {
+                return Err(BridgeError::User(format!(
+                    "url_glob supports at most {MAX_URL_GLOB_BYTES} bytes"
+                )));
+            }
+            let pattern = glob_to_regex(glob);
+            RegexBuilder::new(&pattern)
+                .size_limit(REGEX_SIZE_LIMIT)
+                .build()
+                .map_err(|_| BridgeError::User("url_glob is not a usable pattern".into()))?;
+            return Ok(Some(Self::Glob(pattern)));
+        }
+        let Some(spec) = url_regex else {
+            return Ok(None);
+        };
+        Ok(Some(Self::Regex(compile_url_regex(spec)?)))
+    }
+
+    pub fn matches(&self, candidate: &str) -> bool {
+        match self {
+            Self::Exact(url) => candidate == url,
+            Self::Substring(needle) => candidate.contains(needle.as_str()),
+            // The translated source is bounded at parse time, so compiling on
+            // demand stays cheap and keeps the matcher simple to clone.
+            Self::Glob(pattern) => RegexBuilder::new(pattern)
+                .size_limit(REGEX_SIZE_LIMIT)
+                .build()
+                .is_ok_and(|regex| regex.is_match(candidate)),
+            Self::Regex(regex) => regex.is_match(candidate),
+        }
+    }
+}
+
+/// Translate a URL glob into an anchored regex source: `**` spans segments,
+/// `*` stays inside one segment, `?` is one non-separator character.
+fn glob_to_regex(glob: &str) -> String {
+    let mut pattern = String::with_capacity(glob.len() + 8);
+    pattern.push('^');
+    let mut chars = glob.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '*' if chars.peek() == Some(&'*') => {
+                chars.next();
+                pattern.push_str(".*");
+            }
+            '*' => pattern.push_str("[^/]*"),
+            '?' => pattern.push_str("[^/]"),
+            c => {
+                if "\\.+()[]{}^$|".contains(c) {
+                    pattern.push('\\');
+                }
+                pattern.push(c);
+            }
+        }
+    }
+    pattern.push('$');
+    pattern
+}
+
+fn url_regex_error(message: impl Into<String>) -> BridgeError {
+    BridgeError::User(message.into())
+}
+
+/// Accepts a bare pattern or `{"regex": "...", "flags": "..."}` and compiles it
+/// with the same restricted subset as the locator.
+fn compile_url_regex(spec: &Value) -> Result<Regex> {
+    let (pattern, flags) = match spec {
+        Value::String(pattern) => (pattern.as_str(), ""),
+        Value::Object(object) => {
+            if object.keys().any(|key| key != "regex" && key != "flags") {
+                return Err(url_regex_error("url_regex accepts only regex and flags"));
+            }
+            let pattern = object
+                .get("regex")
+                .and_then(Value::as_str)
+                .ok_or_else(|| url_regex_error("url_regex must contain a regex string"))?;
+            let flags = match object.get("flags") {
+                Some(value) => value
+                    .as_str()
+                    .ok_or_else(|| url_regex_error("url_regex flags must be a string"))?,
+                None => "",
+            };
+            (pattern, flags)
+        }
+        _ => {
+            return Err(url_regex_error(
+                "url_regex must be a pattern string or {regex, flags} object",
+            ))
+        }
+    };
+    validate_safe_regex(pattern, flags)?;
+    let mut builder = RegexBuilder::new(pattern);
+    builder.size_limit(REGEX_SIZE_LIMIT);
+    for flag in flags.chars() {
+        match flag {
+            'i' => {
+                builder.case_insensitive(true);
+            }
+            'm' => {
+                builder.multi_line(true);
+            }
+            's' => {
+                builder.dot_matches_new_line(true);
+            }
+            'u' => {
+                builder.unicode(true);
+            }
+            _ => {}
+        }
+    }
+    builder
+        .build()
+        .map_err(|err| url_regex_error(format!("url_regex does not compile: {err}")))
+}
+
+/// Small explicitly documented subset: no grouping, alternation, backreferences
+/// or counted repetition, one quantifier at most, unique `imsu` flags.
+fn validate_safe_regex(pattern: &str, flags: &str) -> Result<()> {
+    let mut escaped = false;
+    let mut quantifiers = 0;
+    for c in pattern.chars() {
+        if escaped {
+            if c.is_ascii_digit() && c != '0' {
+                return Err(url_regex_error("regex backreferences are unsupported"));
+            }
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else if "()|{}".contains(c) {
+            return Err(url_regex_error(
+                "regex grouping, alternation and counted repetition are unsupported",
+            ));
+        } else if "*+?".contains(c) {
+            quantifiers += 1;
+        }
+    }
+    if pattern.len() > MAX_URL_REGEX_BYTES
+        || quantifiers > 1
+        || flags.chars().any(|c| !"imsu".contains(c))
+        || flags
+            .chars()
+            .enumerate()
+            .any(|(i, c)| flags[..i].contains(c))
+    {
+        return Err(url_regex_error(format!(
+            "regex supports at most {MAX_URL_REGEX_BYTES} bytes, one quantifier and unique imsu flags"
+        )));
+    }
+    Ok(())
+}
+
+/// Collapse CDP/console level spellings onto the four levels log filters use.
+/// Unknown or missing levels count as `info`.
+pub fn normalize_log_level(raw: Option<&str>) -> &'static str {
+    let Some(raw) = raw else {
+        return "info";
+    };
+    if raw.eq_ignore_ascii_case("warning") || raw.eq_ignore_ascii_case("warn") {
+        "warning"
+    } else if raw.eq_ignore_ascii_case("error") || raw.eq_ignore_ascii_case("assert") {
+        "error"
+    } else if raw.eq_ignore_ascii_case("debug")
+        || raw.eq_ignore_ascii_case("verbose")
+        || raw.eq_ignore_ascii_case("trace")
+    {
+        "debug"
+    } else {
+        "info"
+    }
+}
+
+/// An empty filter admits every entry. Otherwise a level is admitted when the
+/// raw or normalized spelling matches on either side, so `warn` and `warning`
+/// are interchangeable.
+pub fn log_level_matches(raw_level: Option<&str>, allowed_levels: &[String]) -> bool {
+    if allowed_levels.is_empty() {
+        return true;
+    }
+    let normalized = normalize_log_level(raw_level);
+    allowed_levels.iter().any(|allowed| {
+        raw_level.is_some_and(|raw| allowed.eq_ignore_ascii_case(raw))
+            || allowed.eq_ignore_ascii_case(normalized)
+            || normalize_log_level(Some(allowed)) == normalized
+    })
+}
+
 /// Wait for a main-frame navigation observed after the supplied arm cursor.
-/// Exact URL matching is intentionally not a Playwright glob/regex contract.
-/// Load milestones are loader-bound; networkidle is deliberately unsupported.
+/// `expected_url` is matched exactly; use [`wait_for_navigation_with_matcher`]
+/// for glob, regex or substring predicates.
 pub(crate) async fn wait_for_navigation(
     store: &Mutex<ObservationStore>,
     tab_id: i64,
     cursor: &ObservationCursor,
     expected_url: Option<&str>,
+    wait_until: LoadState,
+    wait_timeout: Duration,
+) -> Result<TabSnapshot> {
+    let matcher = expected_url.map(|url| UrlMatcher::Exact(url.to_string()));
+    wait_for_navigation_with_matcher(
+        store,
+        tab_id,
+        cursor,
+        matcher.as_ref(),
+        wait_until,
+        wait_timeout,
+    )
+    .await
+}
+
+/// Wait for a main-frame navigation after `cursor` whose URL matches `matcher`
+/// and whose readiness reaches `wait_until`.
+///
+/// `NetworkIdle` also requires the `load` milestone, an empty top-document
+/// request set and a quiet window since the last network change. No CDP event
+/// marks the end of that window, so the wait races the notifier against the
+/// remaining quiet time instead of blocking on it.
+pub(crate) async fn wait_for_navigation_with_matcher(
+    store: &Mutex<ObservationStore>,
+    tab_id: i64,
+    cursor: &ObservationCursor,
+    matcher: Option<&UrlMatcher>,
     wait_until: LoadState,
     wait_timeout: Duration,
 ) -> Result<TabSnapshot> {
@@ -614,6 +912,7 @@ pub(crate) async fn wait_for_navigation(
         tokio::pin!(notified);
         // Register before checking state, avoiding event-before-wait races.
         notified.as_mut().enable();
+        let mut quiet_wait = None;
         {
             let guard = store.lock().unwrap();
             let tab = guard.tab(tab_id)?;
@@ -633,17 +932,47 @@ pub(crate) async fn wait_for_navigation(
                     LoadState::Commit => true,
                     LoadState::DomContentLoaded => snapshot.domcontentloaded,
                     LoadState::Load => snapshot.load,
+                    LoadState::NetworkIdle => snapshot.load && tab.inflight_requests.is_empty(),
                 };
-                if ready
-                    && expected_url.is_none_or(|expected| snapshot.url.as_deref() == Some(expected))
-                {
-                    return Ok(snapshot);
+                let matched = matcher.is_none_or(|matcher| {
+                    snapshot
+                        .url
+                        .as_deref()
+                        .is_some_and(|url| matcher.matches(url))
+                });
+                if ready && matched {
+                    if wait_until == LoadState::NetworkIdle {
+                        let quiet =
+                            Instant::now().saturating_duration_since(tab.last_network_change);
+                        if quiet >= NETWORK_IDLE_QUIET {
+                            return Ok(snapshot);
+                        }
+                        quiet_wait = Some(NETWORK_IDLE_QUIET - quiet);
+                    } else {
+                        return Ok(snapshot);
+                    }
                 }
             }
         }
-        timeout(deadline.saturating_duration_since(Instant::now()), notified)
-            .await
-            .map_err(|_| BridgeError::Timeout("observed navigation".into()))?;
+        match quiet_wait {
+            Some(remaining) => {
+                let remaining = remaining.min(deadline.saturating_duration_since(Instant::now()));
+                if remaining.is_zero() {
+                    return Err(BridgeError::Timeout("observed navigation".into()));
+                }
+                // Any later network event fires the notifier and restarts the
+                // quiet window; otherwise wake when it elapses.
+                tokio::select! {
+                    _ = notified => {}
+                    _ = tokio::time::sleep(remaining) => {}
+                }
+            }
+            None => {
+                timeout(deadline.saturating_duration_since(Instant::now()), notified)
+                    .await
+                    .map_err(|_| BridgeError::Timeout("observed navigation".into()))?;
+            }
+        }
     }
 }
 
@@ -988,5 +1317,307 @@ mod tests {
             .unwrap()
             .unwrap()
             .is_err());
+    }
+
+    #[test]
+    fn url_matchers_accept_exact_glob_and_safe_regex() {
+        let exact = UrlMatcher::parse(Some("https://example.com/a"), None, None)
+            .unwrap()
+            .unwrap();
+        assert!(exact.matches("https://example.com/a"));
+        assert!(!exact.matches("https://example.com/a#fragment"));
+        assert!(UrlMatcher::Substring("example.com/a".into()).matches("https://example.com/a"));
+
+        let segment = UrlMatcher::parse(None, Some("https://example.com/*"), None)
+            .unwrap()
+            .unwrap();
+        assert!(segment.matches("https://example.com/page"));
+        assert!(!segment.matches("https://example.com/a/page"));
+
+        let any_depth = UrlMatcher::parse(None, Some("https://example.com/**"), None)
+            .unwrap()
+            .unwrap();
+        assert!(any_depth.matches("https://example.com/a/b/c"));
+        assert!(any_depth.matches("https://example.com/"));
+
+        let single = UrlMatcher::parse(None, Some("https://example.com/article-?*"), None)
+            .unwrap()
+            .unwrap();
+        assert!(single.matches("https://example.com/article-7x"));
+        assert!(!single.matches("https://example.com/article-"));
+        assert!(!single.matches("https://example.com/article-7/x"));
+
+        let regex = UrlMatcher::parse(
+            None,
+            None,
+            Some(&json!({"regex":"^https://example\\.com/[a-z]+$","flags":"i"})),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(regex.matches("https://EXAMPLE.com/Path"));
+        assert!(!regex.matches("https://example.com/Path/2"));
+
+        let plain = UrlMatcher::parse(None, None, Some(&json!("^https://example\\.com/")))
+            .unwrap()
+            .unwrap();
+        assert!(plain.matches("https://example.com/x"));
+        assert!(UrlMatcher::parse(None, None, None).unwrap().is_none());
+    }
+
+    #[test]
+    fn url_matchers_reject_ambiguous_or_unsafe_patterns() {
+        assert!(UrlMatcher::parse(Some("a"), Some("b"), None).is_err());
+        assert!(UrlMatcher::parse(Some("a"), None, Some(&json!("b"))).is_err());
+        assert!(UrlMatcher::parse(None, Some("a"), Some(&json!("b"))).is_err());
+        for pattern in [
+            json!({"regex":"(a+)+$"}),
+            json!({"regex":"a|b"}),
+            json!({"regex":"a.*.*b"}),
+            json!({"regex":"\\1"}),
+            json!({"regex":"ok","flags":"ii"}),
+            json!({"regex":"ok","flags":"x"}),
+            json!({"regex":"ok","extra":1}),
+            json!({"flags":"i"}),
+            json!({"regex":"a".repeat(MAX_URL_REGEX_BYTES + 1)}),
+        ] {
+            assert!(
+                UrlMatcher::parse(None, None, Some(&pattern)).is_err(),
+                "{pattern}"
+            );
+        }
+        assert!(UrlMatcher::parse(None, Some(&"*".repeat(MAX_URL_GLOB_BYTES + 1)), None).is_err());
+    }
+
+    #[test]
+    fn log_levels_normalize_and_filter_with_aliases() {
+        for (raw, expected) in [
+            (Some("warning"), "warning"),
+            (Some("warn"), "warning"),
+            (Some("ERROR"), "error"),
+            (Some("assert"), "error"),
+            (Some("verbose"), "debug"),
+            (Some("trace"), "debug"),
+            (Some("debug"), "debug"),
+            (Some("log"), "info"),
+            (Some("dir"), "info"),
+            (Some("table"), "info"),
+            (Some("info"), "info"),
+            (Some("notice"), "info"),
+            (None, "info"),
+        ] {
+            assert_eq!(normalize_log_level(raw), expected, "{raw:?}");
+        }
+
+        fn levels(raw: &[&str]) -> Vec<String> {
+            raw.iter().map(|level| level.to_string()).collect()
+        }
+        assert!(log_level_matches(Some("error"), &[]));
+        assert!(log_level_matches(Some("warning"), &levels(&["warn"])));
+        assert!(log_level_matches(Some("warn"), &levels(&["warning"])));
+        assert!(log_level_matches(Some("log"), &levels(&["info"])));
+        assert!(log_level_matches(Some("DEBUG"), &levels(&["debug"])));
+        assert!(log_level_matches(None, &levels(&["info"])));
+        assert!(!log_level_matches(
+            Some("info"),
+            &levels(&["warning", "error"])
+        ));
+        assert!(!log_level_matches(Some("debug"), &levels(&["info"])));
+    }
+
+    #[test]
+    fn network_requests_are_bounded_and_cleared_by_navigation() {
+        let mut store = ObservationStore::default();
+        store.register(1).unwrap();
+        navigate(&mut store, "a");
+        store.record(&event(
+            1,
+            "Network.requestWillBeSent",
+            json!({"requestId":"r1"}),
+        ));
+        store.record(&event(
+            1,
+            "Network.requestWillBeSent",
+            json!({"requestId":"r2"}),
+        ));
+        assert_eq!(store.snapshot(1).unwrap().inflight_network_requests, 2);
+        store.record(&event(
+            1,
+            "Network.loadingFinished",
+            json!({"requestId":"r1"}),
+        ));
+        assert_eq!(store.snapshot(1).unwrap().inflight_network_requests, 1);
+        store.record(&event(
+            1,
+            "Network.loadingFailed",
+            json!({"requestId":"r2"}),
+        ));
+        assert_eq!(store.snapshot(1).unwrap().inflight_network_requests, 0);
+        for index in 0..MAX_INFLIGHT_REQUESTS + 16 {
+            store.record(&event(
+                1,
+                "Network.requestWillBeSent",
+                json!({"requestId":format!("req{index}")}),
+            ));
+        }
+        assert_eq!(
+            store.snapshot(1).unwrap().inflight_network_requests,
+            MAX_INFLIGHT_REQUESTS
+        );
+        navigate(&mut store, "b");
+        assert_eq!(store.snapshot(1).unwrap().inflight_network_requests, 0);
+    }
+
+    #[tokio::test]
+    async fn network_idle_requires_load_and_waits_out_the_quiet_window() {
+        let store = Mutex::new(ObservationStore::default());
+        let arm = store.lock().unwrap().register(1).unwrap().cursor;
+        navigate(&mut store.lock().unwrap(), "a");
+        store.lock().unwrap().record(&event(
+            1,
+            "Page.lifecycleEvent",
+            json!({"frameId":"main", "loaderId":"a", "name":"load"}),
+        ));
+        let started = Instant::now();
+        let snapshot = wait_for_navigation_with_matcher(
+            &store,
+            1,
+            &arm,
+            None,
+            LoadState::NetworkIdle,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        assert!(snapshot.load);
+        assert_eq!(snapshot.inflight_network_requests, 0);
+        // Readiness is reached immediately, but the quiet window still has to
+        // pass before the wait may return.
+        assert!(started.elapsed() >= NETWORK_IDLE_QUIET);
+    }
+
+    #[tokio::test]
+    async fn network_idle_waits_for_inflight_requests() {
+        let store = Arc::new(Mutex::new(ObservationStore::default()));
+        let arm = store.lock().unwrap().register(1).unwrap().cursor;
+        navigate(&mut store.lock().unwrap(), "a");
+        store.lock().unwrap().record(&event(
+            1,
+            "Page.lifecycleEvent",
+            json!({"frameId":"main", "loaderId":"a", "name":"load"}),
+        ));
+        store.lock().unwrap().record(&event(
+            1,
+            "Network.requestWillBeSent",
+            json!({"requestId":"r1"}),
+        ));
+        let mut task = tokio::spawn({
+            let store = store.clone();
+            async move {
+                wait_for_navigation_with_matcher(
+                    &store,
+                    1,
+                    &arm,
+                    None,
+                    LoadState::NetworkIdle,
+                    Duration::from_secs(5),
+                )
+                .await
+            }
+        });
+        tokio::time::sleep(NETWORK_IDLE_QUIET + Duration::from_millis(50)).await;
+        assert!(
+            timeout(Duration::from_millis(50), &mut task).await.is_err(),
+            "networkidle must stay blocked while a request is in flight"
+        );
+        store.lock().unwrap().record(&event(
+            1,
+            "Network.loadingFinished",
+            json!({"requestId":"r1"}),
+        ));
+        let snapshot = task.await.unwrap().unwrap();
+        assert_eq!(snapshot.inflight_network_requests, 0);
+    }
+
+    #[tokio::test]
+    async fn network_idle_restarts_the_quiet_window_on_new_requests() {
+        let store = Arc::new(Mutex::new(ObservationStore::default()));
+        let arm = store.lock().unwrap().register(1).unwrap().cursor;
+        navigate(&mut store.lock().unwrap(), "a");
+        store.lock().unwrap().record(&event(
+            1,
+            "Page.lifecycleEvent",
+            json!({"frameId":"main", "loaderId":"a", "name":"load"}),
+        ));
+        let started = Instant::now();
+        let task = tokio::spawn({
+            let store = store.clone();
+            async move {
+                wait_for_navigation_with_matcher(
+                    &store,
+                    1,
+                    &arm,
+                    None,
+                    LoadState::NetworkIdle,
+                    Duration::from_secs(5),
+                )
+                .await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        store.lock().unwrap().record(&event(
+            1,
+            "Network.requestWillBeSent",
+            json!({"requestId":"late"}),
+        ));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        store.lock().unwrap().record(&event(
+            1,
+            "Network.loadingFinished",
+            json!({"requestId":"late"}),
+        ));
+        let snapshot = task.await.unwrap().unwrap();
+        assert_eq!(snapshot.inflight_network_requests, 0);
+        // Without the timer reset the first quiet window ends near 500ms; the
+        // late request plus its completion must push the return past that.
+        assert!(
+            started.elapsed() >= NETWORK_IDLE_QUIET + Duration::from_millis(200),
+            "quiet window was not restarted: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_uses_a_url_matcher_and_reports_mismatches_by_timeout() {
+        let store = Mutex::new(ObservationStore::default());
+        let arm = store.lock().unwrap().register(1).unwrap().cursor;
+        navigate(&mut store.lock().unwrap(), "a");
+        let glob = UrlMatcher::parse(None, Some("https://example.com/**"), None)
+            .unwrap()
+            .unwrap();
+        let matched = wait_for_navigation_with_matcher(
+            &store,
+            1,
+            &arm,
+            Some(&glob),
+            LoadState::Commit,
+            Duration::from_millis(20),
+        )
+        .await
+        .unwrap();
+        assert_eq!(matched.url.as_deref(), Some("https://example.com/"));
+        let other = UrlMatcher::parse(None, Some("https://other.example/**"), None)
+            .unwrap()
+            .unwrap();
+        let err = wait_for_navigation_with_matcher(
+            &store,
+            1,
+            &arm,
+            Some(&other),
+            LoadState::Commit,
+            Duration::from_millis(20),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, BridgeError::Timeout(_)));
     }
 }

@@ -25,6 +25,18 @@ All notable changes to this project will be documented in this file.
 - Computer Use `js` now uses every native surface enabled by the host launch
   row; browser-specific network, tab and output policies do not wrap that
   native surface.
+- Decouple client-to-native and native-to-client writes in the `--mode mcp`
+  relay with cancel-safe outbound queues so backpressure in one direction does
+  not block the opposite direction.
+- Expand browser official parity across existing tools: `codex_list_tabs`
+  `selected_only` (`Tabs.selected`), `codex_observe` / `codex_nav_and_wait` /
+  `codex_click_and_wait` `wait_until="networkidle"`, `url_glob` and safe
+  `url_regex` matchers in `codex_observe(action="wait_navigation")` and
+  `codex_wait_for_url`, log-level filtering (`levels`) in
+  `codex_observe(action="logs")`, same-origin iframe expansion
+  (`include_iframes=true`) in `codex_dom_snapshot`, and
+  `PlaywrightAPI.elementInfo` / padded element capture in `codex_locator` and
+  `codex_screenshot_element`.
 
 ### Fixed
 
