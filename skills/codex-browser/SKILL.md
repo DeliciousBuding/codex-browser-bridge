@@ -17,6 +17,4 @@ description: Use the installed Codex Browser Use and Computer Use runtimes for b
 - Bootstrap once per worker. Read the native instructions when returned;
   reuse the current target rather than repeating inventory or setup.
 
-See [native runtime setup](references/native-computer-use.md) for setup and
-lifecycle. Use the [extension compatibility reference](references/official-parity.md)
-only when an existing configuration explicitly selects `--surface browser` (`codex_*`).
+See [native runtime setup](references/native-computer-use.md) for setup, discovery, and lifecycle details.

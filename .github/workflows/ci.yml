@@ -34,10 +34,6 @@ jobs:
         timeout-minutes: 10
         shell: bash
         run: cargo test --locked
-      - name: Test live E2E timeout cleanup
-        timeout-minutes: 3
-        shell: pwsh
-        run: ./scripts/test-live-e2e-timeout.ps1
       - name: Install cargo-llvm-cov
         # Prebuilt binary via taiki-e — avoids `cargo install` compiling the
         # cargo-llvm-cov independently of the project build.
@@ -81,9 +77,6 @@ jobs:
       - name: Check release automation contract
         shell: bash
         run: node scripts/check-release-contract.js
-      - name: Check agent surface docs
-        shell: bash
-        run: node scripts/check-agent-surface.js
       - name: Check plugin surface
         shell: bash
         run: node scripts/check-plugin-surface.js

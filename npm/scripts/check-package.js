@@ -23,7 +23,6 @@ function requiredFilesForEnv(env = process.env) {
     "examples/native-computer-use.json",
     "examples/openclaw.json",
     "skills/codex-browser/SKILL.md",
-    "skills/codex-browser/references/official-parity.md",
     "skills/codex-browser/references/native-computer-use.md",
   ];
 
