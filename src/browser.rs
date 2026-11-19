@@ -2559,12 +2559,18 @@ struct ResourceEntry {
     content_size: Option<f64>,
 }
 
+#[derive(Deserialize)]
+struct ResourceTreeEnvelope {
+    #[serde(rename = "frameTree")]
+    frame_tree: FrameTree,
+}
+
 fn parse_resource_tree(raw: &RawValue) -> Result<Vec<PageResource>> {
-    let tree: FrameTree = serde_json::from_str(raw.get())
+    let envelope: ResourceTreeEnvelope = serde_json::from_str(raw.get())
         .map_err(|err| BridgeError::Protocol(format!("parse resource tree: {err}")))?;
 
     let mut resources = Vec::new();
-    collect_resources(&tree, &mut resources);
+    collect_resources(&envelope.frame_tree, &mut resources);
     Ok(resources)
 }
 
@@ -3152,11 +3158,11 @@ mod tests {
     #[test]
     fn resource_tree_treats_invalid_content_size_as_unknown() {
         let raw = RawValue::from_string(
-            r#"{"frame":{"id":"root","url":"https://example.com"},"resources":[
+            r#"{"frameTree":{"frame":{"id":"7A3B2C1D","loaderId":"L1","url":"https://example.com/","domainAndRegistry":"example.com","securityOrigin":"https://example.com","mimeType":"text/html"},"resources":[
                 {"url":"https://example.com/negative.bin","type":"Other","mimeType":"application/octet-stream","contentSize":-1},
                 {"url":"https://example.com/zero.bin","type":"Other","mimeType":"application/octet-stream","contentSize":0},
                 {"url":"https://example.com/ok.css","type":"Stylesheet","mimeType":"text/css","contentSize":12.7}
-            ]}"#
+            ]}}"#
                 .to_string(),
         )
         .unwrap();
@@ -3166,6 +3172,20 @@ mod tests {
         assert_eq!(resources[0].size, None);
         assert_eq!(resources[1].size, None);
         assert_eq!(resources[2].size, Some(13));
+    }
+
+    #[test]
+    fn resource_tree_rejects_unwrapped_frame_tree_shape() {
+        let raw = RawValue::from_string(
+            r#"{"frame":{"id":"root","url":"https://example.com"},"resources":[]}"#.to_string(),
+        )
+        .unwrap();
+
+        let err = parse_resource_tree(&raw).unwrap_err();
+        assert!(
+            err.to_string().contains("frameTree"),
+            "expected missing frameTree error, got: {err}"
+        );
     }
 
     #[test]

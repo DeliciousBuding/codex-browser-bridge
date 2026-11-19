@@ -1012,12 +1012,14 @@ mod tools_call_tests {
             &mut pipe,
             &request,
             json!({
-                "frame": {"id":"frame-1","url":"https://example.com"},
-                "resources": [{
-                    "url":"https://example.com/app.js",
-                    "type":"Script",
-                    "mimeType":"application/javascript"
-                }]
+                "frameTree": {
+                    "frame": {"id":"frame-1","url":"https://example.com"},
+                    "resources": [{
+                        "url":"https://example.com/app.js",
+                        "type":"Script",
+                        "mimeType":"application/javascript"
+                    }]
+                }
             }),
         )
         .await;
@@ -1063,13 +1065,15 @@ mod tools_call_tests {
             &mut pipe,
             &tree,
             json!({
-                "frame": {"id":"frame-1","url":"https://example.com"},
-                "resources": [{
-                    "url":"https://example.com/app.js",
-                    "type":"Script",
-                    "mimeType":"application/javascript",
-                    "contentSize": 4
-                }]
+                "frameTree": {
+                    "frame": {"id":"frame-1","url":"https://example.com"},
+                    "resources": [{
+                        "url":"https://example.com/app.js",
+                        "type":"Script",
+                        "mimeType":"application/javascript",
+                        "contentSize": 4
+                    }]
+                }
             }),
         )
         .await;
