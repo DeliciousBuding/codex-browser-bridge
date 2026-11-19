@@ -96,7 +96,7 @@ Native relay behavior follows the installed runtime and its platform support. A 
 - The relay forwards the client's handshake, catalog, pagination cursors, unknown tool fields, images, and errors without normalizing schemas or native extensions. The external host owns version negotiation and client request deadlines.
 - When a `tools/call` request omits Codex correlation metadata, the relay fills `_meta.callId`, `_meta["x-codex-turn-metadata"]` (`session_id` and `turn_id`), `_meta.sessionId`, and `_meta.threadId`.
 - `enabled_tools` is applied before `disabled_tools` across advertised catalogs, direct `tools/call` requests, and the end-of-session `turn_ended` hook.
-- Application approval uses bidirectional MCP form elicitation (`elicitation/create`); `accept`, `decline`, and `cancel` responses pass through unchanged. The CLI is non-interactive and rejects these requests.
+- Application approval uses bidirectional MCP form elicitation (`elicitation/create`); `accept`, `decline`, and `cancel` responses pass through unchanged. The CLI is non-interactive and responds with `{"action": "cancel"}`.
 - On EOF, `SIGINT`, or `SIGTERM`, the bridge cancels in-flight work, sends `turn_ended`, closes the worker's stdin, and terminates the owned process tree (Windows Job Object, Unix process group). Timed-out or interrupted calls are never replayed.
 
 ## Maintenance

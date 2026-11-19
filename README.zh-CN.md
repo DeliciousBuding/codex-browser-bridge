@@ -96,7 +96,7 @@ codex-browser-bridge --surface computer call js '{"code":"await cua.listWindows(
 - 中继原样转发客户端握手、工具目录、分页 cursor、未知工具字段、图片与错误，不重写 schema 或原生扩展；版本协商与客户端请求超时由外部宿主负责。
 - `tools/call` 缺少 Codex 关联元数据时，自动补齐 `_meta.callId`、`_meta["x-codex-turn-metadata"]`（`session_id` 与 `turn_id`）、`_meta.sessionId` 与 `_meta.threadId`。
 - `enabled_tools` 先于 `disabled_tools` 生效，覆盖对外工具目录、直接 `tools/call` 请求和会话结束时的 `turn_ended` 钩子。
-- 应用授权使用双向 MCP form elicitation（`elicitation/create`），`accept`、`decline`、`cancel` 原样透传；CLI 非交互，直接拒绝该请求。
+- 应用授权使用双向 MCP form elicitation（`elicitation/create`），`accept`、`decline`、`cancel` 原样透传；CLI 非交互，返回标准 MCP 结果 `{"action": "cancel"}`。
 - 在 EOF、`SIGINT` 或 `SIGTERM` 时取消进行中的任务、发送 `turn_ended`、关闭 worker stdin，并收掉自有进程树（Windows Job Object、Unix 进程组）。超时或中断的调用绝不重放。
 
 ## 维护

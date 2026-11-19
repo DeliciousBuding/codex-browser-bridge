@@ -459,12 +459,33 @@ impl Launch {
                 });
             }
             let (client_path, plugins) = discover_browser_client();
+            out["browser_client_url"] = json!(client_path.as_deref().map(path_to_file_url));
             out["browser_client"] = json!(client_path);
             if !plugins.is_empty() {
                 out["browser_plugins"] = json!(plugins);
             }
         }
         out
+    }
+}
+
+fn path_to_file_url(path: &Path) -> String {
+    let raw = path.to_string_lossy().replace('\\', "/");
+    let stripped = raw.strip_prefix("//?/").unwrap_or(&raw);
+    let mut encoded = String::with_capacity(stripped.len() + 16);
+    for ch in stripped.chars() {
+        match ch {
+            ' ' => encoded.push_str("%20"),
+            '#' => encoded.push_str("%23"),
+            '?' => encoded.push_str("%3F"),
+            '%' => encoded.push_str("%25"),
+            _ => encoded.push(ch),
+        }
+    }
+    if encoded.starts_with('/') {
+        format!("file://{encoded}")
+    } else {
+        format!("file:///{encoded}")
     }
 }
 
@@ -490,7 +511,7 @@ fn discover_browser_client() -> (Option<PathBuf>, BTreeMap<String, String>) {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
-        let mut versions: Vec<(std::time::SystemTime, String, PathBuf)> = entries
+        let mut versions: Vec<(bool, std::time::SystemTime, String, PathBuf)> = entries
             .filter_map(|e| e.ok())
             .filter_map(|e| {
                 let version = e.file_name().to_str()?.to_string();
@@ -501,11 +522,15 @@ fn discover_browser_client() -> (Option<PathBuf>, BTreeMap<String, String>) {
                 let mtime = std::fs::metadata(&candidate)
                     .and_then(|m| m.modified())
                     .unwrap_or(std::time::UNIX_EPOCH);
-                Some((mtime, version, candidate))
+                Some((version != "latest", mtime, version, candidate))
             })
             .collect();
-        versions.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
-        if let Some((_, version, candidate)) = versions.into_iter().next() {
+        versions.sort_by(|a, b| {
+            b.0.cmp(&a.0)
+                .then_with(|| b.1.cmp(&a.1))
+                .then_with(|| b.2.cmp(&a.2))
+        });
+        if let Some((_, _, version, candidate)) = versions.into_iter().next() {
             plugins.insert(plugin.to_string(), version);
             if selected.is_none() {
                 selected = Some(candidate);
@@ -1028,7 +1053,7 @@ where
     F: std::future::Future<Output = ()>,
 {
     let default_session = Uuid::new_v4().to_string();
-    let default_turn = Uuid::new_v4().to_string();
+    let mut default_turn = Uuid::new_v4().to_string();
     let mut executing: Option<Value> = None;
     let mut active = BTreeMap::<String, (Value, bool)>::new();
     let mut catalog_requests = BTreeSet::<String>::new();
@@ -1105,7 +1130,11 @@ where
                                 continue;
                             }
                         if ends_turn {
+                            let was_active = executing.is_some();
                             clear_executing_if_ended(&mut executing, row["params"].get("arguments"));
+                            if was_active && executing.is_none() {
+                                default_turn = Uuid::new_v4().to_string();
+                            }
                         }
                         active.insert(id.to_string(), (id, true));
                     } else if row["method"] == "tools/list" {

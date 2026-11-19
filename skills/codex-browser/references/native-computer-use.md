@@ -10,20 +10,28 @@ native runtimes:
 
 ## Browser Use (`node_repl`)
 
-1. Discover the installed `browser_client` entry point with
+1. Discover `browser_client_url` (`file:///...`) with
    `codex-browser-bridge --mode discover` (also printed by `--mode doctor`).
+   If `codex-browser-bridge` is not on `PATH`, look under
+   `$CODEX_HOME/plugins/cache/openai-bundled/browser/<version>/scripts/browser-client.mjs`
+   and convert to a `file:///` URL.
 2. Bootstrap once per worker:
    ```js
-   const { setupBrowserRuntime } = await import("<browser_client>");
+   const { setupBrowserRuntime } = await import("<browser_client_url>");
    const agent = await setupBrowserRuntime();
    ```
-   Do not use bare `import "browser-client"`.
+   Do not use bare `import "browser-client"`, and do not paste raw Windows
+   backslashes into JS string literals (e.g. `\26` triggers a strict-mode octal
+   syntax error).
 3. Select the browser in order:
-   - Explicit user choice: `agent.browsers.get("iab" | "chrome" | "edge" | "extension")` (do not fall back if unavailable).
+   - Explicit user choice: `agent.browsers.get("iab" | "chrome" | "edge" | "dot" | "extension")` (do not fall back if unavailable).
    - Known target URL: `agent.browsers.getForUrl(url)`.
    - Otherwise: `agent.browsers.getDefault()`.
    - Troubleshooting only: `agent.browsers.list()` and `agent.documentation.get("bootstrap-troubleshooting")` or `agent.documentation.get("chrome-troubleshooting")`.
-4. Read `browser.documentation()` once, keep handles in `const`/`let` (never `globalThis`), and reuse that browser and its tabs.
+4. Read `browser.documentation()` once without truncation (chunk only if the
+   host truncates output), keep handles in `const`/`let` (never `globalThis`),
+   batch multi-step work or `Promise.all(...)` inside one `js` cell, and reuse
+   that browser and its tabs.
 
 ## Computer Use (`cua_repl`)
 
@@ -36,9 +44,12 @@ native runtimes:
 
 - Native approval requests (`elicitation/create`) require an interactive MCP
   host; non-interactive CLI calls cancel elicitations (`{"action": "cancel"}`).
+- Only mark deliverable/handoff tabs (`markDeliverable` / `markHandoff`), never
+  research or intermediate tabs. Marks are turn-scoped and expire on
+  `turn_ended`.
 - Long-lived MCP hosts can call `turn_ended` (missing `hook_event_name` /
-  `session_id` / `turn_id` are filled from the active turn context) or close the
-  MCP connection to trigger cleanup.
+  `session_id` / `turn_id` are filled from the active turn context, and the
+  bridge rotates `turn_id` for the next task).
 - For multi-step CLI work, use `batch` to keep one worker. Pass `--image-dir`
   only when you need saved image files alongside the JSON response.
 

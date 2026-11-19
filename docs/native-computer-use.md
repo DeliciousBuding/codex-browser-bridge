@@ -102,25 +102,34 @@ alone does not install those instructions in the receiving agent. Host-specific
 backends and approval prompts still depend on the installed runtime and
 receiving MCP client.
 
-For example, when the installed plugin provides `setupBrowserRuntime`, call
-the native `js` tool with the absolute file URL from that plugin's instructions:
+For example, run `codex-browser-bridge --mode discover` to read
+`browser_client_url` (`file:///...`), then call the native `js` tool with that
+URL (never paste raw Windows backslashes into a JS string literal):
 
 ```js
-const agent = await (await import("file:///path/to/installed/browser-client.mjs"))
-  .setupBrowserRuntime();
+const { setupBrowserRuntime } = await import("<browser_client_url>");
+const agent = await setupBrowserRuntime();
 ```
 
-Use `agent.browsers.list()` to find the intended backend. Get that browser
-using its returned ID and read its native documentation once:
+Select the browser in official Codex order:
+
+- Explicit browser requested by user: `await agent.browsers.get("iab" | "chrome" | "edge" | "dot" | "extension")` (do not fall back if unavailable).
+- Known target URL: `await agent.browsers.getForUrl(url)`.
+- Otherwise: `await agent.browsers.getDefault()`.
+- Troubleshooting only: `await agent.browsers.list()` and `await agent.documentation.get("bootstrap-troubleshooting")` or `get("chrome-troubleshooting")`.
+
+Read `browser.documentation()` once without truncation:
 
 ```js
-const browser = await agent.browsers.get(browserId);
+const browser = await agent.browsers.getDefault();
 nodeRepl.write(await browser.documentation());
 ```
 
-Reuse `agent`, `browser` and tab handles for later calls. If the native
-documentation refers to a specific capability guide, fetch that guide
-when needed rather than requesting the full documentation again.
+Reuse `agent`, `browser`, and tab handles in `const`/`let` bindings (never
+`globalThis`) for later calls, and batch multi-step work or `Promise.all(...)`
+inside a single `js` cell to minimize round-trips. If the native documentation
+refers to a specific capability guide, fetch that guide when needed rather than
+requesting the full documentation again.
 
 ## Tool discovery and instructions
 
@@ -193,8 +202,9 @@ codex-browser-bridge --surface computer --image-dir ./captures batch
 - The only top-level options are `--mode`, `--surface`, `--native-config`, and
   `--image-dir`; the removed 2.x browser flags are rejected by the argument
   parser before startup.
-- The CLI is non-interactive and rejects `elicitation/create` requests with a
-  JSON-RPC error; approve applications through an interactive MCP host.
+- The CLI is non-interactive and cancels `elicitation/create` requests with MCP
+  result `{"action": "cancel"}`; approve applications through an interactive MCP
+  host.
 
 ## Lifecycle
 
