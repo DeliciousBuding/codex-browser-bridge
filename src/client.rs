@@ -251,7 +251,11 @@ impl Drop for FrameWriteGuard<'_> {
         self.writer.take();
         self.inner.alive.store(false, Ordering::Release);
         self.inner.connection_epoch.fetch_add(1, Ordering::AcqRel);
-        self.inner.observations.lock().unwrap().clear();
+        self.inner
+            .observations
+            .lock()
+            .unwrap()
+            .invalidate_all("session_reset");
         if let Some(task) = self.inner.read_task.lock().unwrap().take() {
             task.abort();
         }
@@ -550,7 +554,11 @@ impl Client {
         self.inner.writer.lock().await.take();
         self.inner.pending.lock().unwrap().clear();
         self.inner.event_subs.lock().await.clear();
-        self.inner.observations.lock().unwrap().clear();
+        self.inner
+            .observations
+            .lock()
+            .unwrap()
+            .invalidate_all("session_reset");
         self.inner.tab_locks.lock().await.clear();
         self.inner.attached_tabs.lock().await.clear();
         self.inner.file_chooser_interceptions.lock().await.clear();
@@ -860,7 +868,11 @@ impl Client {
                     // New connection has no CDP debugger sessions — drop the cache so
                     // execute_cdp falls back to a full attach instead of trusting a stale entry.
                     self.inner.attached_tabs.lock().await.clear();
-                    self.inner.observations.lock().unwrap().clear();
+                    self.inner
+            .observations
+            .lock()
+            .unwrap()
+            .invalidate_all("session_reset");
                     *self.inner.reconnect_cooldown_until.lock().await = None;
                     self.inner.alive.store(true, Ordering::Release);
                     self.spawn_read_loop(reader, epoch);
@@ -1026,7 +1038,11 @@ impl Client {
             // RecvError → Connection translation in send_request_once.
             inner.pending.lock().unwrap().clear();
             inner.event_subs.lock().await.clear();
-            inner.observations.lock().unwrap().clear();
+            inner
+                .observations
+                .lock()
+                .unwrap()
+                .invalidate_all("session_reset");
             // Reclaim the writer so any in-flight encode sees None instead of
             // writing into a broken pipe.
             *inner.writer.lock().await = None;
@@ -1508,22 +1524,10 @@ impl Client {
                 Ok(raw) => return Ok(raw),
                 Err(err) if is_session_invalid_error(&err) => {
                     self.inner.attached_tabs.lock().await.remove(&tab_id);
-                    self.inner.observations.lock().unwrap().remove(tab_id);
                 }
                 Err(err) => {
-                    // A silent sticky attempt usually means the extension dropped
-                    // the debugger (background throttling, renderer restart) and
-                    // will keep rejecting every later command for this tab. Drop
-                    // the cached attachment so the next call performs a full
-                    // re-attach. The command is deliberately not replayed.
-                    //
-                    // Only a full sticky-window silence counts as evidence. A
-                    // caller-supplied timeout shorter than that window (input
-                    // cleanup, for example) is a deliberate short deadline, not a
-                    // dead debugger, so the attachment stays valid.
                     if sticky_failure_invalidates(&err, request_timeout) {
                         self.inner.attached_tabs.lock().await.remove(&tab_id);
-                        self.inner.observations.lock().unwrap().remove(tab_id);
                     }
                     return Err(err);
                 }
@@ -1555,7 +1559,6 @@ impl Client {
             Ok(raw) => Ok(raw),
             Err(err) if is_session_invalid_error(&err) => {
                 self.inner.attached_tabs.lock().await.remove(&tab_id);
-                self.inner.observations.lock().unwrap().remove(tab_id);
                 self.detach_tab_until(tab_id, deadline).await.ok();
                 let epoch = match self
                     .attach_tab_until(tab_id, deadline, FocusSetup::Required)
@@ -1642,7 +1645,11 @@ impl Client {
             }
             Err(err) if is_session_invalid_error(&err) => {
                 self.inner.attached_tabs.lock().await.remove(&tab_id);
-                self.inner.observations.lock().unwrap().remove(tab_id);
+                self.inner
+                    .observations
+                    .lock()
+                    .unwrap()
+                    .invalidate_tab(tab_id, "session_reset");
                 Err(BridgeError::Connection(format!(
                     "{method} may have reached the browser before its CDP session became invalid; outcome unknown, so it was not replayed: {err}"
                 )))
@@ -1653,10 +1660,9 @@ impl Client {
         }
     }
 
-    /// Invalidate the sticky attach cache for a tab.
+    /// Invalidate the sticky attach cache for a tab without destroying its observation.
     pub async fn invalidate_attachment(&self, tab_id: i64) {
         self.inner.attached_tabs.lock().await.remove(&tab_id);
-        self.inner.observations.lock().unwrap().remove(tab_id);
     }
 
     /// Retire per-tab state after a tab closes. The lock is removed only when no
@@ -1679,7 +1685,11 @@ impl Client {
 
     async fn retire_current_tab_state(&self, tab_id: i64) {
         self.inner.attached_tabs.lock().await.remove(&tab_id);
-        self.inner.observations.lock().unwrap().remove(tab_id);
+        self.inner
+            .observations
+            .lock()
+            .unwrap()
+            .invalidate_tab(tab_id, "session_reset");
         let mut locks = self.inner.tab_locks.lock().await;
         if let Some(lock) = locks.get(&tab_id) {
             // The current execute_cdp call still owns one Arc while holding the
@@ -1699,7 +1709,11 @@ impl Client {
     /// Clear all per-tab state (call on session finalize).
     pub async fn clear_tab_state(&self) {
         self.inner.attached_tabs.lock().await.clear();
-        self.inner.observations.lock().unwrap().clear();
+        self.inner
+            .observations
+            .lock()
+            .unwrap()
+            .invalidate_all("session_reset");
         self.inner.file_chooser_interceptions.lock().await.clear();
         self.inner
             .tab_locks
@@ -2678,10 +2692,13 @@ mod reconnect_tests {
             .unwrap()
             .is_err());
         assert!(!client.has_live_connection().await);
-        assert!(client.observation_snapshot(9).is_err());
-        assert!(client
+        let snap = client.observation_snapshot(9).unwrap();
+        assert!(!snap.enabled);
+        assert_eq!(snap.invalidated_by, Some("session_reset"));
+        let read_err = client
             .read_observed_events(9, Some(&old.cursor), &[], 1, 1024)
-            .is_err());
+            .unwrap_err();
+        assert!(read_err.to_string().contains("invalidated_by session_reset"));
         assert!(client.send_request("getInfo", None).await.is_err());
         // The retired pipe ends in an incomplete frame; no later request is
         // appended to it and mistaken for the detach payload.
@@ -3150,6 +3167,69 @@ mod reconnect_tests {
             msg.contains("pending JS dialog (prompt)"),
             "expected pending JS dialog hint, got: {msg}"
         );
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn observation_survives_execute_cdp_reattach_cycle() {
+        let (client, mut server) = test_client(4096).await;
+        client.mark_attached(7).await;
+        {
+            let mut obs = client.inner.observations.lock().unwrap();
+            let init = obs.register(7).unwrap();
+            obs.finish_start(7, &init.cursor, Some("complete")).unwrap();
+        }
+
+        let eval_call = tokio::spawn({
+            let client = client.clone();
+            async move {
+                client
+                    .execute_cdp_with_timeout(7, "Runtime.evaluate", Some(json!({"expression":"1+1"})), Duration::from_secs(5))
+                    .await
+            }
+        });
+
+        // Sticky attempt fails with Debugger is not attached -> triggers full detach + attach + focus + retry.
+        let first = next_request(&mut server).await;
+        assert_eq!(first["params"]["method"], "Runtime.evaluate");
+        encode_frame(
+            &mut server,
+            &json!({"id": first["id"], "error": {"code": -32000, "message": "Debugger is not attached"}}),
+        )
+        .await
+        .unwrap();
+
+        let detach = next_request(&mut server).await;
+        assert_eq!(detach["method"], "detach");
+        encode_frame(&mut server, &json!({"id": detach["id"], "result": {}}))
+            .await
+            .unwrap();
+
+        let attach = next_request(&mut server).await;
+        assert_eq!(attach["method"], "attach");
+        encode_frame(&mut server, &json!({"id": attach["id"], "result": {}}))
+            .await
+            .unwrap();
+
+        let focus = next_request(&mut server).await;
+        assert_eq!(focus["params"]["method"], "Emulation.setFocusEmulationEnabled");
+        encode_frame(&mut server, &json!({"id": focus["id"], "result": {}}))
+            .await
+            .unwrap();
+
+        let retry = next_request(&mut server).await;
+        assert_eq!(retry["params"]["method"], "Runtime.evaluate");
+        encode_frame(
+            &mut server,
+            &json!({"id": retry["id"], "result": {"result": {"value": 2}}}),
+        )
+        .await
+        .unwrap();
+
+        eval_call.await.unwrap().unwrap();
+        let snap = client.observation_snapshot(7).unwrap();
+        assert!(snap.enabled, "observation must remain enabled across attach cycles");
+        assert_eq!(snap.invalidated_by, None);
         client.shutdown().await;
     }
 

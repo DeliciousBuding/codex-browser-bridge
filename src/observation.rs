@@ -99,6 +99,8 @@ pub struct TabSnapshot {
     pub file_chooser: Option<ChooserSnapshot>,
     pub dropped_event_count: u64,
     pub retained_event_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invalidated_by: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -145,6 +147,7 @@ struct TabState {
     /// quiet window is measured from here.
     last_network_change: Instant,
     notify: Arc<Notify>,
+    invalidated_by: Option<&'static str>,
 }
 
 impl TabState {
@@ -170,6 +173,7 @@ impl TabState {
             inflight_overflowed: false,
             last_network_change: Instant::now(),
             notify: Arc::new(Notify::new()),
+            invalidated_by: None,
         }
     }
 
@@ -202,6 +206,7 @@ impl TabState {
             file_chooser: self.file_chooser.clone(),
             dropped_event_count: self.dropped_count,
             retained_event_count: self.events.len(),
+            invalidated_by: self.invalidated_by,
         }
     }
 
@@ -417,6 +422,13 @@ fn bounded_string(value: Option<&Value>) -> Option<String> {
 
 impl ObservationStore {
     pub(crate) fn register(&mut self, tab_id: i64) -> Result<TabSnapshot> {
+        if self
+            .tabs
+            .get(&tab_id)
+            .is_some_and(|tab| tab.invalidated_by.is_some())
+        {
+            self.tabs.remove(&tab_id);
+        }
         if !self.tabs.contains_key(&tab_id) && self.tabs.len() >= MAX_TABS {
             return Err(BridgeError::User(format!(
                 "observation tab limit ({MAX_TABS}) reached; stop an observation first"
@@ -439,6 +451,16 @@ impl ObservationStore {
         })
     }
 
+    fn active_tab(&self, tab_id: i64) -> Result<&TabState> {
+        let tab = self.tab(tab_id)?;
+        if let Some(reason) = tab.invalidated_by {
+            return Err(BridgeError::User(format!(
+                "observation invalidated_by {reason}; start it again"
+            )));
+        }
+        Ok(tab)
+    }
+
     pub(crate) fn record(&mut self, event: &Value) {
         let Some(tab_id) = event.pointer("/source/tabId").and_then(Value::as_i64) else {
             return;
@@ -446,6 +468,9 @@ impl ObservationStore {
         let Some(tab) = self.tabs.get_mut(&tab_id) else {
             return;
         };
+        if tab.invalidated_by.is_some() {
+            return;
+        }
         let Some(method) = event.get("method").and_then(Value::as_str) else {
             return;
         };
@@ -489,6 +514,9 @@ impl ObservationStore {
         let Some(tab) = self.tabs.get_mut(&tab_id) else {
             return;
         };
+        if tab.invalidated_by.is_some() {
+            return;
+        }
         // Events received during getFrameTree are newer than its response.
         // Never overwrite that observed navigation with a bootstrap snapshot.
         if tab.main_frame_id.is_some() {
@@ -538,11 +566,28 @@ impl ObservationStore {
         }
     }
 
-    pub(crate) fn clear(&mut self) {
-        for tab in self.tabs.values() {
+    pub(crate) fn invalidate_tab(&mut self, tab_id: i64, reason: &'static str) {
+        if let Some(tab) = self.tabs.get_mut(&tab_id) {
+            tab.enabled = false;
+            tab.invalidated_by = Some(reason);
+            tab.events.clear();
+            tab.event_bytes = 0;
+            tab.dialog = None;
+            tab.file_chooser = None;
             tab.notify.notify_waiters();
         }
-        self.tabs.clear();
+    }
+
+    pub(crate) fn invalidate_all(&mut self, reason: &'static str) {
+        for tab in self.tabs.values_mut() {
+            tab.enabled = false;
+            tab.invalidated_by = Some(reason);
+            tab.events.clear();
+            tab.event_bytes = 0;
+            tab.dialog = None;
+            tab.file_chooser = None;
+            tab.notify.notify_waiters();
+        }
     }
 
     pub(crate) fn read(
@@ -558,7 +603,7 @@ impl ObservationStore {
                 "event limit must be 1..{MAX_EVENTS} and max_bytes 1..{MAX_BYTES}"
             )));
         }
-        let tab = self.tab(tab_id)?;
+        let tab = self.active_tab(tab_id)?;
         if let Some(cursor) = cursor {
             tab.check_cursor(cursor)?;
         }
@@ -606,7 +651,7 @@ impl ObservationStore {
     }
 
     pub(crate) fn dialog(&self, tab_id: i64, id: &str) -> Result<DialogSnapshot> {
-        self.tab(tab_id)?
+        self.active_tab(tab_id)?
             .dialog
             .as_ref()
             .filter(|d| d.id == id)
@@ -623,7 +668,7 @@ impl ObservationStore {
     }
 
     pub(crate) fn chooser(&self, tab_id: i64, id: &str) -> Result<ChooserSnapshot> {
-        self.tab(tab_id)?
+        self.active_tab(tab_id)?
             .file_chooser
             .as_ref()
             .filter(|c| c.id == id)
@@ -648,7 +693,7 @@ impl ObservationStore {
     }
 
     fn notifier(&self, tab_id: i64) -> Result<Arc<Notify>> {
-        Ok(self.tab(tab_id)?.notify.clone())
+        Ok(self.active_tab(tab_id)?.notify.clone())
     }
 }
 
@@ -1088,8 +1133,10 @@ mod tests {
         store.remove(1);
         store.register(1).unwrap();
         assert!(store.read(1, Some(&old), &[], 1, MAX_BYTES).is_err());
-        store.clear();
-        assert!(store.snapshot(1).is_err());
+        store.invalidate_all("session_reset");
+        let snap = store.snapshot(1).unwrap();
+        assert!(!snap.enabled);
+        assert_eq!(snap.invalidated_by, Some("session_reset"));
     }
 
     #[test]
