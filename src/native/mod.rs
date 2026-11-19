@@ -634,8 +634,11 @@ impl OwnedProcess {
         // Also terminate descendants if the launcher already exited on EOF.
         if let Err(error) = self.child.start_kill() {
             #[cfg(unix)]
-            if error.raw_os_error() != Some(libc::ESRCH) {
-                return Err(error.into());
+            {
+                const POSIX_ESRCH: i32 = 3;
+                if error.raw_os_error() != Some(POSIX_ESRCH) {
+                    return Err(error.into());
+                }
             }
             #[cfg(not(unix))]
             return Err(error.into());
