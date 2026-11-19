@@ -1,4 +1,13 @@
-# Upgrading to 3.0.1
+# Upgrading to 3.0.x
+
+`3.0.2` fixes turn-cleanup acknowledgement, preserves structured CLI RPC errors,
+and aligns the CUA skill with native entry selection and tab retention. CLI
+RPC failures now print the original error response frame on stdout and exit
+nonzero; consumers should distinguish its `error` field from native tool result
+objects. CLI/doctor reject unsupported initialize protocol versions; MCP relay
+negotiation remains the receiving host's responsibility. See
+[native setup](native-computer-use.md#cli) for the supported versions and
+[lifecycle](native-computer-use.md#lifecycle) for unconfirmed-hook behavior.
 
 `3.0.0` made the installed Codex `node_repl` (Browser Use) and `cua_repl`
 (Computer Use) runtimes the default entries while retaining the explicit

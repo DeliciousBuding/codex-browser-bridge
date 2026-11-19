@@ -28,6 +28,9 @@ const MAX_NATIVE_CATALOG_CURSOR_BYTES: usize = 64 * 1024;
 const MAX_TRACKED_CATALOG_REQUESTS: usize = 1024;
 const MAX_ACTIVE_REQUESTS: usize = 1024;
 const CLIENT_PROTOCOL_VERSION: &str = "2025-06-18";
+// Known initialize-based versions in the native MCP SDK. The newer discovery
+// lifecycle is owned by the external host in relay mode, not this CLI client.
+const CLI_PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
 
 #[cfg(unix)]
 const CORE_ENV_VARS: &[&str] = &[
@@ -865,7 +868,10 @@ fn cleanup_metadata(mut meta: Value) -> Value {
 
 fn finish<T>(result: Result<T>, cleanup: Result<()>) -> Result<T> {
     match (result, cleanup) {
-        (Err(error), Err(cleanup)) => Err(anyhow::anyhow!("{error:#}; {cleanup:#}")),
+        (Err(error), Err(cleanup)) => {
+            let message = format!("{error}; cleanup failed: {cleanup:#}");
+            Err(error.context(message))
+        }
         (Err(error), Ok(())) => Err(error),
         (Ok(value), cleanup) => {
             cleanup?;
@@ -1008,21 +1014,14 @@ fn is_missing_cleanup_tool(error: &Value) -> bool {
     lower.contains("unknown tool") || lower.contains("method not found")
 }
 
-fn clear_executing_if_ended(executing: &mut Option<Value>, arguments: Option<&Value>) {
-    let Some(active_meta) = executing.as_ref() else {
-        return;
-    };
-    let Ok(active_ctx) = active_meta
+fn ending_context(executing: Option<&Value>, arguments: Option<&Value>) -> Option<Value> {
+    let active_meta = executing?;
+    let active_ctx = active_meta
         .get("x-codex-turn-metadata")
         .context("missing")
         .and_then(parse_context)
-    else {
-        *executing = None;
-        return;
-    };
-    let Some(args) = arguments.and_then(Value::as_object) else {
-        return;
-    };
+        .ok()?;
+    let args = arguments.and_then(Value::as_object)?;
     let same_session = args
         .get("session_id")
         .and_then(Value::as_str)
@@ -1031,9 +1030,30 @@ fn clear_executing_if_ended(executing: &mut Option<Value>, arguments: Option<&Va
         .get("turn_id")
         .and_then(Value::as_str)
         .is_some_and(|id| id == active_ctx["turn_id"].as_str().unwrap_or_default());
-    if same_session && same_turn {
+    (same_session && same_turn).then(|| active_meta.clone())
+}
+
+fn confirm_ended(
+    executing: &mut Option<Value>,
+    default_turn: &mut String,
+    ended: &Value,
+    response: &Value,
+) {
+    if response.get("error").is_none()
+        && response.get("result").is_some_and(Value::is_object)
+        && response["result"]["isError"] != true
+        && executing.as_ref() == Some(ended)
+    {
         *executing = None;
+        *default_turn = Uuid::new_v4().to_string();
     }
+}
+
+fn pending_end_matches(executing: Option<&Value>, ended: &Value) -> bool {
+    ended
+        .get("x-codex-turn-metadata")
+        .and_then(|context| parse_context(context).ok())
+        .is_some_and(|context| ending_context(executing, Some(&context)).is_some())
 }
 
 fn active_request_limit_reached(active: &BTreeMap<String, (Value, bool)>, id: &Value) -> bool {
@@ -1057,6 +1077,7 @@ where
     let mut default_turn = Uuid::new_v4().to_string();
     let mut executing: Option<Value> = None;
     let mut active = BTreeMap::<String, (Value, bool)>::new();
+    let mut pending_endings = BTreeMap::<String, Value>::new();
     let mut catalog_requests = BTreeSet::<String>::new();
     let mut write_failed = false;
     let mut host_eof = false;
@@ -1082,6 +1103,15 @@ where
                         continue;
                     };
                     let request_id = row.get("id").cloned();
+                    if row.get("method").is_some() && request_id.as_ref().is_some_and(|id| {
+                        active.contains_key(&id.to_string()) || pending_endings.contains_key(&id.to_string())
+                    }) {
+                        host_writer.enqueue(json!({
+                            "jsonrpc":"2.0","id":request_id,
+                            "error":{"code":-32600,"message":"native relay request id is already pending"}
+                        }), None)?;
+                        continue;
+                    }
                     if row["method"] == "tools/call" {
                         let Some(id) = request_id else {
                             continue;
@@ -1115,7 +1145,8 @@ where
                         }
                         let tool_name = tool_name.to_string();
                         let ends_turn = tool_name == "turn_ended";
-                        if active_request_limit_reached(&active, &id) {
+                        if active_request_limit_reached(&active, &id)
+                            || (ends_turn && pending_endings.len() >= MAX_ACTIVE_REQUESTS) {
                             host_writer.enqueue(json!({
                                 "jsonrpc":"2.0","id":id,
                                 "error":{
@@ -1141,10 +1172,8 @@ where
                                 continue;
                             }
                         if ends_turn {
-                            let was_active = executing.is_some();
-                            clear_executing_if_ended(&mut executing, row["params"].get("arguments"));
-                            if was_active && executing.is_none() {
-                                default_turn = Uuid::new_v4().to_string();
+                            if let Some(context) = ending_context(executing.as_ref(), row["params"].get("arguments")) {
+                                pending_endings.insert(id.to_string(), context);
                             }
                         }
                         active.insert(id.to_string(), (id, true));
@@ -1202,6 +1231,9 @@ where
                     if row.get("method").is_none() {
                         if let Some(id) = row.get("id").map(ToString::to_string) {
                             active.remove(&id);
+                            if let Some(ended) = pending_endings.remove(&id) {
+                                confirm_ended(&mut executing, &mut default_turn, &ended, &row);
+                            }
                             if catalog_requests.remove(&id) {
                                 if let Some(result) = row.get_mut("result") {
                                     tools.filter_catalog(result);
@@ -1242,6 +1274,14 @@ where
     .await;
 
     let event = outcome.as_ref().copied().unwrap_or("Interrupt");
+    let unconfirmed_end = !pending_endings.is_empty();
+    if pending_endings
+        .values()
+        .any(|ended| pending_end_matches(executing.as_ref(), ended))
+    {
+        // An unanswered explicit hook may already have run. Do not replay it.
+        executing = None;
+    }
     let cleanup = cleanup_session(
         native,
         write_failed,
@@ -1252,6 +1292,9 @@ where
     )
     .await;
     let result = outcome.and_then(|event| {
+        if unconfirmed_end {
+            bail!("native turn_ended outcome unknown and not replayed");
+        }
         if event == "Interrupt" {
             bail!("native action interrupted; outcome unknown and not replayed");
         }
@@ -1268,6 +1311,7 @@ struct Worker<R, W> {
     turn: String,
     next_id: u64,
     last_context: Option<Value>,
+    ending_context: Option<Value>,
     active_request: Option<Value>,
     write_failed: bool,
     tool_policy: ToolPolicy,
@@ -1302,7 +1346,9 @@ impl Worker<tokio::process::ChildStdout, tokio::process::ChildStdin> {
             drop(native);
             if let Some(mut process) = process.take() {
                 if let Err(cleanup) = process.close().await {
-                    bail!("{error:#}; native startup cleanup failed: {cleanup:#}");
+                    return Err(
+                        error.context(format!("native startup cleanup failed: {cleanup:#}"))
+                    );
                 }
             }
             return Err(error);
@@ -1327,6 +1373,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Worker<R, W> {
             turn: Uuid::new_v4().to_string(),
             next_id: 0,
             last_context: None,
+            ending_context: None,
             active_request: None,
             write_failed: false,
             tool_policy,
@@ -1341,7 +1388,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Worker<R, W> {
                 "initialize",
                 json!({
                     "protocolVersion": CLIENT_PROTOCOL_VERSION,
-                    "capabilities": {},
+                    "capabilities": {"elicitation": {"form": {}}},
                     "clientInfo": {
                         "name": client_name,
                         "version": env!("CARGO_PKG_VERSION")
@@ -1349,10 +1396,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Worker<R, W> {
                 }),
             )
             .await?;
-        self.protocol = result
+        let protocol = result
             .get("protocolVersion")
             .and_then(Value::as_str)
-            .map(ToString::to_string);
+            .context("native initialize response missing protocolVersion")?;
+        if !CLI_PROTOCOL_VERSIONS.contains(&protocol) {
+            bail!("native CLI does not support MCP protocol version '{protocol}'; use an MCP host supporting that lifecycle");
+        }
+        self.protocol = Some(protocol.to_string());
         self.write_failed = true;
         self.native
             .send(json!({
@@ -1408,11 +1459,8 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Worker<R, W> {
             }
             if row.get("id") == Some(&id) {
                 self.active_request = None;
-                if let Some(error) = row.get("error") {
-                    if let Some(message) = error.get("message").and_then(Value::as_str) {
-                        bail!("{message}");
-                    }
-                    bail!("native MCP error: {error}");
+                if row.get("error").is_some() {
+                    return Err(NativeRpcError(row).into());
                 }
                 return Ok(row.get("result").cloned().unwrap_or(Value::Null));
             }
@@ -1431,9 +1479,31 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Worker<R, W> {
             &self.turn,
             name,
         )?;
-        tokio::time::timeout(self.tool_timeout, self.request("tools/call", params))
+        if name == "turn_ended" {
+            self.ending_context =
+                ending_context(self.last_context.as_ref(), params.get("arguments"));
+        }
+        let result = tokio::time::timeout(self.tool_timeout, self.request("tools/call", params))
             .await
-            .context("native tool timed out; outcome unknown and not replayed")?
+            .context("native tool timed out; outcome unknown and not replayed")?;
+        if let Some(ended) = self.ending_context.as_ref() {
+            match &result {
+                Ok(value) => {
+                    confirm_ended(
+                        &mut self.last_context,
+                        &mut self.turn,
+                        ended,
+                        &json!({"result": value}),
+                    );
+                    self.ending_context = None;
+                }
+                Err(error) if error.downcast_ref::<NativeRpcError>().is_some() => {
+                    self.ending_context = None;
+                }
+                Err(_) => {}
+            }
+        }
+        result
     }
 
     async fn catalog(&mut self) -> Result<Vec<Value>> {
@@ -1489,6 +1559,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Worker<R, W> {
     }
 
     async fn close(mut self, event: &str) -> Result<()> {
+        let unconfirmed_end = self.ending_context.is_some();
+        if self
+            .ending_context
+            .as_ref()
+            .is_some_and(|ended| pending_end_matches(self.last_context.as_ref(), ended))
+        {
+            self.last_context = None;
+        }
         let cleanup = cleanup_session(
             &mut self.native,
             self.write_failed,
@@ -1503,7 +1581,17 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Worker<R, W> {
             Some(process) => process.close().await,
             None => Ok(()),
         };
-        finish(cleanup, terminated).context("native cleanup was not confirmed")
+        let result = finish(cleanup, terminated).context("native cleanup was not confirmed");
+        if unconfirmed_end {
+            finish(
+                Err(anyhow::anyhow!(
+                    "native turn_ended outcome unknown and not replayed"
+                )),
+                result,
+            )
+        } else {
+            result
+        }
     }
 }
 
@@ -1715,6 +1803,25 @@ impl std::fmt::Display for NativeToolFailed {
 }
 
 impl std::error::Error for NativeToolFailed {}
+
+/// Retain the full native JSON-RPC response for machine-readable CLI errors.
+#[derive(Debug)]
+struct NativeRpcError(Value);
+
+impl std::fmt::Display for NativeRpcError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "native MCP error: {}", self.0["error"])
+    }
+}
+
+impl std::error::Error for NativeRpcError {}
+
+pub fn print_rpc_error(error: &anyhow::Error) -> Result<()> {
+    if let Some(error) = error.downcast_ref::<NativeRpcError>() {
+        println!("{}", serde_json::to_string(&error.0)?);
+    }
+    Ok(())
+}
 
 fn strip_inline_images(value: &mut Value) {
     let images = value

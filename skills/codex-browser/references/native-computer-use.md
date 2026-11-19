@@ -35,10 +35,30 @@ native runtimes:
 
 ## Computer Use (`cua_repl`)
 
-1. On the first `js` call—and immediately after `js_reset`—execute **only**
-   `await cua.getState()` (optionally assigning the result).
-2. Read the returned native instructions, use IDs from the current inventory,
-   store cross-cell handles on `globalThis`, and re-observe after input.
+On the first `js` call—and immediately after `js_reset`—execute exactly one
+entry call, optionally assigning its result. Do not add waits, snapshots, or
+other API calls to that invocation. Read its returned documentation and initial
+state before continuing. Follow the installed tool's first matching entry:
+
+| Target | Entry |
+| --- | --- |
+| Inventory needed | `await cua.getState()` |
+| Referenced tab | `let tab = await cua.getTab({ mention: tabMentionUrl })` using the complete supplied reference |
+| Existing tab URL and browser | `let tab = await cua.getTab({ url }, { browser: browserId })` |
+| Known tab ID and browser | `let tab = await cua.getTab(tabId, { browser: browserId })` |
+| New tab in a named browser | `let tab = await cua.createBrowserTab(browserName, url, browserOptions)`; pass the name directly |
+| URL without a named browser | `let browser = await cua.getBrowser({ url })` |
+| Known Windows window | `let app = await cua.getApp({ windowId: selected.id })` using the observed window ID |
+
+Use the runtime's documented browser options, including `visible` for IAB/Dot
+and a short emoji-prefixed `sessionName` for Chrome/Edge. Use Dot only when
+available. Keep handles in the persistent REPL, use observed IDs, and
+re-observe after input. After context recovery, call
+`await cua.rewriteDocumentation()` before continuing CUA work.
+
+When `completion_summary` is exposed, send a `js` call containing only that
+field once the CUA outcome is observed. It records the outcome; it does not
+reset the REPL or end the host turn.
 
 ## Approvals, lifecycle, and CLI
 
@@ -46,10 +66,14 @@ native runtimes:
   host; non-interactive CLI calls cancel elicitations (`{"action": "cancel"}`).
 - Only mark deliverable/handoff tabs (`markDeliverable` / `markHandoff`), never
   research or intermediate tabs. Marks are turn-scoped and expire on
-  `turn_ended`.
+  `turn_ended`. Follow backend cleanup documentation: unmarked agent-created
+  tabs close, claimed user tabs are released and remain open, and existing
+  persistent IAB/Dot tabs remain open unless explicitly closed.
 - Long-lived MCP hosts can call `turn_ended` (missing `hook_event_name` /
   `session_id` / `turn_id` are filled from the active turn context, and the
-  bridge rotates `turn_id` for the next task).
+  bridge rotates `turn_id` after a successful matching acknowledgement).
+- A rejected hook retains the active context for exit cleanup. An unanswered
+  explicit hook is reported as unconfirmed and is not replayed.
 - For multi-step CLI work, use `batch` to keep one worker. Pass `--image-dir`
   only when you need saved image files alongside the JSON response; add
   `--omit-inline-images` to drop the base64 payload from stdout and read the

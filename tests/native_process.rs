@@ -65,6 +65,9 @@ impl Fixture {
                 "BRIDGE_NATIVE_FIXTURE_PAGINATE_CATALOG",
                 "BRIDGE_NATIVE_FIXTURE_LOOP_CATALOG",
                 "BRIDGE_NATIVE_FIXTURE_IMAGE_RESULT",
+                "BRIDGE_NATIVE_FIXTURE_PROTOCOL",
+                "BRIDGE_NATIVE_FIXTURE_RPC_ERROR",
+                "BRIDGE_NATIVE_FIXTURE_END_ERROR",
                 "NODE_REPL_AUTH_TOKEN"
             ],
             "enabled_tools":["js","js_reset","turn_ended"],
@@ -546,6 +549,189 @@ fn native_cli_image_dir_writes_native_image_bytes() {
     let path = Path::new(artifact["path"].as_str().unwrap());
     assert_eq!(std::fs::read(path).unwrap(), b"hello");
     fixture.assert_processes_exited();
+}
+
+#[test]
+fn native_cli_preserves_structured_rpc_errors_and_cleans_up() {
+    let fixture = Fixture::new();
+    let output = fixture
+        .command()
+        .args(["call", "js", r#"{"code":"synthetic"}"#])
+        .env("BRIDGE_NATIVE_FIXTURE_RPC_ERROR", "1")
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        response["error"],
+        json!({
+            "code": -32603, "message": "synthetic\nRPC error",
+            "data": {"native": ["line 1\n\tline 2", {"keep": true}]}
+        })
+    );
+    assert_eq!(response["_meta"]["nativeError"], true);
+    assert!(fixture
+        .frames()
+        .iter()
+        .any(|frame| frame["params"]["name"] == "turn_ended"));
+    fixture.assert_processes_exited();
+}
+
+#[test]
+fn native_cli_checks_initialize_protocol_before_sending_initialized() {
+    for (version, supported) in [
+        ("2024-11-05", true),
+        ("2025-03-26", true),
+        ("2025-06-18", true),
+        ("2025-11-25", true),
+        ("2026-07-28", false),
+        ("2099-01-01", false),
+        ("", false),
+        ("<missing>", false),
+    ] {
+        let fixture = Fixture::new();
+        let output = fixture
+            .command()
+            .args(["--mode", "doctor"])
+            .env("BRIDGE_NATIVE_FIXTURE_PROTOCOL", version)
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            supported,
+            "{version}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let frames = fixture.frames();
+        assert_eq!(
+            frames
+                .iter()
+                .any(|frame| frame["method"] == "notifications/initialized"),
+            supported
+        );
+        assert_eq!(
+            frames.iter().any(|frame| frame["method"] == "tools/list"),
+            supported
+        );
+        assert_eq!(
+            frames[0]["params"]["capabilities"]["elicitation"],
+            json!({"form":{}})
+        );
+        fixture.assert_processes_exited();
+    }
+}
+
+#[test]
+fn native_cli_batch_confirms_explicit_turn_end_and_rotates_the_next_turn() {
+    let fixture = Fixture::new();
+    let mut child = fixture
+        .command()
+        .arg("batch")
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(
+        b"{\"name\":\"js\",\"arguments\":{\"code\":\"1\"}}\n{\"name\":\"turn_ended\",\"arguments\":{}}\n{\"name\":\"js\",\"arguments\":{\"code\":\"2\"}}\n"
+    ).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let frames = fixture.frames();
+    let calls: Vec<_> = frames
+        .iter()
+        .filter(|frame| frame["method"] == "tools/call")
+        .collect();
+    assert_eq!(calls.len(), 4);
+    let first = &calls[0]["params"]["_meta"]["x-codex-turn-metadata"];
+    let second = &calls[2]["params"]["_meta"]["x-codex-turn-metadata"];
+    assert_eq!(first["session_id"], second["session_id"]);
+    assert_ne!(first["turn_id"], second["turn_id"]);
+    assert_eq!(
+        calls[3]["params"]["arguments"]["turn_id"],
+        second["turn_id"]
+    );
+    fixture.assert_processes_exited();
+}
+
+#[test]
+fn native_cli_does_not_replay_a_timed_out_explicit_turn_end() {
+    let fixture = Fixture::new();
+    let path = fixture.root.path().join("config.json");
+    let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    config["mcpServers"]["cua_repl"]["tool_timeout_sec"] = json!(0.1);
+    std::fs::write(&path, config.to_string()).unwrap();
+    let mut child = fixture
+        .command()
+        .arg("batch")
+        .env("BRIDGE_NATIVE_FIXTURE_HANG_CLEANUP", "1")
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(
+        b"{\"name\":\"js\",\"arguments\":{\"code\":\"1\"}}\n{\"name\":\"turn_ended\",\"arguments\":{}}\n"
+    ).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("turn_ended outcome unknown and not replayed"));
+    let frames = fixture.frames();
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|frame| frame["params"]["name"] == "turn_ended")
+            .count(),
+        1
+    );
+    assert!(frames
+        .iter()
+        .any(|frame| frame["method"] == "notifications/cancelled"));
+    fixture.assert_processes_exited();
+}
+
+#[test]
+fn native_cli_retains_rejected_explicit_turns_for_exit_cleanup() {
+    for mode in ["rpc", "tool"] {
+        let fixture = Fixture::new();
+        let mut child = fixture
+            .command()
+            .arg("batch")
+            .env("BRIDGE_NATIVE_FIXTURE_END_ERROR", mode)
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(
+            b"{\"name\":\"js\",\"arguments\":{\"code\":\"1\"}}\n{\"name\":\"turn_ended\",\"arguments\":{}}\n"
+        ).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(!output.status.success());
+        let frames = fixture.frames();
+        let endings: Vec<_> = frames
+            .iter()
+            .filter(|frame| frame["params"]["name"] == "turn_ended")
+            .collect();
+        assert_eq!(endings.len(), 2);
+        assert_eq!(
+            endings[0]["params"]["arguments"]["turn_id"],
+            endings[1]["params"]["arguments"]["turn_id"]
+        );
+        let rows: Vec<Value> = String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rows.len(), 2);
+        if mode == "rpc" {
+            assert_eq!(rows[1]["error"]["data"], json!({"keep":true}));
+        } else {
+            assert_eq!(rows[1]["isError"], true);
+        }
+        fixture.assert_processes_exited();
+    }
 }
 
 #[test]

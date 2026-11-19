@@ -98,6 +98,7 @@ Native relay behavior follows the installed runtime and its platform support. A 
 - `enabled_tools` is applied before `disabled_tools` across advertised catalogs, direct `tools/call` requests, and the end-of-session `turn_ended` hook.
 - Application approval uses bidirectional MCP form elicitation (`elicitation/create`); `accept`, `decline`, and `cancel` responses pass through unchanged. The CLI is non-interactive and responds with `{"action": "cancel"}`.
 - On EOF, `SIGINT`, or `SIGTERM`, the bridge cancels in-flight work, sends `turn_ended`, closes the worker's stdin, and terminates the owned process tree (Windows Job Object, Unix process group). Timed-out or interrupted calls are never replayed.
+- Explicit turn hooks clear their matching context only after success; unanswered hooks are reported without replay. CLI preserves native RPC error frames on stdout and exits nonzero. Model token budgets, tool exposure, and UI rendering belong to the receiving host; see [native setup](docs/native-computer-use.md).
 
 ## Maintenance
 

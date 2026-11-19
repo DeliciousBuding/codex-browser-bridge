@@ -1118,6 +1118,154 @@ async fn cleanup_tolerates_missing_turn_ended_tool() {
 }
 
 #[tokio::test]
+async fn relay_confirms_turn_end_only_on_success_and_for_the_same_execution() {
+    for (response, new_execution) in [
+        (
+            json!({"error":{"code":-32603,"message":"hook rejected","data":{"retryable":false}}}),
+            false,
+        ),
+        (json!({"result":{"isError":true,"content":[]}}), false),
+        (json!({"result":{"content":[]}}), true),
+    ] {
+        let (host_client, host_bridge) = tokio::io::duplex(32768);
+        let (native_bridge, native_server) = tokio::io::duplex(32768);
+        let (hr, hw) = tokio::io::split(host_bridge);
+        let (nr, nw) = tokio::io::split(native_bridge);
+        let task = tokio::spawn(async move {
+            relay(
+                &mut JsonTransport::new(hr, hw),
+                &mut JsonTransport::new(nr, nw),
+                std::future::pending(),
+                &ToolPolicy::default(),
+            )
+            .await
+        });
+        let (cr, cw) = tokio::io::split(host_client);
+        let mut client = JsonTransport::new(cr, cw);
+        let (sr, sw) = tokio::io::split(native_server);
+        let mut server = JsonTransport::new(sr, sw);
+        send(&mut client, json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"js","arguments":{"code":"1"}}})).await;
+        let first = receive(&mut server).await;
+        send(
+            &mut server,
+            json!({"jsonrpc":"2.0","id":1,"result":{"content":[]}}),
+        )
+        .await;
+        receive(&mut client).await;
+        let context = first["params"]["_meta"]["x-codex-turn-metadata"].clone();
+        send(&mut client, json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"turn_ended","arguments":{"session_id":context["session_id"],"turn_id":context["turn_id"]}}})).await;
+        receive(&mut server).await;
+        let execution = if new_execution {
+            // A later js in the same turn must survive an older hook's ack.
+            send(&mut client, json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"js","arguments":{"code":"2"}}})).await;
+            let later = receive(&mut server).await;
+            assert_eq!(later["params"]["_meta"]["x-codex-turn-metadata"], context);
+            send(
+                &mut server,
+                json!({"jsonrpc":"2.0","id":3,"result":{"content":[]}}),
+            )
+            .await;
+            receive(&mut client).await;
+            later
+        } else {
+            first
+        };
+        let mut response = response;
+        response["jsonrpc"] = json!("2.0");
+        response["id"] = json!(2);
+        send(&mut server, response.clone()).await;
+        assert_eq!(receive(&mut client).await, response);
+        drop(client);
+        let cleanup = receive(&mut server).await;
+        assert_eq!(cleanup["params"]["name"], "turn_ended");
+        assert_eq!(
+            cleanup["params"]["arguments"]["turn_id"],
+            context["turn_id"]
+        );
+        assert_cleanup_metadata(&cleanup["params"]["_meta"], &execution["params"]["_meta"]);
+        send(
+            &mut server,
+            json!({"jsonrpc":"2.0","id":cleanup["id"],"result":{"content":[]}}),
+        )
+        .await;
+        tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn relay_does_not_replay_an_unanswered_explicit_turn_end() {
+    let (host_client, host_bridge) = tokio::io::duplex(32768);
+    let (native_bridge, native_server) = tokio::io::duplex(32768);
+    let (hr, hw) = tokio::io::split(host_bridge);
+    let (nr, nw) = tokio::io::split(native_bridge);
+    let task = tokio::spawn(async move {
+        relay(
+            &mut JsonTransport::new(hr, hw),
+            &mut JsonTransport::new(nr, nw),
+            std::future::pending(),
+            &ToolPolicy::default(),
+        )
+        .await
+    });
+    let (cr, cw) = tokio::io::split(host_client);
+    let mut client = JsonTransport::new(cr, cw);
+    let (sr, sw) = tokio::io::split(native_server);
+    let mut server = JsonTransport::new(sr, sw);
+    send(
+        &mut client,
+        json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"js","arguments":{}}}),
+    )
+    .await;
+    receive(&mut server).await;
+    send(
+        &mut server,
+        json!({"jsonrpc":"2.0","id":1,"result":{"content":[]}}),
+    )
+    .await;
+    receive(&mut client).await;
+    send(&mut client, json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"turn_ended","arguments":{}}})).await;
+    receive(&mut server).await;
+    send(&mut client, json!({"jsonrpc":"2.0","id":2,"method":"ping"})).await;
+    assert_eq!(receive(&mut client).await["error"]["code"], -32600);
+    // Later work in the same turn does not make an unanswered hook safe to replay.
+    send(
+        &mut client,
+        json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"js","arguments":{}}}),
+    )
+    .await;
+    receive(&mut server).await;
+    send(
+        &mut server,
+        json!({"jsonrpc":"2.0","id":3,"result":{"content":[]}}),
+    )
+    .await;
+    receive(&mut client).await;
+    drop(client);
+    let cancel = receive(&mut server).await;
+    assert_eq!(cancel["method"], "notifications/cancelled");
+    assert_eq!(cancel["params"]["requestId"], 2);
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), server.receive())
+            .await
+            .unwrap()
+            .unwrap()
+            .is_none()
+    );
+    let error = tokio::time::timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("turn_ended outcome unknown and not replayed"));
+}
+
+#[tokio::test]
 async fn relay_rotates_default_turn_after_explicit_host_turn_ended() {
     let (host_client, host_bridge) = tokio::io::duplex(32768);
     let (native_bridge, native_server) = tokio::io::duplex(32768);

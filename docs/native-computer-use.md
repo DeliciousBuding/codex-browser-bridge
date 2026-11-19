@@ -140,8 +140,12 @@ is a Codex convention. The bridge forwards initialization instructions,
 tool descriptions and tool results. The short skill chooses the service;
 it does not copy either runtime's full API or confirmation policy.
 
-- For desktop work, call `js` with `await cua.getState()` and read the
-  instructions and state returned by the installed runtime.
+- For unified CUA work, make the first `js` call a single native entry call and
+  read its returned documentation before continuing. Use `cua.getState()` when
+  you need inventory; select a known tab, browser, URL, or Windows window
+  directly through the installed tool's matching entry. The
+  [skill reference](../skills/codex-browser/references/native-computer-use.md#computer-use-cua_repl)
+  lists these entries. CUA can operate browser tabs as well as desktop windows.
 - For webpage work with the Browser API, bootstrap the installed Browser
   client as above and read its own instructions. A successful plain-JS
   call only proves that the REPL runs; `agent.browsers.list()` checks the
@@ -159,6 +163,17 @@ The bridge does not import Codex's system prompt, app-private context,
 secrets, or approval decisions into another MCP host. Backend availability
 and policy depend on that installation; a successful handshake is not proof
 that a particular backend can execute an action.
+
+MCP preserves JavaScript and text string contents, including newlines and
+indentation, and forwards text/image content blocks, `structuredContent`,
+`_meta`, and JSON-RPC errors. The enclosing JSON frame is parsed and serialized
+as one stdio line; escaped `\n` and `\t` still represent the original string.
+Model namespaces, deferred tool search, per-tool output token limits, history
+compression, image previews, activity cards, tab references, and CUA completion
+cards belong to the receiving host. A generic MCP registration does not supply
+Codex's UI or model context handling. Native documentation, state output, and
+batching continue to come from the installed runtime without bridge summaries,
+caches, or automatic token trimming.
 
 ## Native methods and authorization
 
@@ -209,6 +224,18 @@ codex-browser-bridge --surface computer --image-dir ./captures batch
 - The CLI is non-interactive and cancels `elicitation/create` requests with MCP
   result `{"action": "cancel"}`; approve applications through an interactive MCP
   host.
+- CLI and doctor request the legacy `2025-06-18` initialize protocol and
+  advertise form elicitation so cancellation can be returned explicitly.
+  They accept the known initialize-based versions `2024-11-05`, `2025-03-26`,
+  `2025-06-18`, and `2025-11-25`; unsupported or missing versions fail before
+  `notifications/initialized`. The `2026-07-28` discovery lifecycle requires a
+  compatible external MCP host. MCP relay mode leaves negotiation untouched.
+- A native JSON-RPC error is printed as its full response frame on stdout,
+  preserving `code`, `message`, `data`, and extension fields, and exits nonzero.
+  Native tool results remain result objects, including `isError`. CLI responds
+  to server pings, cancels elicitations, and rejects other reverse requests.
+  Notifications are consumed without a CLI event stream; use MCP for
+  bidirectional events, progress, or interactive UI.
 
 ## Lifecycle
 
@@ -228,12 +255,42 @@ keep a connection across turns can send the native lifecycle hook with their
 turn metadata. The bridge cannot infer host turn boundaries from MCP alone.
 Native JSON-RPC frames are limited to 64 MiB.
 
+An explicit `turn_ended` clears the matching execution context and rotates the
+default turn only after a successful response. JSON-RPC errors and
+`isError: true` keep that context for exit cleanup. A late acknowledgement
+cannot clear a later execution. If an explicit hook is still unanswered when
+the connection ends, cleanup cancels the request and terminates the worker
+without replaying that hook, and reports its outcome as unconfirmed.
+
+`completion_summary` (when exposed by CUA) records an observed outcome;
+`js_reset` resets bindings; `turn_ended` performs native turn cleanup. Tab
+cleanup follows the runtime and backend: unmarked agent-created tabs close,
+claimed user tabs are released and left open, and existing persistent IAB/Dot
+tabs stay open unless closed. Deliverable/handoff marks apply to the current
+turn. Process-tree termination alone does not prove external tabs or physical
+held input have been cleaned up.
+
 ## Verification status
 
-Verified on 2026-11-18 against `cua-repl` 0.1.5 / Sky 0.7.21 (Codex host
-integration reference `30c75292aa4c8ab614c99f8d7a38e0d60b9347da`). Tracking and
+Native reference: `cua-repl` 0.1.5 / Sky 0.7.21 and Codex host source
+`30c75292aa4c8ab614c99f8d7a38e0d60b9347da`. The readable source is a reference,
+not the exact source of every installed Codex binary. Tracking and
 remaining platform checks live in
 [issue #57](https://github.com/DeliciousBuding/codex-browser-bridge/issues/57).
+
+The 3.0.2 candidate passed both runtimes' startup/catalogs, batch bindings,
+reset, explicit turn hooks, and Browser client bootstrap on Linux ARM64 X11.
+Direct native and bridge transports both passed a synthetic GTK button
+`0 -> 1`, AX, screenshot, turn hook, and fixture/worker cleanup. Browser
+inventory was empty, so webpage input was not verified.
+
+The Windows x64 3.0.2 candidate passed both doctor checks; actual JS execution
+remained blocked by native Windows sandbox initialization. Package verification
+and current published-binary readbacks are recorded in issue #57. Native
+sandbox state and entitlement were not modified.
+
+The table below retains earlier 2026-11-18 evidence. Windows GUI/input passes
+belong to the 2.1.1 iteration and do not establish 3.0.2 Windows GUI acceptance.
 
 | Platform / runtime | Protocol & observation | Input & lifecycle | Notes |
 | --- | --- | --- | --- |

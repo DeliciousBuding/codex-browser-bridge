@@ -48,6 +48,14 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     logging::init();
+    let result = run().await;
+    if let Err(error) = &result {
+        native::print_rpc_error(error)?;
+    }
+    result
+}
+
+async fn run() -> anyhow::Result<()> {
     let args = Args::parse();
     if args.command.is_some() && !matches!(args.mode, Mode::Mcp) {
         anyhow::bail!("commands cannot be combined with --mode; omit --mode for tools/call/batch");

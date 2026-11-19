@@ -46,6 +46,7 @@ child = subprocess.Popen(
         }
     )
 )
+end_count = 0
 for line in sys.stdin:
     row = json.loads(line)
     with (root / "frames.jsonl").open("a", encoding="utf-8") as stream:
@@ -56,10 +57,14 @@ for line in sys.stdin:
         if os.environ.get("BRIDGE_NATIVE_FIXTURE_HANG_INITIALIZE"):
             continue
         result = {
-            "protocolVersion": row["params"]["protocolVersion"],
+            "protocolVersion": os.environ.get(
+                "BRIDGE_NATIVE_FIXTURE_PROTOCOL", row["params"]["protocolVersion"]
+            ),
             "capabilities": {"tools": {}},
             "serverInfo": {"name": "synthetic-native", "version": "1"},
         }
+        if os.environ.get("BRIDGE_NATIVE_FIXTURE_PROTOCOL") == "<missing>":
+            result.pop("protocolVersion")
     elif row["method"] == "tools/list":
         if os.environ.get("BRIDGE_NATIVE_FIXTURE_HANG_CATALOG"):
             continue
@@ -102,6 +107,27 @@ for line in sys.stdin:
                 ]
             }
     else:
+        if row.get("params", {}).get("name") == "turn_ended":
+            end_count += 1
+            end_error = os.environ.get("BRIDGE_NATIVE_FIXTURE_END_ERROR")
+            if end_error and end_count == 1:
+                reply = {"jsonrpc": "2.0", "id": row["id"]}
+                if end_error == "rpc":
+                    reply["error"] = {"code": -32603, "message": "synthetic hook rejected", "data": {"keep": True}}
+                else:
+                    reply["result"] = {"isError": True, "content": []}
+                print(json.dumps(reply), flush=True)
+                continue
+        if row.get("params", {}).get("name") == "js" and os.environ.get(
+            "BRIDGE_NATIVE_FIXTURE_RPC_ERROR"
+        ):
+            print(json.dumps({
+                "jsonrpc": "2.0", "id": row["id"],
+                "error": {"code": -32603, "message": "synthetic\nRPC error",
+                          "data": {"native": ["line 1\n\tline 2", {"keep": True}]}},
+                "_meta": {"nativeError": True}
+            }), flush=True)
+            continue
         if row.get("params", {}).get("name") == "turn_ended" and os.environ.get(
             "BRIDGE_NATIVE_FIXTURE_HANG_CLEANUP"
         ):

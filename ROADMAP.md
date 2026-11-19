@@ -17,9 +17,9 @@ Current contracts and verification status:
 [docs/native-computer-use.md](docs/native-computer-use.md) and
 [CHANGELOG.md](CHANGELOG.md).
 
-## Delivered (`v2.0.0` – `v3.0.0`)
+## Delivered (`v2.0.0` – `v3.0.2`)
 
-- **Native-only relay (`v3.0.0`)**: `--surface native-browser` (default)
+- **Native-only relay (`v3.0.1`)**: `--surface native-browser` (default)
   relays the installed Codex `node_repl` Browser runtime and `--surface
   computer` relays `cua_repl` through one cancel-safe full-duplex JSON-RPC
   stdio transport. The Claude plugin (`mcp.json`) and client templates
@@ -33,12 +33,15 @@ Current contracts and verification status:
   discovery, Codex CLI environment and Windows `PATH`/`PATHEXT` parity, unified
   cancel-safe transport across `--mode mcp` and CLI/doctor (`call`, `batch`,
   `tools`, `--image-dir`), and Windows JobObject / Unix process-group teardown.
-- **Removed in 3.0**: the legacy Chromium extension adapter, its structured
+- **Removed in 3.0.1**: the legacy Chromium extension adapter, its structured
   `codex_*` tools and profiles, the interactive REPL, session files, the
   method-parity matrix, and the agent-surface drift checker.
 - **Supply chain & distribution**: zero-exception `cargo-deny` gate, checksummed
-  Windows/Linux x64 and arm64 binaries with GitHub artifact attestations, npm
+  Windows/Linux/macOS x64 and arm64 binaries with GitHub artifact attestations, npm
   Trusted Publishing, and Claude Code plugin packaging.
+- **Native alignment (`v3.0.2`)**: acknowledged turn cleanup, structured CLI
+  errors and legacy protocol validation, native CUA entry selection and tab
+  retention, and explicit receiving-host token/UI boundaries.
 
 ## Next iterations
 
@@ -56,7 +59,7 @@ Tracked in [issue #57](https://github.com/DeliciousBuding/codex-browser-bridge/i
   on interrupt, user takeover during active runs, and multi-display / DPI /
   clipboard coverage on Windows x64 and Linux X11.
 - **Platform acceptance matrix**: live GUI verification on Windows ARM64,
-  Linux x64, and Linux Wayland.
+  Linux x64, Linux Wayland, and macOS GUI/TCC.
 
 ## Out of scope
 
@@ -67,5 +70,4 @@ Tracked in [issue #57](https://github.com/DeliciousBuding/codex-browser-bridge/i
   duplicates the installed runtime.
 - Backend-authorized browser download/upload streaming (`BrowserUseAPI` host
   endpoints that depend on Codex app-private backend services).
-- Prebuilt macOS release binaries until a Darwin GUI/TCC endpoint is verified.
 - Automatic cross-OS bridging between WSL and Windows.
