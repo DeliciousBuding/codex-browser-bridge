@@ -355,7 +355,7 @@ async fn dom_mutation_unknown_outcome_is_never_retried() {
     let request = next(&mut peer).await;
     protocol::encode_frame(
         &mut peer,
-        &json!({"id":request["id"],"error":{"code":-32000,"message":"session not found"}}),
+        &json!({"id":request["id"],"error":{"code":-32000,"message":"Target closed"}}),
     )
     .await
     .unwrap();

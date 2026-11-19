@@ -275,6 +275,25 @@ file-result boundary. A legacy tool may remain as a convenience alias, but it
 must call the shared implementation rather than maintain a second behavior
 engine.
 
+## Documented approximations and boundaries
+
+Where native extension/CDP behavior differs from higher-level expectations, the
+bridge keeps the boundary explicit rather than hiding it behind silent fallbacks:
+
+| Area | Approximation / behavior | Boundary & known failure mode |
+|---|---|---|
+| Focus emulation (`FocusSetup`) | `handle_dialog`, `reload`, and `close_tab` skip `Emulation.setFocusEmulationEnabled` and never cache a `Skip` attach in `attached_tabs` | Unlocks modal JS dialog deadlocks; if `Required` focus setup times out while an observed dialog is open, the error names the pending dialog |
+| Mutation retry & 3-state outcome | `execute_cdp_once_with_timeout` replays once only on `is_provably_not_dispatched` errors; every mutation tool returns `structuredContent.execution` (`not_executed` / `executed` / `unknown` + `verify_with`) | Post-dispatch errors (`target closed`, `execution context destroyed`, timeouts) are never replayed |
+| Observation lifetime | Decoupled from `attached_tabs` cache misses/re-attaches; genuine session resets mark entries `invalidated_by: "session_reset"`; `observe start` clears pre-start replayed console/log events (`preStartHistory: false`) | Callers must re-run `observe start` after `session_reset`; pre-start logs are intentionally excluded |
+| Viewport & device emulation | `codex_emulate_device` uses `deviceScaleFactor: 0` (native DPR) and `reset=true` clears overrides + reloads; `codex_browser_viewport` accepts explicit `tab_id` and returns `applied_tab` | Reset triggers a tab reload so `window.innerWidth` reverts immediately; omitting `tab_id` on `codex_browser_viewport` still targets the browser window |
+| `codex_click_and_wait` | Dispatches a single trusted click then waits for observed navigation | Non-navigating clicks time out with `click was dispatched` and `structuredContent.execution: "executed"` |
+| `codex_cua_click` / `codex_cua_scroll` | `cua_click` validates coordinates against live `Page.getLayoutMetrics`; `cua_scroll` defaults an omitted axis to `0` when the other axis is supplied | Out-of-viewport clicks fail as `not_executed` before input dispatch |
+| `codex_locator` shadow traversal | Defaults to document DOM (`shadow=false`) so counts match `document.querySelectorAll`; opt-in `shadow=true` pierces open page shadow roots while excluding extension-injected shadow hosts | Closed shadow roots and cross-origin iframes remain excluded |
+| `codex_page_assets` | Legacy no-action path strictly requires CDP `frameTree`; `list` filters out non-page URLs (`chrome-extension://`, etc.); `bundle` allows omitted `inventory_id` (auto-lists) and skips non-`http(s)` assets in `skipped` | Extension-injected assets are excluded rather than failing the bundle |
+| `codex_browser_management` | Forwards Chromium management namespaces | `windows.query` is unsupported by Chromium (`windows.getAll`/`getCurrent`/`get` instead; `query` applies to `tabs`/`tabGroups`) |
+| `codex_screenshot` 10s extension limit | Extension enforces a 10s per-CDP-command timeout on background tabs | Timeout errors explicitly note that the page may already be rendered and retrying `codex_screenshot` is safe |
+| `codex_name_session` / `codex_get_info` | Extension `getInfo` does not echo `nameSession`; server mirrors the last acknowledged name into `bridge.sessionName` | In-process only; cleared when the MCP server restarts |
+
 ## Tracking an official update
 
 Run the drift checker, compare API members and capability docs, and inspect the

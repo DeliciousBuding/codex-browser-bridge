@@ -253,7 +253,7 @@ async fn invalidated_press_can_finish_slow_reattachment_before_release() {
     assert_eq!(mouse["type"], "mousePressed");
     protocol::encode_frame(
         &mut peer,
-        &json!({"id":press["id"],"error":{"code":-1,"message":"Debugger unattached"}}),
+        &json!({"id":press["id"],"error":{"code":-1,"message":"Target closed"}}),
     )
     .await
     .unwrap();

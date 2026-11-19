@@ -779,7 +779,18 @@ pub async fn screenshot_with_clip(
             "Page.captureScreenshot",
             Some(serde_json::Value::Object(params)),
         )
-        .await?;
+        .await
+        .map_err(|err| {
+            let timed_out = matches!(err, BridgeError::Timeout(_))
+                || err.to_string().to_ascii_lowercase().contains("timed out");
+            if timed_out {
+                BridgeError::Timeout(format!(
+                    "{err} (extension 10s CDP limit; page may already be rendered—safe to retry codex_screenshot)"
+                ))
+            } else {
+                err
+            }
+        })?;
     screenshot_data(&raw)
 }
 

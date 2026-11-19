@@ -625,14 +625,27 @@ async fn read(c: &Client, t: i64, a: &PageAsset, cap: usize) -> Result<Vec<u8>> 
         .frame_id
         .as_ref()
         .ok_or_else(|| user("resource frame unavailable; no network fallback attempted"))?;
-    let _ = cdp(c, t, "Page.enable", None).await;
-    let v = cdp(
+    let v = match cdp(
         c,
         t,
         "Page.getResourceContent",
         Some(json!({"frameId":f,"url":a.url})),
     )
-    .await?;
+    .await
+    {
+        Ok(v) => v,
+        Err(err) if err.to_string().contains("Agent is not enabled") => {
+            let _ = cdp(c, t, "Page.enable", None).await;
+            cdp(
+                c,
+                t,
+                "Page.getResourceContent",
+                Some(json!({"frameId":f,"url":a.url})),
+            )
+            .await?
+        }
+        Err(err) => return Err(err),
+    };
     let x: Content = serde_json::from_value(v).map_err(|e| proto(&e.to_string()))?;
     let b = if x.base64_encoded {
         if x.content.len() > cap.div_ceil(3) * 4 {

@@ -1036,6 +1036,7 @@ impl super::Server {
         self.client_snapshot()
             .send_request("nameSession", Some(json!({ "name": name })))
             .await?;
+        *self.session_name.lock().unwrap() = Some(name.to_string());
         Ok(vec![Content::text(format!("Session named: {name}"))])
     }
 

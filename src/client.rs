@@ -869,10 +869,10 @@ impl Client {
                     // execute_cdp falls back to a full attach instead of trusting a stale entry.
                     self.inner.attached_tabs.lock().await.clear();
                     self.inner
-            .observations
-            .lock()
-            .unwrap()
-            .invalidate_all("session_reset");
+                        .observations
+                        .lock()
+                        .unwrap()
+                        .invalidate_all("session_reset");
                     *self.inner.reconnect_cooldown_until.lock().await = None;
                     self.inner.alive.store(true, Ordering::Release);
                     self.spawn_read_loop(reader, epoch);
@@ -2698,7 +2698,9 @@ mod reconnect_tests {
         let read_err = client
             .read_observed_events(9, Some(&old.cursor), &[], 1, 1024)
             .unwrap_err();
-        assert!(read_err.to_string().contains("invalidated_by session_reset"));
+        assert!(read_err
+            .to_string()
+            .contains("invalidated_by session_reset"));
         assert!(client.send_request("getInfo", None).await.is_err());
         // The retired pipe ends in an incomplete frame; no later request is
         // appended to it and mistaken for the detach payload.
@@ -2956,15 +2958,25 @@ mod reconnect_tests {
                 !is_provably_not_dispatched(&err),
                 "must NOT treat post-dispatch error as provably not dispatched: {msg}"
             );
-            assert!(is_session_invalid_error(&err), "should still invalidate: {msg}");
+            assert!(
+                is_session_invalid_error(&err),
+                "should still invalidate: {msg}"
+            );
         }
     }
 
     #[tokio::test]
-    async fn execute_cdp_once_retries_once_on_debugger_not_attached_without_clearing_observations() {
+    async fn execute_cdp_once_retries_once_on_debugger_not_attached_without_clearing_observations()
+    {
         let (client, mut server) = test_client(4096).await;
         client.mark_attached(7).await;
-        client.inner.observations.lock().unwrap().register(7).unwrap();
+        client
+            .inner
+            .observations
+            .lock()
+            .unwrap()
+            .register(7)
+            .unwrap();
 
         let call = tokio::spawn({
             let client = client.clone();
@@ -3004,7 +3016,10 @@ mod reconnect_tests {
             .unwrap();
 
         let focus = next_request(&mut server).await;
-        assert_eq!(focus["params"]["method"], "Emulation.setFocusEmulationEnabled");
+        assert_eq!(
+            focus["params"]["method"],
+            "Emulation.setFocusEmulationEnabled"
+        );
         encode_frame(&mut server, &json!({"id": focus["id"], "result": {}}))
             .await
             .unwrap();
@@ -3056,7 +3071,8 @@ mod reconnect_tests {
 
         let err = call.await.unwrap().unwrap_err();
         assert!(
-            err.to_string().contains("outcome unknown, so it was not replayed"),
+            err.to_string()
+                .contains("outcome unknown, so it was not replayed"),
             "unexpected error: {err}"
         );
         no_request(&mut server, "target closed must not trigger a retry").await;
@@ -3097,7 +3113,10 @@ mod reconnect_tests {
         // Must go straight to Page.handleJavaScriptDialog without Emulation.setFocusEmulationEnabled.
         let dialog_cmd = next_request(&mut server).await;
         assert_eq!(dialog_cmd["method"], "executeCdp");
-        assert_eq!(dialog_cmd["params"]["method"], "Page.handleJavaScriptDialog");
+        assert_eq!(
+            dialog_cmd["params"]["method"],
+            "Page.handleJavaScriptDialog"
+        );
         encode_frame(&mut server, &json!({"id": dialog_cmd["id"], "result": {}}))
             .await
             .unwrap();
@@ -3147,7 +3166,10 @@ mod reconnect_tests {
             .unwrap();
 
         let focus = next_request(&mut server).await;
-        assert_eq!(focus["params"]["method"], "Emulation.setFocusEmulationEnabled");
+        assert_eq!(
+            focus["params"]["method"],
+            "Emulation.setFocusEmulationEnabled"
+        );
         encode_frame(
             &mut server,
             &json!({"id": focus["id"], "error": {"code": -32000, "message": "Timed out after 10000ms waiting for CDP command Emulation.setFocusEmulationEnabled."}}),
@@ -3184,7 +3206,12 @@ mod reconnect_tests {
             let client = client.clone();
             async move {
                 client
-                    .execute_cdp_with_timeout(7, "Runtime.evaluate", Some(json!({"expression":"1+1"})), Duration::from_secs(5))
+                    .execute_cdp_with_timeout(
+                        7,
+                        "Runtime.evaluate",
+                        Some(json!({"expression":"1+1"})),
+                        Duration::from_secs(5),
+                    )
                     .await
             }
         });
@@ -3212,7 +3239,10 @@ mod reconnect_tests {
             .unwrap();
 
         let focus = next_request(&mut server).await;
-        assert_eq!(focus["params"]["method"], "Emulation.setFocusEmulationEnabled");
+        assert_eq!(
+            focus["params"]["method"],
+            "Emulation.setFocusEmulationEnabled"
+        );
         encode_frame(&mut server, &json!({"id": focus["id"], "result": {}}))
             .await
             .unwrap();
@@ -3228,7 +3258,10 @@ mod reconnect_tests {
 
         eval_call.await.unwrap().unwrap();
         let snap = client.observation_snapshot(7).unwrap();
-        assert!(snap.enabled, "observation must remain enabled across attach cycles");
+        assert!(
+            snap.enabled,
+            "observation must remain enabled across attach cycles"
+        );
         assert_eq!(snap.invalidated_by, None);
         client.shutdown().await;
     }

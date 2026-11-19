@@ -54,6 +54,10 @@ pub struct Server {
     /// access. This also serializes concurrent bind requests.
     pub(crate) binding_lock: Arc<tokio::sync::RwLock<()>>,
     browser_selection: Arc<std::sync::Mutex<Option<crate::config::BrowserSelection>>>,
+    /// In-process mirror of the last name acknowledged by `nameSession` because
+    /// the extension's `getInfo` response does not echo it back. Cleared on
+    /// server restart.
+    pub(crate) session_name: Arc<std::sync::Mutex<Option<String>>>,
     pub(crate) clipboard: Arc<tokio::sync::Mutex<crate::clipboard::VirtualClipboard>>,
     pub(crate) webmcp: Arc<crate::webmcp::WebMcpRegistry>,
     pub(crate) page_assets: crate::page_assets::PageAssetsRegistry,
@@ -74,6 +78,7 @@ impl Server {
             client: Arc::new(RwLock::new(client)),
             binding_lock: Arc::new(tokio::sync::RwLock::new(())),
             browser_selection: Arc::new(std::sync::Mutex::new(None)),
+            session_name: Arc::new(std::sync::Mutex::new(None)),
             clipboard: Arc::new(tokio::sync::Mutex::new(
                 crate::clipboard::VirtualClipboard::default(),
             )),
@@ -94,6 +99,7 @@ impl Server {
             client: Arc::new(RwLock::new(client)),
             binding_lock: Arc::new(tokio::sync::RwLock::new(())),
             browser_selection: Arc::new(std::sync::Mutex::new(None)),
+            session_name: Arc::new(std::sync::Mutex::new(None)),
             clipboard: Arc::new(tokio::sync::Mutex::new(
                 crate::clipboard::VirtualClipboard::default(),
             )),
@@ -270,6 +276,9 @@ impl Server {
         );
         info["startupBrowserSelection"] =
             serde_json::to_value(&*self.browser_selection.lock().unwrap()).unwrap_or(Value::Null);
+        if let Some(name) = self.session_name.lock().unwrap().as_deref() {
+            info["sessionName"] = json!(name);
+        }
         info
     }
 

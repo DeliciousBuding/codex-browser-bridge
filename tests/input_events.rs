@@ -261,7 +261,7 @@ async fn session_invalid_keydown_is_not_replayed() {
         &mut peer,
         &json!({
             "id": request["id"],
-            "error": {"code": -1, "message": "Debugger unattached"}
+            "error": {"code": -1, "message": "Target closed"}
         }),
     )
     .await
@@ -292,7 +292,7 @@ async fn session_invalid_keydown_is_not_replayed() {
         .unwrap_err();
     assert!(
         error.to_string().contains("outcome unknown")
-            || error.to_string().contains("Debugger unattached"),
+            || error.to_string().contains("Target closed"),
         "{error}"
     );
     if let Ok(Ok(frame)) = timeout(

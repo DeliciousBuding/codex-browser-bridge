@@ -108,12 +108,9 @@ async fn persistent_observation_stores_events_before_enable_ack_and_between_call
             64 * 1024,
         )
         .unwrap();
-    assert_eq!(logs.events.len(), 2);
+    // B18: preStartHistory is false; events replayed during enable are dropped.
+    assert_eq!(logs.events.len(), 0);
     assert_eq!(logs.dropped_event_count, 0);
-    assert_eq!(
-        logs.events[0].event["params"]["args"][0]["value"],
-        "earlier"
-    );
     event(
         &mut server,
         7,
@@ -241,9 +238,10 @@ async fn observation_start_reuses_enabled_state_and_dialog_ids_are_stale_after_c
     assert!(client.validate_dialog(7, &dialog.id).is_err());
     assert!(client.validate_file_chooser(7, &chooser.id).is_err());
     client.invalidate_attachment(7).await;
+    // B13: invalidating the attach cache does not destroy active observations.
     assert!(client
         .read_observed_events(7, Some(&initial.cursor), &[], 10, 64 * 1024)
-        .is_err());
+        .is_ok());
     client.shutdown().await;
 }
 
@@ -348,7 +346,9 @@ async fn chooser_interception_is_disarmed_before_turn_cleanup() {
     assert_eq!(req["method"], "turnEnded");
     reply(&mut server, &req, json!({})).await;
     assert!(timeout(DEADLINE, ending).await.unwrap().unwrap().unwrap());
-    assert!(client.observation_snapshot(7).is_err());
+    let snap = client.observation_snapshot(7).unwrap();
+    assert!(!snap.enabled);
+    assert_eq!(snap.invalidated_by, Some("session_reset"));
     client.shutdown().await;
 }
 
@@ -380,5 +380,7 @@ async fn lost_interceptor_ack_still_attempts_disarm_on_shutdown() {
     assert_eq!(req["params"]["commandParams"]["enabled"], false);
     reply(&mut server, &req, json!({})).await;
     timeout(DEADLINE, shutdown).await.unwrap().unwrap();
-    assert!(client.observation_snapshot(7).is_err());
+    let snap = client.observation_snapshot(7).unwrap();
+    assert!(!snap.enabled);
+    assert_eq!(snap.invalidated_by, Some("session_reset"));
 }
