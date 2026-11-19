@@ -1167,14 +1167,14 @@ impl Client {
         // Attachment rollback has its own bounded budget. Keep it outside the
         // observer deadline, which may cancel event producer initialization.
         self.prepare_input(tab_id, deadline).await?;
-        let epoch = self.inner.connection_epoch.load(Ordering::Acquire);
+        let mut epoch = self.inner.connection_epoch.load(Ordering::Acquire);
         let remaining = remaining_before_write("start observation", deadline)?;
         let initial = self.inner.observations.lock().unwrap().register(tab_id)?;
         if initial.enabled {
             return Ok(initial);
         }
         let result = timeout(remaining, async {
-            for (method, params) in [
+            let enable_commands = [
                 ("Page.enable", None),
                 (
                     "Page.setLifecycleEventsEnabled",
@@ -1183,9 +1183,31 @@ impl Client {
                 ("Runtime.enable", None),
                 ("Log.enable", None),
                 ("Network.enable", None),
-            ] {
-                self.execute_cdp_raw_until(tab_id, method, params, deadline, epoch)
-                    .await?;
+            ];
+            let mut retried = false;
+            'enable: loop {
+                for (method, params) in &enable_commands {
+                    match self
+                        .execute_cdp_raw_until(tab_id, method, params.clone(), deadline, epoch)
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(err) if !retried && is_provably_not_dispatched(&err) => {
+                            retried = true;
+                            self.inner.attached_tabs.lock().await.remove(&tab_id);
+                            self.detach_tab_until(tab_id, deadline).await.ok();
+                            epoch = self.attach_tab_until(tab_id, deadline).await.map_err(|attach_err| {
+                                BridgeError::Protocol(format!(
+                                    "retry attach failed for tab {tab_id}: {attach_err}"
+                                ))
+                            })?;
+                            self.inner.attached_tabs.lock().await.insert(tab_id, epoch);
+                            continue 'enable;
+                        }
+                        Err(err) => return Err(err),
+                    }
+                }
+                break;
             }
             let raw = self
                 .execute_cdp_raw_until(tab_id, "Page.getFrameTree", None, deadline, epoch)
@@ -1571,10 +1593,32 @@ impl Client {
         }
 
         match self
-            .execute_cdp_raw_until(tab_id, method, params, deadline, epoch)
+            .execute_cdp_raw_until(tab_id, method, params.clone(), deadline, epoch)
             .await
         {
             Ok(raw) => Ok(raw),
+            Err(err) if is_provably_not_dispatched(&err) => {
+                // Command never reached the renderer: clear attach cache only
+                // (preserving observations), re-attach, and replay once.
+                self.inner.attached_tabs.lock().await.remove(&tab_id);
+                self.detach_tab_until(tab_id, deadline).await.ok();
+                let retry_epoch = match self.attach_tab_until(tab_id, deadline).await {
+                    Ok(epoch) => epoch,
+                    Err(err) => {
+                        self.retire_current_tab_state(tab_id).await;
+                        return Err(BridgeError::Protocol(format!(
+                            "retry attach failed for tab {tab_id}: {err}"
+                        )));
+                    }
+                };
+                self.inner
+                    .attached_tabs
+                    .lock()
+                    .await
+                    .insert(tab_id, retry_epoch);
+                self.execute_cdp_raw_until(tab_id, method, params, deadline, retry_epoch)
+                    .await
+            }
             Err(err) if is_session_invalid_error(&err) => {
                 self.inner.attached_tabs.lock().await.remove(&tab_id);
                 self.inner.observations.lock().unwrap().remove(tab_id);
@@ -2158,11 +2202,12 @@ fn remaining_before_write(method: &str, deadline: Instant) -> Result<Duration> {
     Ok(remaining(deadline))
 }
 
-/// Errors that indicate the CDP session is no longer valid and needs re-attach.
-fn is_session_invalid_error(err: &BridgeError) -> bool {
+/// Errors that prove the CDP command was never dispatched to the renderer
+/// because no debugger session was attached to the target. Safe for a single
+/// re-attach + replay even on state-changing commands.
+fn is_provably_not_dispatched(err: &BridgeError) -> bool {
     let msg = err.to_string().to_ascii_lowercase();
     [
-        "target closed",
         "not attached",
         // The extension reports a dropped debugger as "Debugger unattached",
         // which does not contain "not attached".
@@ -2174,7 +2219,23 @@ fn is_session_invalid_error(err: &BridgeError) -> bool {
         "no target",
         "target does not exist",
         "cannot find target",
+    ]
+    .iter()
+    .any(|needle| msg.contains(needle))
+}
+
+/// Errors that indicate the CDP session is no longer valid and needs re-attach.
+/// Includes post-dispatch failures (`target closed`, `execution context destroyed`)
+/// where a mutation's outcome is unknown and must not be replayed.
+fn is_session_invalid_error(err: &BridgeError) -> bool {
+    if is_provably_not_dispatched(err) {
+        return true;
+    }
+    let msg = err.to_string().to_ascii_lowercase();
+    [
+        "target closed",
         "execution context destroyed",
+        "execution context was destroyed",
     ]
     .iter()
     .any(|needle| msg.contains(needle))
@@ -2510,7 +2571,7 @@ mod reconnect_tests {
         assert_eq!(enable["params"]["method"], "Page.enable");
         encode_frame(
             &mut peer,
-            &json!({"id":enable["id"],"error":{"code":-32000,"message":"Debugger unattached"}}),
+            &json!({"id":enable["id"],"error":{"code":-32000,"message":"Target closed"}}),
         )
         .await
         .unwrap();
@@ -2525,7 +2586,7 @@ mod reconnect_tests {
             .is_err());
         no_request(
             &mut peer,
-            "observer must not start another attach after invalidation",
+            "observer must not start another attach after post-dispatch invalidation",
         )
         .await;
         client.shutdown().await;
@@ -2785,6 +2846,140 @@ mod reconnect_tests {
             "stale attachment must not focus or detach a new connection",
         )
         .await;
+        client.shutdown().await;
+    }
+
+    #[test]
+    fn provably_not_dispatched_excludes_post_dispatch_errors() {
+        for msg in [
+            "Debugger is not attached",
+            "Debugger unattached",
+            "debugger detached",
+            "No session with given id",
+            "Session not found",
+            "No target with given id found",
+            "Target does not exist",
+            "Cannot find target",
+        ] {
+            let err = BridgeError::Rpc {
+                method: "executeCdp".into(),
+                message: msg.into(),
+            };
+            assert!(is_provably_not_dispatched(&err), "should match: {msg}");
+            assert!(is_session_invalid_error(&err), "should invalidate: {msg}");
+        }
+
+        for msg in ["Target closed", "Execution context was destroyed"] {
+            let err = BridgeError::Rpc {
+                method: "executeCdp".into(),
+                message: msg.into(),
+            };
+            assert!(
+                !is_provably_not_dispatched(&err),
+                "must NOT treat post-dispatch error as provably not dispatched: {msg}"
+            );
+            assert!(is_session_invalid_error(&err), "should still invalidate: {msg}");
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_cdp_once_retries_once_on_debugger_not_attached_without_clearing_observations() {
+        let (client, mut server) = test_client(4096).await;
+        client.mark_attached(7).await;
+        client.inner.observations.lock().unwrap().register(7).unwrap();
+
+        let call = tokio::spawn({
+            let client = client.clone();
+            async move {
+                client
+                    .execute_cdp_once_with_timeout(
+                        7,
+                        "Input.dispatchMouseEvent",
+                        Some(json!({"type":"mousePressed","x":10,"y":20})),
+                        Duration::from_secs(5),
+                    )
+                    .await
+            }
+        });
+
+        let first = next_request(&mut server).await;
+        assert_eq!(first["method"], "executeCdp");
+        assert_eq!(first["params"]["method"], "Input.dispatchMouseEvent");
+        encode_frame(
+            &mut server,
+            &json!({"id": first["id"], "error": {"code": -32000, "message": "Debugger is not attached"}}),
+        )
+        .await
+        .unwrap();
+
+        let detach = next_request(&mut server).await;
+        assert_eq!(detach["method"], "detach");
+        encode_frame(&mut server, &json!({"id": detach["id"], "result": {}}))
+            .await
+            .unwrap();
+
+        let attach = next_request(&mut server).await;
+        assert_eq!(attach["method"], "attach");
+        encode_frame(&mut server, &json!({"id": attach["id"], "result": {}}))
+            .await
+            .unwrap();
+
+        let focus = next_request(&mut server).await;
+        assert_eq!(focus["params"]["method"], "Emulation.setFocusEmulationEnabled");
+        encode_frame(&mut server, &json!({"id": focus["id"], "result": {}}))
+            .await
+            .unwrap();
+
+        let replay = next_request(&mut server).await;
+        assert_eq!(replay["method"], "executeCdp");
+        assert_eq!(replay["params"]["method"], "Input.dispatchMouseEvent");
+        encode_frame(
+            &mut server,
+            &json!({"id": replay["id"], "result": {"ok": true}}),
+        )
+        .await
+        .unwrap();
+
+        let raw = call.await.unwrap().unwrap();
+        assert_eq!(raw.get(), r#"{"ok":true}"#);
+        assert!(client.observation_snapshot(7).is_ok());
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn execute_cdp_once_does_not_retry_on_target_closed() {
+        let (client, mut server) = test_client(4096).await;
+        client.mark_attached(7).await;
+
+        let call = tokio::spawn({
+            let client = client.clone();
+            async move {
+                client
+                    .execute_cdp_once_with_timeout(
+                        7,
+                        "Input.dispatchMouseEvent",
+                        Some(json!({"type":"mousePressed","x":10,"y":20})),
+                        Duration::from_secs(5),
+                    )
+                    .await
+            }
+        });
+
+        let first = next_request(&mut server).await;
+        assert_eq!(first["params"]["method"], "Input.dispatchMouseEvent");
+        encode_frame(
+            &mut server,
+            &json!({"id": first["id"], "error": {"code": -32000, "message": "Target closed"}}),
+        )
+        .await
+        .unwrap();
+
+        let err = call.await.unwrap().unwrap_err();
+        assert!(
+            err.to_string().contains("outcome unknown, so it was not replayed"),
+            "unexpected error: {err}"
+        );
+        no_request(&mut server, "target closed must not trigger a retry").await;
         client.shutdown().await;
     }
 
