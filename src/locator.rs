@@ -39,7 +39,7 @@ pub fn validate_spec(spec: &Value) -> Result<()> {
         return Err(invalid("locator spec exceeds 65536 bytes"));
     }
     validate_query(spec, 0, &mut 0)?;
-    for name in ["force", "trial", "checked"] {
+    for name in ["force", "trial", "checked", "shadow"] {
         if spec.get(name).is_some_and(|v| !v.is_boolean()) {
             return Err(invalid(format!("{name} must be a boolean")));
         }

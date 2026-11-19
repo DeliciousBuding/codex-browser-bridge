@@ -434,11 +434,15 @@ impl ObservationStore {
                 "observation tab limit ({MAX_TABS}) reached; stop an observation first"
             )));
         }
-        Ok(self
-            .tabs
-            .entry(tab_id)
-            .or_insert_with(TabState::new)
-            .snapshot(tab_id))
+        let entry = self.tabs.entry(tab_id).or_insert_with(TabState::new);
+        if entry.enabled {
+            // B18: preStartHistory is false; a fresh observe start drops prior buffered events.
+            entry.events.clear();
+            entry.event_bytes = 0;
+            entry.dropped_count = 0;
+            entry.lost_through = 0;
+        }
+        Ok(entry.snapshot(tab_id))
     }
 
     pub(crate) fn snapshot(&self, tab_id: i64) -> Result<TabSnapshot> {
@@ -556,6 +560,12 @@ impl ObservationStore {
             tab.domcontentloaded |= matches!(ready_state, Some("interactive" | "complete"));
             tab.load |= ready_state == Some("complete");
         }
+        // B18: Drop pre-start console/log replay emitted during Runtime.enable/Log.enable
+        // so preStartHistory:false holds strictly.
+        tab.events.clear();
+        tab.event_bytes = 0;
+        tab.dropped_count = 0;
+        tab.lost_through = 0;
         tab.enabled = true;
         Ok(tab.snapshot(tab_id))
     }

@@ -97,6 +97,8 @@ pub struct BundleResult {
     pub directory_path: PathBuf,
     pub manifest_path: PathBuf,
     pub assets: Vec<ExportedAsset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<Value>,
     pub partial_inventory: bool,
     pub path_scope: PathScope,
     pub browser_download: bool,
@@ -157,7 +159,7 @@ impl PageAssetsRegistry {
                 if let Some(xs) = x["assets"].as_array() {
                     for a in xs.iter().take(MAX_ASSETS) {
                         let u = a["url"].as_str().unwrap_or("");
-                        if u.is_empty() {
+                        if u.is_empty() || !is_page_asset_url(u) {
                             continue;
                         }
                         if let Some(old) = assets.iter_mut().find(|z| z.url == u) {
@@ -269,25 +271,37 @@ impl PageAssetsRegistry {
         let tc = cap(o.max_total_bytes, MAX_TOTAL)?;
         timeout(BUDGET, async {
             let tab = parse_tab_id("page_assets", tab_id)?;
-            let inv = self
-                .inventories
-                .lock()
-                .await
-                .iter()
-                .find(|x| x.tab == tab && x.result.id == o.inventory_id)
-                .cloned()
-                .ok_or_else(|| user("unknown inventory; list this tab again"))?;
-            if !same(
-                &inv.epoch,
-                &epoch(
-                    cdp(c, tab, "Page.getFrameTree", None)
-                        .await?
-                        .get("frameTree")
-                        .ok_or_else(|| proto("missing frame tree"))?,
-                )?,
-            ) {
-                return Err(user("asset inventory is stale; list again"));
-            }
+            let inv = if o.inventory_id.is_empty() {
+                let listed = self.list_inner(c, tab_id).await?;
+                self.inventories
+                    .lock()
+                    .await
+                    .iter()
+                    .find(|x| x.tab == tab && x.result.id == listed.id)
+                    .cloned()
+                    .ok_or_else(|| proto("freshly listed inventory missing"))?
+            } else {
+                let found = self
+                    .inventories
+                    .lock()
+                    .await
+                    .iter()
+                    .find(|x| x.tab == tab && x.result.id == o.inventory_id)
+                    .cloned()
+                    .ok_or_else(|| user("unknown inventory; list this tab again"))?;
+                if !same(
+                    &found.epoch,
+                    &epoch(
+                        cdp(c, tab, "Page.getFrameTree", None)
+                            .await?
+                            .get("frameTree")
+                            .ok_or_else(|| proto("missing frame tree"))?,
+                    )?,
+                ) {
+                    return Err(user("asset inventory is stale; list again"));
+                }
+                found
+            };
             let ids = o.asset_ids.as_ref();
             if ids.is_some_and(|ids| ids.is_empty() || ids.len() > MAX_ASSETS) {
                 return Err(user("asset_ids must contain 1..512 IDs"));
@@ -325,9 +339,18 @@ impl PageAssetsRegistry {
                 return Err(user("bundle matched no assets"));
             }
             let mut data = Vec::new();
+            let mut skipped = Vec::new();
             let mut total = 0usize;
             for a in selected.iter() {
                 budget.check_elapsed()?;
+                if a.inline.is_none() && !is_http_url(&a.url) {
+                    skipped.push(json!({
+                        "id": a.id,
+                        "url": a.url,
+                        "reason": "non_http_url"
+                    }));
+                    continue;
+                }
                 if a.size.is_some_and(|size| size > rc as u64) {
                     return Err(user("known resource size exceeds max_resource_bytes"));
                 }
@@ -351,7 +374,7 @@ impl PageAssetsRegistry {
             ) {
                 return Err(user("page changed during bundle; no output written"));
             }
-            publish(&dir, data, inv.result.partial, budget)
+            publish(&dir, data, skipped, inv.result.partial, budget)
         })
         .await
         .map_err(|_| BridgeError::Timeout("page assets bundle; no output published".into()))?
@@ -481,6 +504,20 @@ fn collect(v: &Value, o: &mut Vec<PageAsset>, p: &mut bool, d: usize) {
         }
     }
 }
+fn is_http_url(u: &str) -> bool {
+    let lower = u.to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
+}
+
+fn is_page_asset_url(u: &str) -> bool {
+    let lower = u.to_ascii_lowercase();
+    lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("data:")
+        || lower.starts_with("blob:")
+        || lower.starts_with("inline-svg:")
+}
+
 fn push(
     o: &mut Vec<PageAsset>,
     u: &str,
@@ -490,6 +527,9 @@ fn push(
     f: Option<String>,
     p: &mut bool,
 ) {
+    if !is_page_asset_url(u) {
+        return;
+    }
     if u.len() > 8192 || o.len() >= MAX_ASSETS {
         *p = true;
         return;
@@ -585,6 +625,7 @@ async fn read(c: &Client, t: i64, a: &PageAsset, cap: usize) -> Result<Vec<u8>> 
         .frame_id
         .as_ref()
         .ok_or_else(|| user("resource frame unavailable; no network fallback attempted"))?;
+    let _ = cdp(c, t, "Page.enable", None).await;
     let v = cdp(
         c,
         t,
@@ -615,6 +656,7 @@ pub fn validate_output_dir(p: &Path) -> Result<()> {
 fn publish(
     dir: &Path,
     data: Vec<(PageAsset, Vec<u8>)>,
+    skipped: Vec<Value>,
     partial: bool,
     budget: FileBudget,
 ) -> Result<BundleResult> {
@@ -656,6 +698,7 @@ fn publish(
         directory_path: p.to_owned(),
         manifest_path: m.clone(),
         assets,
+        skipped,
         partial_inventory: partial,
         path_scope: PathScope::BridgeHost,
         browser_download: false,

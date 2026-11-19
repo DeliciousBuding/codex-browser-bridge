@@ -4,9 +4,19 @@
   let traversed = 0;
   let regexCharacters = 0;
   const maxResults = Math.max(1, Math.min(Number(spec.max_results) || 50, 200));
+  const includeShadow = spec.shadow === true;
   const clean = (value) => String(value == null ? "" : value).replace(/\s+/g, " ").trim();
   const textOf = (el) => String(el.innerText != null ? el.innerText : el.textContent || "");
   const windowOf = (el) => el.ownerDocument && el.ownerDocument.defaultView || globalThis;
+
+  function isExtensionShadow(shadowRoot) {
+    try {
+      const html = shadowRoot.innerHTML || "";
+      return /chrome-extension:\/\/|edge-extension:\/\/|moz-extension:\/\//i.test(html);
+    } catch {
+      return false;
+    }
+  }
 
   function allElements(root, out) {
     if (out.length >= MAX_ELEMENTS) throw new Error("locator traversal exceeds 50000 elements");
@@ -14,7 +24,9 @@
       if (++traversed > 200000) throw new Error("locator traversal exceeds 200000 cumulative elements");
       out.push(el);
       if (out.length >= MAX_ELEMENTS) throw new Error("locator traversal exceeds 50000 elements");
-      if (el.shadowRoot) allElements(el.shadowRoot, out);
+      if (includeShadow && el.shadowRoot && !isExtensionShadow(el.shadowRoot)) {
+        allElements(el.shadowRoot, out);
+      }
     }
     return out;
   }

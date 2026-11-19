@@ -1112,7 +1112,16 @@ impl super::Server {
                                 &client,
                                 tab_id,
                                 BundleOptions {
-                                    inventory_id: required_str(&args, "inventory_id")?.to_string(),
+                                    inventory_id: args
+                                        .get("inventory_id")
+                                        .map(|v| {
+                                            v.as_str().ok_or_else(|| {
+                                                anyhow::anyhow!("inventory_id must be a string")
+                                            })
+                                        })
+                                        .transpose()?
+                                        .unwrap_or("")
+                                        .to_string(),
                                     output_dir: required_str(&args, "output_dir")?.into(),
                                     asset_ids: optional_str_array(&args, "asset_ids")?,
                                     kinds,
