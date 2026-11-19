@@ -242,8 +242,8 @@ function runtimeGlibc() {
 }
 
 function resolveTarget(platform, cpu, glibcVersion) {
-  if (!["win32", "linux"].includes(platform)) {
-    throw new Error(`codex-browser-bridge does not ship binaries for ${platform}; supported platforms are Windows and Linux (glibc >= 2.39).`);
+  if (!["win32", "linux", "darwin"].includes(platform)) {
+    throw new Error(`codex-browser-bridge does not ship binaries for ${platform}; supported platforms are Windows, Linux (glibc >= 2.39), and macOS.`);
   }
   if (!["x64", "arm64"].includes(cpu)) {
     throw new Error(`codex-browser-bridge does not ship a ${platform} binary for ${cpu}.`);
@@ -253,6 +253,9 @@ function resolveTarget(platform, cpu, glibcVersion) {
       asset: cpu === "arm64" ? "codex-browser-bridge-arm64.exe" : "codex-browser-bridge.exe",
       executable: "codex-browser-bridge.exe",
     };
+  }
+  if (platform === "darwin") {
+    return { asset: `codex-browser-bridge-darwin-${cpu}`, executable: "codex-browser-bridge" };
   }
   const version = typeof glibcVersion === "string" && glibcVersion.match(/^(\d+)\.(\d+)(?:\.\d+)?$/);
   if (!version || Number(version[1]) < 2 || (Number(version[1]) === 2 && Number(version[2]) < 39)) {
@@ -360,7 +363,7 @@ async function install(options = {}) {
   fs.mkdirSync(outDir, { recursive: true });
   const target = path.join(outDir, executable);
   fs.writeFileSync(target, binary);
-  if (platform === "linux") fs.chmodSync(target, 0o755);
+  if (platform === "linux" || platform === "darwin") fs.chmodSync(target, 0o755);
   log(`Installed: ${target}`);
   logInstallHints(root, log, target, platform);
   return { target, asset, tag, repo };

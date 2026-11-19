@@ -87,7 +87,7 @@ codex-browser-bridge --surface computer call js '{"code":"await cua.listWindows(
 |------|------|
 | Windows x64 / arm64 | 已发布二进制 |
 | Linux GNU x64 / arm64 | 已发布二进制；glibc >= 2.39 |
-| macOS | 源码编译与 CI 测试通过；无预编译二进制 |
+| macOS arm64 / x64 | 已发布二进制；需在 macOS 提示时为已安装运行时授予「辅助功能」与「屏幕录制」权限（TCC） |
 
 中继行为随对应平台已安装运行时而定。Linux/WSL 进程需要本环境内的运行时；桥接器不会跨 OS 边界转接 Windows worker。
 

@@ -92,8 +92,8 @@ jobs:
           npm run check:package
 
   test-lib:
-    # Native GNU builds keep Unix socket tests and both shipped Linux targets
-    # covered. Ubuntu 24.04 sets the binary glibc compatibility floor to 2.39.
+    # Linux GNU builds cover both shipped targets natively. Ubuntu 24.04 sets
+    # the binary glibc compatibility floor to 2.39.
     strategy:
       fail-fast: false
       matrix:
@@ -122,9 +122,9 @@ jobs:
         shell: bash
         run: cargo build --locked --release --target "${{ matrix.target }}"
 
-  macos-source:
-    # Source/adapter checks only. This does not establish GUI/TCC acceptance
-    # or add a macOS release asset.
+  macos:
+    # macOS source, test, and cross-build checks. This does not establish
+    # GUI/TCC acceptance on a real desktop.
     runs-on: macos-15
     timeout-minutes: 20
     env:
@@ -135,8 +135,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master (toolchain: 1.88.0)
         with:
           toolchain: "1.88.0"
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
           components: clippy
-      - name: Test adapter
+      - name: Test native relay
         timeout-minutes: 10
         run: cargo test --locked
       - name: Clippy
@@ -146,3 +147,5 @@ jobs:
           cargo build --locked --release
           target/release/codex-browser-bridge --version
           target/release/codex-browser-bridge --help
+      - name: Build x64
+        run: cargo build --locked --release --target x86_64-apple-darwin

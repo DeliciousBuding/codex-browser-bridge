@@ -31,9 +31,10 @@ There is no custom CDP client, DOM or observation engine, locator engine,
 tool profile system, or browser session layer. Those responsibilities belong
 to the installed runtime, and the bridge does not duplicate or shadow them.
 
-Current releases publish Windows x64/arm64 and Linux GNU x64/arm64 binaries
-(glibc >= 2.39 for the Linux release builds). A compiling macOS target does
-not establish macOS runtime support.
+Current releases publish Windows x64/arm64, Linux GNU x64/arm64 (glibc >= 2.39
+for the Linux release builds), and macOS arm64/x64 binaries. Release builds and
+CI do not exercise macOS TCC/Accessibility prompts, so a published macOS binary
+does not by itself establish desktop-control permission on a given machine.
 
 The repository is both the Claude plugin source and the generic MCP server
 source. The Claude plugin registers `codex-browser` (`--surface native-browser`)

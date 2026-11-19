@@ -60,6 +60,6 @@
   "engines": {
     "node": ">=18"
   },
-  "os": ["win32", "linux"],
+  "os": ["win32", "linux", "darwin"],
   "cpu": ["x64", "arm64"]
 }

@@ -87,7 +87,7 @@ It does not implement CDP, DOM snapshots, locators, observation cursors, tool pr
 |---------|--------|
 | Windows x64 / arm64 | Published binaries |
 | Linux GNU x64 / arm64 | Published binaries; glibc >= 2.39 |
-| macOS | Source builds and CI tests; no prebuilt binary |
+| macOS arm64 / x64 | Published binaries; grant the installed runtime Accessibility and Screen Recording (TCC) permissions when macOS prompts |
 
 Native relay behavior follows the installed runtime and its platform support. A Linux/WSL process needs a runtime installed in that environment; the bridge does not bridge a Windows worker across the OS boundary.
 

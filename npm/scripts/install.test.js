@@ -101,7 +101,12 @@ async function run() {
     for (const libc of [undefined, "musl", "2.38", "1.99", "invalid"]) {
       assert.throws(() => resolveTarget("linux", "x64", libc), /require glibc >= 2.39/);
     }
-    assert.throws(() => resolveTarget("darwin", "arm64"), /does not ship binaries for darwin/);
+    for (const cpu of ["x64", "arm64"]) {
+      assert.deepStrictEqual(resolveTarget("darwin", cpu), {
+        asset: `codex-browser-bridge-darwin-${cpu}`, executable: "codex-browser-bridge",
+      });
+    }
+    assert.throws(() => resolveTarget("freebsd", "x64"), /does not ship binaries for freebsd/);
     assert.throws(() => resolveTarget("win32", "ia32"), /does not ship/);
     assert.throws(() => resolveTarget("linux", "riscv64", "2.39"), /does not ship/);
 
@@ -306,6 +311,29 @@ async function run() {
       platform: "linux", arch: "x64", glibcVersion: "2.38", env: {},
       requestBuffer: async () => { throw new Error("must not download on an unsupported libc"); },
     }), /require glibc >= 2.39/);
+
+    for (const cpu of ["x64", "arm64"]) {
+      const darwinOut = path.join(tmp, `darwin-${cpu}`);
+      const calls = [];
+      const result = await install({
+        platform: "darwin", arch: cpu, env: {},
+        packageRoot: installRoot,
+        binDir: darwinOut, version: "1.10.0", log: () => {},
+        requestBuffer: async (url) => {
+          calls.push(url);
+          return url.endsWith("checksums.txt")
+            ? Buffer.from(`${binaryHash} *codex-browser-bridge-darwin-${cpu}\n`)
+            : binary;
+        },
+      });
+      assert.strictEqual(result.asset, `codex-browser-bridge-darwin-${cpu}`);
+      assert.deepStrictEqual(calls, [
+        `https://github.com/DeliciousBuding/codex-browser-bridge/releases/download/v1.10.0/checksums.txt`,
+        `https://github.com/DeliciousBuding/codex-browser-bridge/releases/download/v1.10.0/codex-browser-bridge-darwin-${cpu}`,
+      ]);
+      assert.deepStrictEqual(fs.readFileSync(path.join(darwinOut, "codex-browser-bridge")), binary);
+      if (process.platform !== "win32") assert.strictEqual(fs.statSync(result.target).mode & 0o777, 0o755);
+    }
 
     const nativeName = process.platform === "win32" ? "codex-browser-bridge.exe" : "codex-browser-bridge";
     let nativeSupported = true;

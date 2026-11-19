@@ -69,7 +69,8 @@ const pkg = JSON.parse(read(packageJsonPath));
 const publishNpm = indentedBlock(workflowLines, /^  publish-npm:/, /^  [A-Za-z0-9_-]+:/);
 const releaseJob = indentedBlock(workflowLines, /^  release:/, /^  [A-Za-z0-9_-]+:/);
 const linuxJob = indentedBlock(workflowLines, /^  test-lib:/, /^  [A-Za-z0-9_-]+:/);
-const assets = ["codex-browser-bridge.exe", "codex-browser-bridge-arm64.exe", "codex-browser-bridge-linux-x64-gnu", "codex-browser-bridge-linux-arm64-gnu"];
+const macosJob = indentedBlock(workflowLines, /^  test-macos:/, /^  [A-Za-z0-9_-]+:/);
+const assets = ["codex-browser-bridge.exe", "codex-browser-bridge-arm64.exe", "codex-browser-bridge-linux-x64-gnu", "codex-browser-bridge-linux-arm64-gnu", "codex-browser-bridge-darwin-arm64", "codex-browser-bridge-darwin-x64"];
 for (const asset of assets) {
   // The checksum drift guard, attestation subjects, release upload, and npm
   // checksum embedding must all cover every shipped platform.
@@ -88,6 +89,14 @@ for (const runner of ["ubuntu-24.04", "ubuntu-24.04-arm"]) {
   if (!linuxJob.includes(`os: ${runner}`) || !ciWorkflow.includes(`os: ${runner}`)) {
     fail(`Linux builds must use native ${runner} runners for the documented glibc floor`);
   }
+}
+for (const target of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
+  if (!macosJob.includes(target) || !ciWorkflow.includes(target)) {
+    fail(`CI and release must build ${target}`);
+  }
+}
+if (!/runs-on: macos-15/.test(macosJob) || !/runs-on: macos-15/.test(ciWorkflow)) {
+  fail("macOS builds must run on macos-15");
 }
 if (!/glibc >= 2\.39/.test(docs)) fail("release docs must state the Linux glibc compatibility floor");
 if (!publishNpm) {
@@ -156,8 +165,8 @@ if (setupNodeNoCacheCount < setupNodeCount) {
 }
 
 for (const [name, text, jobs] of [
-  ["release.yml", workflow, ["validate-release", "test", "test-lib", "release", "publish-npm"]],
-  ["ci.yml", ciWorkflow, ["rust", "npm", "test-lib"]],
+  ["release.yml", workflow, ["validate-release", "test", "test-lib", "test-macos", "release", "publish-npm"]],
+  ["ci.yml", ciWorkflow, ["rust", "npm", "test-lib", "macos"]],
   ["supply-chain.yml", supplyChainWorkflow, ["cargo-deny"]],
 ]) {
   for (const job of jobs) {
@@ -261,9 +270,9 @@ if (pkg.name !== "@delicious233/codex-browser-bridge") {
 if (pkg.private !== false) {
   fail("npm package must remain public (private=false)");
 }
-if (JSON.stringify(pkg.os) !== JSON.stringify(["win32", "linux"]) ||
+if (JSON.stringify(pkg.os) !== JSON.stringify(["win32", "linux", "darwin"]) ||
     JSON.stringify(pkg.cpu) !== JSON.stringify(["x64", "arm64"])) {
-  fail("npm package platform metadata must match the Windows/Linux x64/arm64 release matrix");
+  fail("npm package platform metadata must match the Windows/Linux/macOS x64/arm64 release matrix");
 }
 if (!pkg.repository || !String(pkg.repository.url).includes("DeliciousBuding/codex-browser-bridge")) {
   fail("npm package repository.url must point at DeliciousBuding/codex-browser-bridge");
