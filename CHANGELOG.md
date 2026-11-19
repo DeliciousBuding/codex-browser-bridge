@@ -18,6 +18,7 @@ Format: one bullet per change, no hard line wraps. 中文版见 [CHANGELOG.zh-CN
 ### Changed
 
 - Document native string formatting and result preservation, CLI event/protocol boundaries, and host-owned tool exposure, token budgets, and UI rendering.
+- Remove unused HTML fixtures left behind by the retired extension adapter.
 
 ## [3.0.1] - 2026-11-19
 
