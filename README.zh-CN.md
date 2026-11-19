@@ -20,13 +20,20 @@
 
 ## 快速开始
 
-### Claude Code 插件
+### 插件与 Skill 安装
 
 ```bash
+# Claude Code 插件
 claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
+
+# Google Antigravity（agy CLI，直接导入 .claude-plugin/plugin.json）
+agy plugin install https://github.com/DeliciousBuding/codex-browser-bridge
+
+# Agent Skills（skills.sh）
+npx skills add DeliciousBuding/codex-browser-bridge
 ```
 
-插件注册两个原生 MCP 服务（`codex-browser` 与 `codex-computer`）。请先安装并配置 Codex 原生运行时；插件不打包运行时。如果本机只安装了其中一个运行时，另一个服务启动失败属于预期行为；如需单入口，可使用手工配置只保留对应项。
+仓库同时提供 Cursor 原生插件清单（[.cursor-plugin/plugin.json](.cursor-plugin/plugin.json)）与 Official MCP Registry 清单（[server.json](server.json)），并在 [examples/](examples/) 中提供 VS Code / OpenCode / Antigravity / Cursor 等客户端模板。插件注册两个原生 MCP 服务（`codex-browser` 与 `codex-computer`）；请先安装并配置 Codex 原生运行时。如果本机只安装了其中一个运行时，另一个服务启动失败属于预期行为；如需单入口，可使用手工配置只保留对应项。
 
 ### 手工 MCP 配置
 

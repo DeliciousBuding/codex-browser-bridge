@@ -2,13 +2,11 @@
   "mcpServers": {
     "codex-browser": {
       "command": "codex-browser-bridge",
-      "args": ["--surface", "native-browser", "--mode", "mcp"],
-      "transport": "stdio"
+      "args": ["--surface", "native-browser", "--mode", "mcp"]
     },
     "codex-computer": {
       "command": "codex-browser-bridge",
-      "args": ["--surface", "computer", "--mode", "mcp"],
-      "transport": "stdio"
+      "args": ["--surface", "computer", "--mode", "mcp"]
     }
   }
 }

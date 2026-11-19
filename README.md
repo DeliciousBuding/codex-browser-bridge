@@ -20,13 +20,20 @@ Bare invocations without `--surface` use `native-browser`. See [Native setup](ht
 
 ## Quick Start
 
-### Claude Code plugin
+### Plugins & Skills
 
 ```bash
+# Claude Code plugin
 claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
+
+# Google Antigravity (agy CLI — imports .claude-plugin/plugin.json directly)
+agy plugin install https://github.com/DeliciousBuding/codex-browser-bridge
+
+# Agent Skills (skills.sh)
+npx skills add DeliciousBuding/codex-browser-bridge
 ```
 
-The plugin registers both native MCP services (`codex-browser` and `codex-computer`). Install and configure the native Codex runtimes first; the plugin does not bundle them. If only one runtime is installed on your machine, the other entry failing to start is expected—use a single-entry manual configuration if you only want one.
+Cursor native plugin metadata is provided in [.cursor-plugin/plugin.json](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/.cursor-plugin/plugin.json) and Official MCP Registry metadata in [server.json](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/server.json). The plugin registers both native MCP services (`codex-browser` and `codex-computer`). Install and configure the native Codex runtimes first; the plugin does not bundle them. If only one runtime is installed on your machine, the other entry failing to start is expected—use a single-entry manual configuration if you only want one.
 
 ### Manual MCP configuration
 

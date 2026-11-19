@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "codex-browser": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@delicious233/codex-browser-bridge@3.0.0", "--surface", "native-browser", "--mode", "mcp"]
+    },
+    "codex-computer": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@delicious233/codex-browser-bridge@3.0.0", "--surface", "computer", "--mode", "mcp"]
+    }
+  }
+}

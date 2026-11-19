@@ -1,0 +1,32 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.DeliciousBuding/codex-browser-bridge",
+  "description": "Thin stdio MCP and CLI relay to the installed Codex native Browser Use (node_repl) and Computer Use (cua_repl) runtimes.",
+  "repository": {
+    "url": "https://github.com/DeliciousBuding/codex-browser-bridge",
+    "source": "github"
+  },
+  "version": "3.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@delicious233/codex-browser-bridge",
+      "version": "3.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--surface",
+          "value": "native-browser"
+        },
+        {
+          "type": "named",
+          "name": "--mode",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}

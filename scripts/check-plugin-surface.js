@@ -57,6 +57,8 @@ if (!cargoVersion) {
 }
 
 const claude = readJson(".claude-plugin/plugin.json");
+const cursorPlugin = readJson(".cursor-plugin/plugin.json");
+const serverManifest = readJson("server.json");
 const mcp = readJson("mcp.json");
 const claudeMarketplace = readJson(".claude-plugin/marketplace.json");
 
@@ -64,9 +66,30 @@ if (claude.name !== "codex-browser") {
   failures.push(".claude-plugin/plugin.json name must remain codex-browser");
 }
 requireVersion(claude, ".claude-plugin/plugin.json", packageJson.version);
-
 requirePathInsidePlugin(claude.skills, ".claude-plugin/plugin.json skills");
 requirePathInsidePlugin(claude.mcpServers, ".claude-plugin/plugin.json mcpServers");
+
+if (cursorPlugin.name !== "codex-browser") {
+  failures.push(".cursor-plugin/plugin.json name must remain codex-browser");
+}
+requireVersion(cursorPlugin, ".cursor-plugin/plugin.json", packageJson.version);
+requirePathInsidePlugin(cursorPlugin.skills, ".cursor-plugin/plugin.json skills");
+requirePathInsidePlugin(cursorPlugin.mcpServers, ".cursor-plugin/plugin.json mcpServers");
+if (cursorPlugin.mcpServers !== "./mcp.json") {
+  failures.push(".cursor-plugin/plugin.json must reuse root ./mcp.json");
+}
+
+requireVersion(serverManifest, "server.json", packageJson.version);
+const npmPkg = (serverManifest.packages || []).find(
+  (p) => p.registryType === "npm" && p.identifier === "@delicious233/codex-browser-bridge"
+);
+if (!npmPkg) {
+  failures.push("server.json must list npm package @delicious233/codex-browser-bridge");
+} else if (npmPkg.version !== packageJson.version) {
+  failures.push(
+    `server.json npm package version ${npmPkg.version || "<missing>"} does not match ${packageJson.version}`
+  );
+}
 if (claude.author && claude.author.name !== "DeliciousBuding") {
   failures.push(".claude-plugin/plugin.json author.name must remain DeliciousBuding");
 }
