@@ -1655,6 +1655,10 @@ pub async fn delete_cookies(client: &Client, tab_id: &str, params: Value) -> Res
 }
 
 /// Emulate a device viewport (width/height/userAgent/mobile).
+///
+/// Uses `deviceScaleFactor: 0` so Chromium preserves the host display's native
+/// DPR instead of hardcoding 1. Applies `user_agent` via `Emulation.setUserAgentOverride`
+/// when non-empty.
 pub async fn emulate_device(
     client: &Client,
     tab_id: &str,
@@ -1671,22 +1675,38 @@ pub async fn emulate_device(
             Some(json!({
                 "width": width,
                 "height": height,
-                "deviceScaleFactor": 1,
-                "mobile": mobile,
-                "userAgent": user_agent
+                "deviceScaleFactor": 0,
+                "mobile": mobile
             })),
         )
-        .await
-        .map(|_| ())
+        .await?;
+    if !user_agent.is_empty() {
+        client
+            .execute_cdp(
+                id,
+                "Emulation.setUserAgentOverride",
+                Some(json!({ "userAgent": user_agent })),
+            )
+            .await?;
+    }
+    Ok(())
 }
 
-/// Clear device emulation (revert to real viewport).
+/// Clear device emulation (revert to real viewport and reload so layout metrics
+/// immediately return to the pre-emulation native width).
 pub async fn reset_device(client: &Client, tab_id: &str) -> Result<()> {
     let id = parse_tab_id("reset_device", tab_id)?;
     client
         .execute_cdp(id, "Emulation.clearDeviceMetricsOverride", None)
-        .await
-        .map(|_| ())
+        .await?;
+    let _ = client
+        .execute_cdp(
+            id,
+            "Emulation.setUserAgentOverride",
+            Some(json!({ "userAgent": "" })),
+        )
+        .await;
+    reload(client, tab_id).await
 }
 
 // ── Event capture (requires event subscription architecture) ────

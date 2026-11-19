@@ -677,18 +677,57 @@ impl super::Server {
 
     async fn handle_browser_viewport(&self, args: Value) -> anyhow::Result<Vec<Content>> {
         let reset = optional_bool(&args, "reset")?.unwrap_or(false);
+        let tab_id = args
+            .get("tab_id")
+            .map(|v| {
+                v.as_str()
+                    .ok_or_else(|| anyhow::anyhow!("tab_id must be a string"))
+            })
+            .transpose()?;
+        if let Some(tab_id) = tab_id {
+            if reset {
+                browser::reset_device(&self.client_snapshot(), tab_id).await?;
+                return Ok(vec![Content::text(
+                    json!({"applied_tab": tab_id, "reset": true}).to_string(),
+                )]);
+            }
+            let width = optional_u64(&args, "width")?;
+            let height = optional_u64(&args, "height")?;
+            match (width, height) {
+                (Some(w), Some(h)) => {
+                    browser::emulate_device(
+                        &self.client_snapshot(),
+                        tab_id,
+                        w as i64,
+                        h as i64,
+                        "",
+                        false,
+                    )
+                    .await?;
+                    return Ok(vec![Content::text(
+                        json!({"applied_tab": tab_id, "width": w, "height": h}).to_string(),
+                    )]);
+                }
+                _ => anyhow::bail!(
+                    "viewport width and height must be provided together, or pass reset=true"
+                ),
+            }
+        }
+
         if reset {
             browser::browser_viewport(&self.client_snapshot(), None, None).await?;
-            return Ok(vec![Content::text("Browser viewport reset".into())]);
+            return Ok(vec![Content::text(
+                json!({"applied_tab": null, "scope": "browser_window", "reset": true}).to_string(),
+            )]);
         }
 
         let width = optional_u64(&args, "width")?;
         let height = optional_u64(&args, "height")?;
         browser::browser_viewport(&self.client_snapshot(), width, height).await?;
-        Ok(vec![Content::text(match (width, height) {
-            (Some(width), Some(height)) => format!("Browser viewport set to {width}x{height}"),
-            _ => "Browser viewport updated".into(),
-        })])
+        Ok(vec![Content::text(
+            json!({"applied_tab": null, "scope": "browser_window", "width": width, "height": height})
+                .to_string(),
+        )])
     }
 
     async fn handle_browser_visibility(&self, args: Value) -> anyhow::Result<Vec<Content>> {
