@@ -347,18 +347,9 @@ jobs:
 
       - name: Generate release notes
         shell: bash
-        run: |
-          VERSION="${{ needs.validate-release.outputs.version }}"
-          HEADING="## [$VERSION]"
-          awk -v heading="$HEADING" '
-            index($0, heading) == 1 { found=1; next }
-            found && /^## \[/ { exit }
-            found { print }
-          ' CHANGELOG.md > release_notes.txt
-          if ! grep -Eq '[^[:space:]]' release_notes.txt; then
-            echo "CHANGELOG.md section for $VERSION is empty" >&2
-            exit 1
-          fi
+        env:
+          VERSION: ${{ needs.validate-release.outputs.version }}
+        run: node scripts/render-release-notes.js --version "$VERSION" --out release_notes.txt
 
       - name: Stage GitHub Release assets
         env:

@@ -206,6 +206,55 @@ if (!/claude plugin validate --strict \./.test(docs)) {
   fail("release docs must include strict Claude plugin validation");
 }
 
+const changelogPath = path.join(root, "CHANGELOG.md");
+const changelogZhPath = path.join(root, "CHANGELOG.zh-CN.md");
+const renderNotesPath = path.join(root, "scripts", "render-release-notes.js");
+if (!fs.existsSync(renderNotesPath)) {
+  fail("scripts/render-release-notes.js must exist");
+}
+if (!/node scripts\/render-release-notes\.js --version/.test(workflow)) {
+  fail("release.yml must render GitHub Release notes with scripts/render-release-notes.js");
+}
+if (!/CHANGELOG\.zh-CN\.md/.test(docs)) {
+  fail("release docs must document CHANGELOG.zh-CN.md");
+}
+if (!/scripts\/render-release-notes\.js/.test(docs)) {
+  fail("release docs must document scripts/render-release-notes.js");
+}
+
+function changelogHeadings(file) {
+  if (!fs.existsSync(file)) return null;
+  return fs
+    .readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => /^## \[[^\]]+\]/.test(line))
+    .map((line) => line.trim());
+}
+
+const headingsEn = changelogHeadings(changelogPath);
+const headingsZh = changelogHeadings(changelogZhPath);
+if (!headingsEn) {
+  fail("CHANGELOG.md must exist");
+} else if (!headingsZh) {
+  fail("CHANGELOG.zh-CN.md must exist");
+} else {
+  for (const heading of headingsEn) {
+    if (!headingsZh.includes(heading)) fail(`CHANGELOG.zh-CN.md is missing section ${heading}`);
+  }
+  for (const heading of headingsZh) {
+    if (!headingsEn.includes(heading)) fail(`CHANGELOG.md is missing section ${heading}`);
+  }
+}
+
+for (const [name, file] of [["CHANGELOG.md", changelogPath], ["CHANGELOG.zh-CN.md", changelogZhPath]]) {
+  if (!fs.existsSync(file)) continue;
+  const lines = read(file).split(/\r?\n/);
+  const indented = lines.findIndex((line) => /^ {2,}\S/.test(line));
+  if (indented >= 0) {
+    fail(`${name}:${indented + 1} is indented; keep changelog bullets on single lines without hard wraps`);
+  }
+}
+
 if (pkg.name !== "@delicious233/codex-browser-bridge") {
   fail("npm package name drifted from @delicious233/codex-browser-bridge");
 }

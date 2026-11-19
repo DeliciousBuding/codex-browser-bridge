@@ -14,7 +14,7 @@ This project uses explicit SemVer tags, a curated changelog, GitHub Release asse
 
 ## Changelog
 
-`CHANGELOG.md` follows the Keep a Changelog shape:
+`CHANGELOG.md` (English) and `CHANGELOG.zh-CN.md` (Chinese) follow the Keep a Changelog shape and carry the same `## [Unreleased]` and `## [X.Y.Z] - YYYY-MM-DD` headings:
 
 ```markdown
 ## [Unreleased]
@@ -27,7 +27,11 @@ This project uses explicit SemVer tags, a curated changelog, GitHub Release asse
 ### Security
 ```
 
-Use only sections that have entries. Keep pending changes under `Unreleased`, then move them into the release section in the release PR. Release automation requires a non-empty dated `## [X.Y.Z] - YYYY-MM-DD` section for the tag being released and extracts GitHub Release notes from that section.
+Use only sections that have entries. Keep pending changes under `Unreleased`, then move them into the release section in the release PR. Release automation requires a non-empty dated `## [X.Y.Z] - YYYY-MM-DD` section in `CHANGELOG.md` for the tag being released.
+
+Write one change per bullet and keep every bullet on a single line; do not hard-wrap at a fixed column. Streamline an entry instead of appending clauses, because GitHub Release notes render the same paragraphs in a narrower column.
+
+`node scripts/render-release-notes.js --version X.Y.Z [--prev-tag vA.B.C] [--out file]` renders the GitHub Release body. It reads both changelogs in order, rewrites relative Markdown links to the tagged repository tree, appends one shared `### Install` block, and adds a compare link to the previous SemVer tag (auto-detected from git tags unless `--prev-tag` is passed). A version missing from `CHANGELOG.zh-CN.md` is omitted cleanly instead of failing the render.
 
 ## Commit and PR Style
 
@@ -51,7 +55,7 @@ The release workflow must:
 5. Generate GitHub artifact attestations for all four binaries and the checksum file.
 6. Stage the checksum file as a workflow artifact for npm package embedding.
 7. If the npm version is already published, compare the current `checksums.txt` with the published npm package's embedded checksums before uploading release assets. Same-version reruns may only clobber GitHub Release assets when the binary hashes still match the package users already install.
-8. Create or update a draft GitHub Release from the changelog section and upload assets with clobber semantics so reruns can recover from partial failures.
+8. Create or update a draft GitHub Release from the section rendered by `scripts/render-release-notes.js` and upload assets with clobber semantics so reruns can recover from partial failures.
 9. Publish the GitHub Release before npm publish so the npm installer can download public binary assets as soon as the package is visible.
 10. Embed release checksums into the npm package and bundle the complete
     `skills/codex-browser/` tree, including its reference files, plus
@@ -122,6 +126,12 @@ Then verify package contents from the repository root:
 ```bash
 cd npm
 npm run check:package
+```
+
+Render and read the release notes before tagging:
+
+```bash
+node scripts/render-release-notes.js --version X.Y.Z
 ```
 
 `npm prepack` stages the root `README.md`, `LICENSE`, `skills/`, and `examples/`

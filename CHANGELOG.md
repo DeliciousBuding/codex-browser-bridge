@@ -2,426 +2,218 @@
 
 All notable changes to this project will be documented in this file.
 
+Format: one bullet per change, no hard line wraps. 中文版见 [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)。
+
 ## [Unreleased]
 
 ## [3.0.0] - 2026-11-19
 
-### Changed
+### Breaking
 
-- **Breaking:** The Claude plugin, manual client examples, and npm setup hint
-  now register Browser Use (`node_repl`) and Computer Use (`cua_repl`)
-  independently (`codex-browser` and `codex-computer`). Their native catalogs
-  replace the 66-tool `codex_*` catalog in those integrations. Pass
-  `--surface browser` explicitly for existing scripts or clients that still
-  need `codex_*` tools. See [docs/upgrade-v3.md](docs/upgrade-v3.md).
-- Trim the bundled skill to concise native-first routing (`SKILL.md` plus
-  `native-computer-use.md` and compatibility `official-parity.md`), removing
-  five orphaned 2.x `codex_*` reference files and the obsolete Go-era
-  `Makefile`.
-- Remove four unused legacy Rust library wrappers (`dom_cua_type`,
-  `get_resource_content`, `nav_and_wait`, `click_and_wait`) and remove the
-  `windows` crate from production dependencies (`CREATE_NO_WINDOW` is already
-  applied directly on `tokio::process::Command`; tests keep it as a Windows
-  dev-dependency).
+- Claude Code plugin, client examples, and npm setup now register native Browser Use (`codex-browser` / `node_repl`) and Computer Use (`codex-computer` / `cua_repl`) separately instead of the 66-tool `codex_*` catalog. Pass `--surface browser` explicitly if you still need `codex_*` tools. ([Upgrade Guide](https://github.com/DeliciousBuding/codex-browser-bridge/blob/v3.0.0/docs/upgrade-v3.md))
 
 ### Added
 
-- Relay the installed Codex Browser/Chrome `node_repl` with
-  `--surface native-browser`, using the same launcher and MCP forwarding as
-  native Computer Use, plus `browser_access_env` boolean diagnostics in
-  `discover`/`doctor`.
-- Add [docs/upgrade-v3.md](docs/upgrade-v3.md) covering the 2.x to 3.0.0
-  native-first transition.
+- Native Browser Use relay via `--surface native-browser` (`node_repl`), sharing the same launcher, MCP forwarding, and `discover`/`doctor` diagnostics as native Computer Use.
+
+### Changed
+
+- Trimmed the bundled skill to native-first routing (`SKILL.md`, `native-computer-use.md`, `official-parity.md`) and removed obsolete 2.x references, unused library wrappers, and the legacy `Makefile`.
 
 ### Fixed
 
-- Redact malformed `~/.codex/config.toml` parse errors to line numbers only so
-  private paths or tokens in host config are never echoed to stderr.
-- Keep filtering late `tools/list` catalog responses even after a client
-  cancels the request, avoid duplicate synthetic `turn_ended` calls after an
-  explicit host `turn_ended`, and tolerate missing `turn_ended` (`-32601`)
-  during session teardown.
-- Validate native CLI `call`/`batch` tool names, JSON object arguments, line
-  numbers, and `--mode cli` usage before launch discovery, and pass `Interrupt`
-  cleanup on failed CLI runs.
-- Report an unanswered native tool call as interrupted when its MCP connection
-  closes, and reject malformed `tools/call` IDs with `-32600` instead of
-  dropping them.
-- Report locator checkbox postcondition timeouts consistently without replaying
-  the click.
+- Redacted malformed `~/.codex/config.toml` parse errors to line numbers only so local paths or tokens are never printed to stderr.
+- Hardened native MCP lifecycle: late `tools/list` filtering after cancellation, deduplicated `turn_ended` teardown, early CLI argument validation, disconnect interruption reporting, and locator checkbox timeout handling.
 
 ## [2.1.1] - 2026-11-18
 
 ### Changed
 
-- Align the native Computer Use launcher with Codex CLI: preserve the host's
-  surface and trusted-service configuration, honor `env_vars` and the local
-  stdio environment policy, resolve Windows commands against the constructed
-  child `PATH` while forwarding `PATHEXT`, and apply configured startup/tool
-  timeouts plus enabled/disabled tool filters.
-- Unify native MCP relay and CLI/doctor on the same untyped JSON stdio
-  transport without an external MCP SDK dependency. CLI and doctor send Codex's
-  `2025-06-18` MCP client request with server negotiation and default 30/300s
-  startup/tool deadlines, while the MCP relay leaves handshake negotiation,
-  pagination traversal, interactive elicitation waits and request deadlines to
-  the receiving MCP host.
-- Follow bounded native `tools/list` pagination in CLI and doctor, preserve call
-  correlation metadata for every native tool call, and reject unused
-  `--image-dir` combinations before launch.
-- Computer Use `js` now uses every native surface enabled by the host launch
-  row; browser-specific network, tab and output policies do not wrap that
-  native surface.
-- Decouple client-to-native and native-to-client writes in the `--mode mcp`
-  relay with cancel-safe outbound queues so backpressure in one direction does
-  not block the opposite direction.
-- Expand browser official parity across existing tools: `codex_list_tabs`
-  `selected_only` (`Tabs.selected`), `codex_observe` / `codex_nav_and_wait` /
-  `codex_click_and_wait` `wait_until="networkidle"`, `url_glob` and safe
-  `url_regex` matchers in `codex_observe(action="wait_navigation")` and
-  `codex_wait_for_url`, log-level filtering (`levels`) in
-  `codex_observe(action="logs")`, same-origin iframe expansion
-  (`include_iframes=true`) in `codex_dom_snapshot`, and
-  `PlaywrightAPI.elementInfo` / padded element capture in `codex_locator` and
-  `codex_screenshot_element`.
+- Aligned the native Computer Use launcher with Codex CLI: it preserves the host surface and trusted-service config, honors `env_vars` and the local stdio environment policy, resolves Windows commands against the constructed child `PATH` with `PATHEXT`, and applies configured startup/tool timeouts and tool filters.
+- Unified native MCP relay and CLI/doctor on one untyped JSON stdio transport without an external MCP SDK; CLI and doctor negotiate `2025-06-18` with 30/300s startup/tool deadlines, while the relay leaves handshake negotiation, pagination, elicitation waits, and deadlines to the receiving host.
+- Followed bounded native `tools/list` pagination in CLI and doctor, preserved call correlation metadata for every native tool call, and rejected unused `--image-dir` combinations before launch.
+- Computer Use `js` now uses every native surface enabled by the host launch row; browser-specific network, tab, and output policies no longer wrap that surface.
+- Decoupled client-to-native and native-to-client writes in the `--mode mcp` relay with cancel-safe outbound queues so backpressure in one direction cannot block the other.
+- Expanded browser official parity: `selected_only` for `codex_list_tabs`, `networkidle` waits in `codex_observe`/`codex_nav_and_wait`/`codex_click_and_wait`, `url_glob` and safe `url_regex` matchers for `codex_wait_for_url`, log `levels` filtering, same-origin `include_iframes` snapshots, and padded element capture.
 
 ### Fixed
 
-- Apply the host's `enabled_tools`/`disabled_tools` policy consistently to
-  advertised catalogs, direct `tools/call` requests, and internal `turn_ended`
-  cleanup across both MCP relay and CLI modes.
-- Close child `stdin` before terminating a failed native CLI/doctor worker
-  startup, preserve the underlying error chain when CLI/doctor cleanup is not
-  confirmed, and fail the MCP relay when the native child closes `stdout`
-  unexpectedly.
-- Re-verify tab attachment before modifier-key release cleanup in
-  `input::keypress`, bound `pointer::scroll` (`mouseMoved` plus
-  `Input.synthesizeScrollGesture`) to a single operation deadline, and guard
-  `start_observation` failure rollback by connection epoch.
+- Applied the host `enabled_tools`/`disabled_tools` policy consistently to advertised catalogs, direct `tools/call` requests, and internal `turn_ended` cleanup in both relay and CLI modes.
+- Closed child `stdin` before failing native CLI/doctor startup, preserved the underlying error chain when cleanup is unconfirmed, and failed the relay when the native child closed `stdout` unexpectedly.
+- Re-verified tab attachment before modifier-key release in `input::keypress`, bounded `pointer::scroll` to a single deadline, and guarded `start_observation` rollback by connection epoch.
 
 ## [2.1.0] - 2026-11-18
 
 ### Added
 
-- Experimental, explicit `--surface computer` access to the installed native `cua_repl`
-  MCP service, with native schemas, application elicitation, images, metadata,
-  cancellation and owned worker cleanup.
-- Native CLI tools/call/batch, runtime discovery/doctor, and optional image
-  artifacts through `--image-dir`. Noninteractive CLI never approves apps.
+- Experimental `--surface computer` access to the installed native `cua_repl` MCP service, with native schemas, application elicitation, images, metadata, cancellation, and owned worker cleanup.
+- Native CLI `call`/`batch`, runtime discovery/doctor, and optional image artifacts through `--image-dir`; noninteractive CLI never approves apps.
 
 ### Fixed
 
-- Match the native Codex Browser client by enabling focus emulation after
-  every debugger attach, including claims and reconnects. Background clicks,
-  typing and screenshots no longer activate the selected tab or window.
-- Remove the automatic `Page.bringToFront` input fallback and its environment
-  workaround. Foreground activation remains an explicit user-requested tool.
-  Failed focus setup detaches and reports an error before dispatching input.
-- Bind successful attachment setup to the pipe generation so reconnecting
-  cannot send the first input with a stale debugger or focus cache.
-- Remove pending request registrations when an outer timeout cancels a call,
-  and allow attachment recovery to finish before the bounded pointer release.
-- Preserve native MCP extension fields and installed host service mappings.
-  Reject invalid call metadata per request and report interrupted sessions
-  with a nonzero exit status.
-- Finish bounded attach/focus setup before starting the observation producer,
-  allow bounded detach rollback, and avoid input release after expired setup.
-- Position the pointer before every native scroll gesture. Report missing
-  mouse-move acknowledgments as errors; background scroll timeouts remain
-  unknown outcomes and are never retried or worked around by activation.
+- Matched the native Codex Browser client by enabling focus emulation after every debugger attach, so background clicks, typing, and screenshots no longer activate the selected tab or window.
+- Removed the automatic `Page.bringToFront` input fallback; foreground activation stays an explicit user-requested tool, and failed focus setup detaches and reports an error before dispatching input.
+- Bound successful attachment setup to the pipe generation so reconnecting cannot send the first input with a stale debugger or focus cache.
+- Removed pending request registrations when an outer timeout cancels a call, and let attachment recovery finish before the bounded pointer release.
+- Preserved native MCP extension fields and installed host service mappings, rejected invalid call metadata per request, and reported interrupted sessions with a nonzero exit status.
+- Finished bounded attach/focus setup before starting the observation producer, allowed bounded detach rollback, and avoided input release after expired setup.
+- Positioned the pointer before every native scroll gesture; missing mouse-move acknowledgments are errors, while background scroll timeouts remain unknown outcomes and are never retried.
 
 ### Changed
 
-- Update pinned CI actions from reviewed dependency PRs #52, #53, #54 and #55.
-- Raise Rust MSRV to 1.88 for the native MCP SDK (`rmcp` 3.9.0).
-- Publish desktop acceptance separately from source builds: Linux ARM64 X11
-  passed the synthetic app workflow; Windows input requires an unlocked
-  desktop, while macOS GUI/TCC and Wayland remain unverified.
+- Updated pinned CI actions from reviewed dependency PRs #52, #53, #54, and #55.
+- Raised the Rust MSRV to 1.88 for native MCP support (`rmcp` 3.9.0).
+- Published desktop acceptance separately from source builds: Linux ARM64 X11 passed the synthetic app workflow, Windows input requires an unlocked desktop, and macOS GUI/TCC and Wayland remain unverified.
 
 ## [2.0.3] - 2026-11-17
 
 ### Fixed
 
-- Require complete discovery for automatic and family-only browser selection.
-  An unknown or unprobed endpoint can be another profile, so the bridge now
-  requires an exact `browser_id` when it cannot prove uniqueness.
-- Ignore disconnected transports and the explicit app-private IAB/MCP Apps
-  replies without treating ordinary timeouts or permission failures as stale.
-  Doctor distinguishes these cases in its endpoint status and counts.
+- Required complete discovery for automatic and family-only browser selection; when uniqueness cannot be proven, the bridge requires an exact `browser_id` because an unprobed endpoint can be another profile.
+- Ignored disconnected transports and app-private IAB/MCP Apps replies without treating ordinary timeouts or permission failures as stale; doctor distinguishes these cases in endpoint status and counts.
 
 ## [2.0.2] - 2026-11-17
 
 ### Fixed
 
-- Allow `select_browser_from_inventory` to select a unique matching live
-  browser extension even when other discovered `codex-browser-use` pipes or
-  sockets fail `getInfo` or time out (`failed_pipe_count` / `unprobed_pipe_count`
-  non-zero). Previously, ChatGPT Desktop's own `codex-browser-use-<uuid>` pipes
-  on Windows or stale `.sock` files on Linux caused auto-discovery and
-  `--browser-family` selection to fail with `browser inventory is incomplete`
-  even when a healthy Edge or Chrome extension host was live. The bridge now
-  logs a warning and proceeds when a unique live browser matches, still fails
-  closed on multiple live matches, and still reports `incomplete` when no live
-  browser is found.
+- Allowed `select_browser_from_inventory` to select a unique live extension while other pipes or sockets fail `getInfo`, which previously broke auto-discovery and `--browser-family` on Windows `codex-browser-use-<uuid>` pipes and stale Linux `.sock` files. The bridge now logs a warning when one live browser matches, still fails closed on multiple live matches, and still reports `incomplete` when none is found.
 
 ## [2.0.1] - 2026-11-16
 
 ### Fixed
 
-- Attach to the ChatGPT browser extension 1.26+ no longer fails with
-  `Cannot read properties of undefined (reading 'timeoutMs')`. The extension now
-  reads `params.networkPolicy` on every attach; the bridge sends the same
-  `{constraints: []}` default the official client uses, which installs no rules.
-  Every CDP tool was unusable without it.
+- Attaching to ChatGPT browser extension 1.26+ no longer fails with `Cannot read properties of undefined (reading 'timeoutMs')`; the bridge sends the official `{constraints: []}` network policy, which installs no rules, on every attach.
 
 ### Added
 
-- `--network-policy`, `CODEX_BRIDGE_NETWORK_POLICY`, and the `network_policy`
-  TOML key set the Browser Use network policy installed with each attach. Values
-  are the extension's own JSON shape and are validated against its budgets
-  (128 constraints, 4096 patterns, 64 KiB pattern text, timeout 1..30000 ms)
-  before the debugger is detached, so an invalid policy fails without first
-  breaking an attached tab.
+- `--network-policy`, `CODEX_BRIDGE_NETWORK_POLICY`, and the `network_policy` TOML key set the Browser Use network policy installed with each attach, validated against the extension budgets (128 constraints, 4096 patterns, 64 KiB pattern text, 1–30000 ms timeout) before the debugger detaches.
 
 ### Changed
 
-- The pinned official plugin baseline moves to `26.1111.21308` (23 interfaces,
-  153 members). `check-official-drift.js` now counts both command-registration
-  packing styles instead of reporting zero for current builds.
+- Moved the pinned official plugin baseline to `26.1111.21308` (23 interfaces, 153 members); `check-official-drift.js` counts both command-registration packing styles.
 
 ## [2.0.0] - 2026-10-25
 
-See [the upgrade guide](docs/upgrade-v2.md) for existing claims, configuration
-and continuation files. Tool names and counts remain unchanged.
+See [docs/upgrade-v2.md](docs/upgrade-v2.md) for existing claims, configuration, and continuation files. Tool names and counts are unchanged.
 
 ### Changed
 
-- CLI continuation files use v2, bind exact extension identity and reject legacy
-  or malformed tokens. OS-backed locks reject concurrent use; state is saved
-  before operations and survives uncertain disconnects.
-- `codex_claim_tab` requires expected title/URL from current user-tab enumeration;
-  numeric-only calls are rejected. Native claim lacks atomic snapshot comparison,
-  so a changed response reports possible ownership change without replay.
-- Explicit configuration errors/unknown keys fail; browser selectors use coherent
-  CLI/environment/file precedence. Diagnostic output distinguishes tool profiles,
-  attached-instance identity and permission-gated capability availability.
+- CLI continuation files use v2, bind exact extension identity, and reject legacy or malformed tokens; OS-backed locks reject concurrent use, state is saved before operations, and it survives uncertain disconnects.
+- `codex_claim_tab` requires the expected title and URL from current user-tab enumeration, and numeric-only calls are rejected; because native claim lacks atomic snapshot comparison, a changed response reports a possible ownership change without replay.
+- Explicit configuration errors and unknown keys now fail; browser selectors use coherent CLI/environment/file precedence, and diagnostics distinguish tool profiles, attached-instance identity, and permission-gated capabilities.
 
 ### Fixed
 
-- Incomplete discovery cannot prove an implicit unique browser. Rebind/finalize
-  exclude in-flight tools and unresolved old turns remain recoverable; rebinding
-  the same instance preserves its turn.
-- Explicit native no-route responses are counted as stale endpoints, not unknown
-  browser instances; timeout/permission failures still block implicit selection.
+- Incomplete discovery can no longer prove an implicit unique browser; rebind/finalize exclude in-flight tools, unresolved old turns stay recoverable, and rebinding the same instance preserves its turn.
+- Explicit native no-route responses count as stale endpoints rather than unknown browser instances; timeout and permission failures still block implicit selection.
 
 ## [1.13.0] - 2026-10-24
 
 ### Added
 
-- `codex_observe`: bounded tab/document event journal, cursor gaps, frame/loader
-  state, active dialog/chooser IDs and persistent rendered logs. Capture begins
-  before the action; no claim of complete pre-start history or OOPIF routing.
-- `codex_file_chooser`: explicit interception, opaque document-bound handles,
-  multiple mode and bounded colocated uploads. Remote host paths and verified
-  browser-level downloads remain unsupported.
-- Locator declarative and/or/has/has_not, bounded all specs and limited safe
-  regex; exact select descriptors/multiple, trial/force, sequential typing,
-  trusted setChecked and same-target async postcondition without replay.
-- Screenshot explicit bounded clip/scale; network URL substring filter; local
-  MCP guide resource.
+- `codex_observe`: bounded tab/document event journal with cursor gaps, frame/loader state, active dialog and chooser IDs, and persistent rendered logs; capture begins before the action.
+- `codex_file_chooser`: explicit interception with opaque document-bound handles, multiple mode, and bounded colocated uploads.
+- Locator and/or/has/has_not combinators, bounded specs, limited safe regex, exact select descriptors, trial/force, sequential typing, trusted `setChecked`, and same-target async postconditions without replay.
+- Screenshot bounded clip/scale, network URL substring filter, and a local MCP guide resource.
 
 ### Fixed
 
-- Pointer and keyboard input now activate a background tab before dispatching.
-  Chrome acknowledges synthesized input for an occluded tab without delivering
-  it, so a click could report success while the page state never changed. Set
-  `CODEX_BRIDGE_NO_AUTO_FOREGROUND=1` to keep the previous behaviour.
-- A dropped extension debugger no longer leaves CDP unusable for the rest of the
-  process. The extension reports `Debugger unattached`, which did not match the
-  session-invalid patterns, so the cached attachment was never cleared. A
-  sticky-window timeout now also invalidates the cache; short caller deadlines
-  used by input cleanup deliberately do not.
-- `codex_navigate` reports a failed navigation instead of returning success.
-  `Page.navigate` carries `net::ERR_*` in `errorText` without raising an error,
-  and a browser error page also reports `readyState=complete`; both are now
-  surfaced by `codex_navigate`, `codex_nav_and_wait` and `codex_wait_for_load`.
-  Malformed navigation results are protocol errors, and a failed URL probe is
-  no longer accepted as a completed load.
-- Keyboard events and `Input.insertText` use the non-replayed CDP path. A
-  `Debugger unattached` response can no longer duplicate a keydown or inserted
-  text while recovering the attachment.
-- `codex_hover` confirms that the target is observed in the `:hover` state
-  before reporting success; a dispatched-but-undelivered pointer move now fails.
-- `codex_console_logs` and `codex_network_monitor` capture real events again.
-  The extension delivers CDP notifications inside an `onCDPEvent` envelope,
-  which the read loop now unwraps; both tools previously returned
-  `log_count: 0` / an empty request list while reporting success. Captures are
-  also scoped to the requested tab before byte accounting, so a noisy
-  neighbouring tab can no longer produce an empty result.
+- Pointer and keyboard input activate a background tab before dispatching, because Chrome acknowledges synthesized input for an occluded tab without delivering it; `CODEX_BRIDGE_NO_AUTO_FOREGROUND=1` restores the previous behaviour.
+- A dropped extension debugger now clears the cached attachment, and a sticky-window timeout also invalidates the cache; short caller deadlines used by input cleanup deliberately do not.
+- `codex_navigate`, `codex_nav_and_wait`, and `codex_wait_for_load` surface `net::ERR_*` navigation results and browser error pages instead of reporting success.
+- Keyboard events and `Input.insertText` use the non-replayed CDP path, so attachment recovery cannot duplicate a keydown or inserted text.
+- `codex_hover` confirms the target reaches the `:hover` state before reporting success.
+- `codex_console_logs` and `codex_network_monitor` unwrap the extension's `onCDPEvent` envelope and scope captures to the requested tab before byte accounting.
 
 ### Changed
 
-- Exports and page assets share bounded acquisition/output budgets, strict
-  explicit directories, staging and atomic no-overwrite publication. Results
-  distinguish bridge-host files from browser downloads. Filesystems lacking
-  the atomic contract fail without a destructive fallback.
-- Navigation composites arm before action and wait for commit, DOMContentLoaded
-  or load. Navigation/dialog/file mutations do not replay on ambiguous errors.
-  Shared observation producers are not disabled by timed captures.
-
-- `call` and `batch` end the browser turn on exit by default, including the
-  failure path, so a tab can no longer be left owned by a process that exited.
-  `--keep-turn` opts out, and `--session-file` keeps one turn across separate
-  `call`/`batch` commands. Ctrl-C and SIGTERM follow the same finalize policy;
-  `--keep-turn` and an unfinalized session file leave the turn open.
-- `--session-file` is rejected outside `call`/`batch`, and `--finalize` conflicts
-  with `--keep-turn`. A command rejected before dialing no longer creates a
-  phantom session file or deletes an existing one, and session-file write or
-  removal failures now make the command fail instead of logging a warning.
-- The mock-transport client tests (read loop, reconnect, event routing) now run
-  on Windows as well as Linux. They were gated behind `not(windows)`, which left
-  the primary platform's event dispatch untested.
-- `codex_browser_management` requires `confirm=true` for methods that remove or
-  discard browser state (`remove`, `delete`, `clear`, `close`, `discard`).
-- `CODEX_BRIDGE_SOCKET_DIR` is now an explicit override on Unix and
-  `$XDG_RUNTIME_DIR/codex-browser-use` is tried before `/tmp`; returned socket
-  paths identify the directory that produced them.
-- Configuration precedence now matches the documented order: CLI flags >
-  environment > config file > default. Previously the config file overrode the
-  environment for profile, browser selector, upload base and content limits.
+- Exports and page assets share bounded acquisition/output budgets with strict explicit directories, staging, and atomic no-overwrite publication; filesystems lacking the atomic contract fail without a destructive fallback.
+- Navigation composites arm before the action and wait for commit, DOMContentLoaded, or load; navigation, dialog, and file mutations do not replay on ambiguous errors.
+- `call` and `batch` end the browser turn on exit by default, including failures; `--keep-turn` opts out and `--session-file` keeps one turn across separate commands, with Ctrl-C and SIGTERM following the same policy.
+- `--session-file` is rejected outside `call`/`batch`, `--finalize` conflicts with `--keep-turn`, and a command rejected before dialing no longer creates a phantom session file or deletes an existing one.
+- Mock-transport client tests (read loop, reconnect, event routing) now run on Windows as well as Linux.
+- `codex_browser_management` requires `confirm=true` for methods that remove or discard browser state (`remove`, `delete`, `clear`, `close`, `discard`).
+- `CODEX_BRIDGE_SOCKET_DIR` is an explicit Unix override, and `$XDG_RUNTIME_DIR/codex-browser-use` is tried before `/tmp`; returned socket paths identify their directory.
+- Configuration precedence now matches the documented order: CLI flags > environment > config file > default.
 
 ## [1.12.0] - 2026-10-24
 
 ### Added
 
-- This release registers 64 MCP tools (`basic` 45 / `network` 63 / `full` 64).
-  `codex_locator` adds strict CSS/role/text/label/placeholder/test-id reads and
-  actions; iframe and chained-locator semantics remain partial. `codex_cua_move`
-  adds pointer movement and coordinate/backend-node clicks support double-click.
-- CUA pointer parameters now follow the official surface: button 1..5,
-  `keypress`/`keys` modifiers, `scrollX`/`scrollY`, and drag `path[]`. One
-  non-replayed CDP dispatcher serves CUA and locator actions and attempts a
-  release after partial press/move failures. CSS `codex_click` and
-  `codex_hover` now use the locator hit test plus that pointer path instead of
-  JavaScript `click()` or synthetic hover events. Scroll uses the official
-  `Input.synthesizeScrollGesture` path. Current extension builds apply but do
-  not acknowledge `mouseMoved`, so movement waits in a bounded no-ack window;
-  drag latency therefore scales with the supplied path length.
-- Shell `tools [NAME]`, `call NAME [JSON]`, and same-session JSONL `batch` commands
-  reuse MCP profiles and handlers. Output defaults to 16384 bytes per result and
-  summarizes images; `--finalize` attempts turn cleanup even after failure.
-- Linux `/tmp/codex-browser-use/*.sock` discovery and validated Unix transport,
-  with socket owner/mode, directory and peer-UID checks. Doctor adds transport
-  kind/path while retaining legacy `pipe_*` fields.
-- Native Linux GNU x64/arm64 CI/release jobs and npm package selection
-  (glibc >= 2.39 for release binaries); existing Windows asset names remain stable.
-  Native gates and release builds do not establish live Linux extension
-  compatibility or macOS runtime support.
-- Browser-instance discovery and exact binding. `codex_list_browsers` reports
-  stable extension instance IDs, browser family, profile metadata,
-  capabilities, and pipe transport; `codex_bind_browser` pins one instance.
-- Fail-closed multi-instance selection and instance-pinned reconnect. The
-  bridge no longer silently switches between two live Edge/Chrome profiles.
-- Official capability alignment for browser history, Chromium management,
-  viewport override, visibility, tab handoff/deliverable marks, and full-page
-  screenshots.
-- An official surface drift baseline and `scripts/check-official-drift.js` for
-  tracking changes to the bundled Codex Browser plugin API, command catalog,
-  `browser`/`chrome` package manifests, and Chrome/Edge extension-family catalog.
-- `docs/official-parity.md` records which official capabilities are bridged,
-  partial, conditional, app-private, or out of scope.
+- 64 MCP tools (`basic` 45 / `network` 63 / `full` 64): `codex_locator` adds strict CSS/role/text/label/placeholder/test-id reads and actions, `codex_cua_move` adds pointer movement, and coordinate or backend-node clicks support double-click.
+- CUA pointer parameters follow the official surface (`button` 1..5, `keypress`/`keys` modifiers, `scrollX`/`scrollY`, drag `path[]`), served by one non-replayed CDP dispatcher that releases after partial press/move failures; CSS `codex_click` and `codex_hover` use the locator hit test and scroll uses `Input.synthesizeScrollGesture`.
+- Shell `tools`, `call`, and same-session `batch` commands reuse MCP profiles and handlers, default to 16384 bytes per result, summarize images, and support `--finalize` cleanup even after failure.
+- Linux `/tmp/codex-browser-use/*.sock` discovery with socket owner/mode, directory, and peer-UID checks; doctor reports transport kind and path while retaining legacy `pipe_*` fields.
+- Native Linux GNU x64/arm64 CI and release jobs plus npm package selection (glibc >= 2.39 for release binaries); Windows asset names stay stable.
+- Browser-instance discovery and exact binding: `codex_list_browsers` reports stable instance IDs, browser family, profile metadata, capabilities, and transport, while `codex_bind_browser` pins one instance with fail-closed multi-instance selection and instance-pinned reconnect.
+- Official capability alignment for browser history, Chromium management, viewport override, visibility, tab handoff/deliverable marks, and full-page screenshots.
+- `docs/official-parity.md` and `scripts/check-official-drift.js` track changes to the bundled Codex Browser plugin API, command catalog, package manifests, and extension-family catalog.
 
 ### Changed
 
-- Documented bridge-owned surfaces separately from official APIs in
-  `docs/official-parity.md`: CUA input now follows official field names and
-  semantics, AX and backend DOM IDs stay distinct, and clipboard, WebMCP,
-  page-assets, exports, and the unrestricted evaluate escape hatch keep explicit
-  bridge contracts instead of imitating app-private behavior.
-- The `basic` and `network` profiles include browser discovery/binding, strict
-  locators, history, management, viewport, visibility, handoff marks, clipboard,
-  WebMCP, and content export so lower-token clients retain the new entry points.
+- Documented bridge-owned surfaces separately from official APIs: CUA input follows official field names, AX and backend DOM IDs stay distinct, and clipboard, WebMCP, page assets, exports, and the evaluate escape hatch keep explicit bridge contracts.
+- The `basic` and `network` profiles include discovery/binding, strict locators, history, management, viewport, visibility, handoff marks, clipboard, WebMCP, and content export.
 
 ### Fixed
 
-- Interactive CLI `try` commands now preserve raw JSON argument strings.
-- Doctor output now includes browser family, extension instance ID, extension
-  ID, and profile name for every connected pipe.
-- Browser rebinding closes the old transport and requires prior finalization or
-  explicit `end_previous_turn=true` when tabs are owned, avoiding abandoned turns.
-- `codex_finalize` sends official `turnEnded` and preserves marked
-  handoff/deliverable tabs; a disconnected pipe is not successful turn cleanup.
-- Accessibility lookup returns backend DOM `node_id`, separate AX IDs and an
-  `actionable` flag; AX-only nodes are not passed to DOM actions.
-- Connection verification and subsequent requests now use the same session and
-  turn IDs.
-- Doctor separates stale transport-name notes from health warnings and explains
-  ambiguous same-family instances.
+- Interactive CLI `try` commands preserve raw JSON argument strings.
+- Doctor output includes browser family, extension instance ID, extension ID, and profile name for every connected pipe.
+- Browser rebinding closes the old transport and requires prior finalization or explicit `end_previous_turn=true` when tabs are owned.
+- `codex_finalize` sends official `turnEnded` and preserves marked handoff/deliverable tabs; a disconnected pipe is not successful turn cleanup.
+- Accessibility lookup returns backend DOM `node_id`, separate AX IDs, and an `actionable` flag; AX-only nodes are not passed to DOM actions.
+- Connection verification and subsequent requests use the same session and turn IDs.
+- Doctor separates stale transport-name notes from health warnings and explains ambiguous same-family instances.
 
 ### Security
 
-- Updated `tokio` to `1.53.3` to address `RUSTSEC-2026-0386`.
+- Updated `tokio` to `1.53.3` for `RUSTSEC-2026-0386`.
 
 ## [1.11.4] - 2026-10-22
 
 ### Changed
 
-- The Claude plugin now launches the npm package through a version-pinned
-  `npx` entry, so the one-command marketplace install works without a prior
-  global npm install. A global install remains a warm-path option and is still
-  required for the manual MCP examples.
-- README, architecture, contributor, release, and example docs now describe
-  the plugin/binary boundary consistently: the plugin ships the skill and MCP
-  configuration, while the pinned npm package supplies the Windows binary on
-  first use.
-- The plugin-surface check now enforces the `npx` package pin and the
-  user-facing one-command install string in both READMEs.
+- The Claude plugin launches the npm package through a version-pinned `npx` entry, so the one-command marketplace install works without a prior global npm install; a global install remains a warm-path option for the manual MCP examples.
+- README, architecture, contributor, release, and example docs describe the plugin/binary boundary consistently: the plugin ships the skill and MCP configuration, while the pinned npm package supplies the Windows binary on first use.
+- The plugin-surface check enforces the `npx` package pin and the one-command install string in both READMEs.
 
 ## [1.11.3] - 2026-10-21
 
 ### Changed
 
-- The bridge remains a generic MCP server with the complete 52-tool surface and
-  dual-era MCP support. Claude Code remains the primary plugin distribution
-  path, including progressive skill loading and tool-search deferral.
-- Installer hints now direct Codex / ChatGPT desktop users to their native
-  browser integration instead of installing a duplicate bridge plugin.
+- The bridge remains a generic MCP server with the complete 52-tool surface and dual-era MCP support; Claude Code remains the primary plugin distribution path with progressive skill loading and tool-search deferral.
+- Installer hints direct Codex / ChatGPT desktop users to their native browser integration instead of installing a duplicate bridge plugin.
 
 ### Removed
 
-- Removed the portable Agent Plugins / OpenAI manifest, `.codex-plugin/`
-  compatibility manifest, repo-scoped Codex marketplace, and associated
-  install instructions. Codex already controls the existing browser extension
-  directly and does not need this bridge installed as a Codex plugin.
+- Removed the portable Agent Plugins / OpenAI manifest, `.codex-plugin/` compatibility manifest, repo-scoped Codex marketplace, and associated install instructions.
 
 ## [1.11.2] - 2026-10-21
 
 ### Added
 
-- Installable plugin distribution for Claude Code, ChatGPT desktop, and Codex. The repository now exposes a portable Agent Plugins manifest, Codex compatibility manifest, Claude marketplace, Claude plugin manifest, and repo-scoped Codex marketplace while retaining the complete 52-tool MCP server.
-- Claude Code MCP tool search integration. `codex_doctor` is the only tool marked `anthropic/alwaysLoad`; the remaining schemas stay deferred for progressive discovery.
-- The agent skill is now a progressive bundle: `SKILL.md` handles routing and core workflow, while four task references are loaded only when relevant.
+- Installable plugin distribution for Claude Code, ChatGPT desktop, and Codex via a portable Agent Plugins manifest, Codex compatibility manifest, Claude marketplace, and Claude plugin manifest, retaining the complete 52-tool MCP server.
+- Claude Code MCP tool-search integration: `codex_doctor` is the only `anthropic/alwaysLoad` tool and the remaining schemas stay deferred.
+- The agent skill became a progressive bundle: `SKILL.md` handles routing and core workflow while four task references load only when relevant.
 
 ### Changed
 
-- Aligned the remaining runtime diagnostics, package metadata, architecture, contributor, security, and agent-skill wording with the current ChatGPT desktop app and ChatGPT browser extension names.
-- Documented the current compatibility matrix, the one-pipe-per-session boundary, and event-driven maintenance expectations.
-- Installer and doctor-suggested MCP configs now recommend the 34-tool `basic` profile instead of exposing all 52 tools by default. The bridge's built-in profile remains `full` when no profile is configured.
-- Plugin installs default to `full` because tool-search-capable clients defer schemas; manual MCP wiring keeps `basic` as the low-token fallback. No MCP tools were removed or replaced by a second routing layer.
-- npm installation hints now recommend the Claude Code plugin first, then the ChatGPT desktop / Codex marketplace, with the skill copy and manual MCP JSON paths retained as explicit fallbacks.
-- Pinned GitHub Actions updates merged during this maintenance cycle: `actions/attest` 4.2.2, `codecov/codecov-action` 7.1.1, and `taiki-e/install-action` 2.87.21.
+- Aligned runtime diagnostics, package metadata, architecture, contributor, security, and agent-skill wording with the current ChatGPT desktop app and browser extension names.
+- Installer and doctor-suggested MCP configs recommend the 34-tool `basic` profile; the built-in default stays `full`, and plugin installs default to `full` because tool-search-capable clients defer schemas.
+- npm installation hints recommend the Claude Code plugin first, then the ChatGPT desktop / Codex marketplace, with skill copy and manual MCP JSON as fallbacks.
+- Pinned GitHub Actions updates: `actions/attest` 4.2.2, `codecov/codecov-action` 7.1.1, and `taiki-e/install-action` 2.87.21.
 
 ### Fixed
 
-- Plugin packaging reuses one root `mcp.json` for portable, Codex, and Claude surfaces. This prevents Claude from auto-loading a second project-level `.mcp.json` copy and starting the same MCP endpoint twice.
-- The live E2E harness drains doctor stdout/stderr concurrently instead of waiting on a full pipe buffer before reading.
-- Windows npm command shims (`.cmd`, `.bat`, and the extensionless npm shim) now count as spawn-ready in doctor diagnostics even when they wrap a different install path than the running executable.
-- Doctor pipe diagnostics now report current browser-extension metadata (`Edge 1.26.x`, for example) instead of leaving the browser label empty for the current extension response shape.
+- Plugin packaging reuses one root `mcp.json`, so Claude no longer auto-loads a second project-level copy and starts the MCP endpoint twice.
+- The live E2E harness drains doctor stdout/stderr concurrently instead of waiting on a full pipe buffer.
+- Windows npm command shims (`.cmd`, `.bat`, and the extensionless shim) count as spawn-ready even when they wrap a different install path.
+- Doctor pipe diagnostics report current browser-extension metadata instead of leaving the browser label empty.
 
 ## [1.11.1] - 2026-08-19
 
 ### Added
 
-- npm installer now honors `HTTPS_PROXY` / `https_proxy` (with `ALL_PROXY` fallback and `NO_PROXY` exclusions) when downloading release binaries, tunneling through the proxy with HTTP CONNECT. Fixes `npm i -g` postinstall failures on machines that can only reach GitHub through a proxy.
+- npm installer honors `HTTPS_PROXY` / `https_proxy` (with `ALL_PROXY` fallback and `NO_PROXY` exclusions) when downloading release binaries, using HTTP CONNECT tunneling, which fixes `npm i -g` postinstall failures on proxy-only machines.
 
 ### Notes
 
@@ -431,25 +223,21 @@ and continuation files. Tool names and counts remain unchanged.
 
 ### Added
 
-- **MCP protocol revision `2026-07-28` support (dual-era server).** The bridge now serves both protocol eras from one binary:
-  - Legacy era (`2024-11-05` … `2025-11-25`): the classic stdio lifecycle. `initialize` now negotiates the protocol version — supported revisions are echoed back, unknown requests get the newest legacy revision offered. The legacy wire format is byte-identical to v1.10.x, so existing clients see no change.
-  - Modern era (`2026-07-28`, SEP-2567/SEP-2575): stateless requests. Requests carrying `params._meta["io.modelcontextprotocol/protocolVersion"]` are answered without an `initialize` handshake. Results carry the required `resultType` field, server identity in `_meta["io.modelcontextprotocol/serverInfo"]`, and `ttlMs`/`cacheScope` cache hints on cacheable endpoints (`tools/list`, `resources/list`, `resources/read`, `prompts/list`, SEP-2549). Unsupported versions return `UnsupportedProtocolVersionError` (-32022) with the supported list.
-  - `server/discover` (required for servers under the new revision) advertises supported versions, capabilities, and instructions; it is also answered without version metadata so modern clients can probe compatibility on stdio.
-  - `ping` is answered for legacy clients only; the 2026-07-28 revision removed it.
-- **MCP tool annotations** (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on all 52 tools, introduced by revision `2025-03-26`. Clients use the hints for approval UX and retry decisions; `openWorldHint` is always true because every tool reaches a live browser.
-- `initialize` results now include natural-language `instructions` describing effective bridge usage.
+- MCP protocol revision `2026-07-28` support (dual-era server): the legacy era (`2024-11-05` … `2025-11-25`) keeps the classic stdio lifecycle with version negotiation and a byte-identical wire format to v1.10.x, while modern-era requests carrying `params._meta["io.modelcontextprotocol/protocolVersion"]` are answered statelessly with `resultType`, server identity in `_meta`, and `ttlMs`/`cacheScope` hints; unsupported versions return `-32022`.
+- `server/discover` advertises supported versions, capabilities, and instructions and is answered without version metadata so modern clients can probe stdio compatibility; `ping` is answered for legacy clients only.
+- MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on all 52 tools; `openWorldHint` is always true because every tool reaches a live browser.
+- `initialize` results include natural-language `instructions` describing effective bridge usage.
 
 ### Changed
 
-- New `src/mcp/lifecycle.rs` module owns version negotiation, era detection, modern result framing, and spec error envelopes.
-- Verified against the official `2026-07-28` schema (`DiscoverResult`, `CacheableResult`, `ResultType`, error-code allocation `-32020`…`-32099`).
-- Verified against Codex v0.148.x: extension capabilities (`viewport`, `pageAssets`, `browserTabMentions` protocol v1) remain fully covered by the existing tool surface.
+- New `src/mcp/lifecycle.rs` owns version negotiation, era detection, modern result framing, and spec error envelopes.
+- Verified against the official `2026-07-28` schema and Codex v0.148.x extension capabilities (`viewport`, `pageAssets`, `browserTabMentions` protocol v1).
 
 ## [1.10.1] - 2026-07-14
 
 ### Fixed
 
-- `codex_evaluate` now sets `awaitPromise=true` on `Runtime.evaluate`, so async expressions like `fetch(...).then(...)` return real values instead of an empty Promise object `{}`.
+- `codex_evaluate` sets `awaitPromise=true` on `Runtime.evaluate`, so async expressions such as `fetch(...).then(...)` return real values instead of an empty Promise object.
 - `codex_evaluate` surfaces `exceptionDetails` as a tool error instead of returning a silent partial payload.
 
 ### Documentation
@@ -460,87 +248,52 @@ and continuation files. Tool names and counts remain unchanged.
 
 ### Changed
 
-- Made `codex_file_input` require an explicit `CODEX_BRIDGE_UPLOAD_BASE` instead of falling back to the process working directory.
-- Routed npm prerelease publishes to the `next` dist-tag while keeping stable releases on `latest`.
-- Tightened navigation URL validation to only allow `http://` and `https://`.
-- Normalized URL inputs before sending them to CDP and rejected malformed HTTP(S) URLs with raw whitespace, control characters, backslashes, or missing hosts.
-- Added bounded duration validation for MCP waits, captures, and form-fill delays.
-- Restricted generic CDP execution to an explicit low-level allowlist and blocked raw methods that bypass dedicated safety wrappers.
-- Added `codex_doctor` to the `basic` tool profile.
+- `codex_file_input` requires an explicit `CODEX_BRIDGE_UPLOAD_BASE` instead of falling back to the working directory.
+- npm prereleases publish to the `next` dist-tag while stable releases stay on `latest`.
+- Navigation accepts only `http://` and `https://`, normalizes URLs before CDP, and rejects raw whitespace, control characters, backslashes, or missing hosts.
+- Added bounded duration validation for MCP waits, captures, and form-fill delays, and added `codex_doctor` to the `basic` profile.
+- Restricted generic CDP execution to an explicit low-level method allowlist that blocks raw methods bypassing dedicated safety wrappers.
 
 ### Fixed
 
-- Bounded MCP stdio line reads to reject oversized JSON-RPC messages before unbounded buffer growth.
-- Validated cookie-tool URL filters with the same `http://` and `https://` scheme boundary used by navigation.
-- Skipped page asset content fetches when advertised resource sizes already exceed the configured byte budget.
-- Tightened raw CDP execution from broad domain prefixes to an explicit method allowlist.
-- Added page asset content fetch timeouts and skipped unknown-size resources before requesting content.
-- Added the Ubuntu mock harness to the release workflow gate before asset creation.
-- Staged GitHub Release assets through a recoverable draft/update path, then published the GitHub Release before npm so npm installs can immediately download public binaries.
-- Validated release jobs against the exact annotated tag commit SHA and required non-empty dated changelog sections for release notes.
-- Pinned release-workflow actions to full commit SHAs for the jobs that hold release write or OIDC permissions.
-- Pinned CI and supply-chain workflow actions to full commit SHAs and added a CI-enforced pin scanner.
-- Added a CI/release-enforced agent-surface drift check for tool docs, profile counts, packaged examples, and npm skill/example contents.
-- Made release validation fail early on empty changelog sections and made npm publish reruns skip already-published versions only when the expected dist-tag is correct.
-- Updated `crossbeam-epoch` in the lockfile to clear `RUSTSEC-2026-0204` from the dev-dependency benchmark chain.
-- Added workflow concurrency controls to cancel stale PR validation runs and serialize same-tag release runs.
-- Retired per-tab client locks on tab close/finalize and normalized invalid page asset sizes as unknown to avoid long-lived agent sessions accumulating stale state or fetching misleadingly sized resources.
-- Retired idle per-tab locks after attach failures and made `codex_print_pdf` use bounded CDP streaming with explicit stream close instead of holding unbounded PDF base64 in memory.
-- Hardened the live E2E script timeout path and added a CI-covered fake bridge timeout harness so killed MCP bridge processes do not trigger blocking stderr reads or follow-up cleanup requests; stderr is now drained asynchronously so verbose bridge logs cannot block MCP responses.
-- Bundled multi-client MCP config examples in the npm package and expanded postinstall hints for Claude Code, Cursor, OpenClaw, Hermes Agent, and skill-aware agents.
-- Trimmed the published npm package scripts to `postinstall` only while preserving repo-local dev scripts, so installed tarballs do not advertise helper scripts that are not shipped.
-- Switched packaged Cursor and Hermes Agent examples to the full profile so default templates expose all 52 documented MCP tools.
-- Made explicit config paths authoritative, rejected relative upload paths, cleaned pending CDP requests on page asset timeouts, and normalized fetched asset content to base64.
-- Fixed npm package content checks so CI and release jobs verify the bundled agent skill before publish.
-- Included README and LICENSE in the npm package tarball.
-- Aligned Dependabot with the Rust 1.85 MSRV by holding back `criterion` minor updates that require newer Rust.
+- Bounded MCP stdio line reads and validated cookie-tool URL filters with the same `http`/`https` boundary used by navigation.
+- Skipped page asset content fetches when advertised sizes exceed the byte budget, added fetch timeouts, and normalized fetched content or unknown sizes.
+- Staged GitHub Release assets through a recoverable draft/update path and published the GitHub Release before npm so installs can download public binaries immediately.
+- Validated release jobs against the exact annotated tag commit SHA and required non-empty dated changelog sections.
+- Pinned release, CI, and supply-chain workflow actions to full commit SHAs and added a CI-enforced pin scanner plus an agent-surface drift check.
+- Made release validation fail early on empty changelog sections and let npm reruns skip published versions only when the expected dist-tag is correct.
+- Added workflow concurrency controls to cancel stale PR runs and serialize same-tag releases.
+- Retired per-tab client locks on close, finalize, and attach failure, and normalized invalid page asset sizes so long sessions do not accumulate stale or misleading state.
+- Streamed `codex_print_pdf` through bounded CDP with explicit stream close instead of holding unbounded base64 in memory.
+- Drained E2E stderr asynchronously and covered the timeout path with a CI fake-bridge harness.
+- Bundled multi-client MCP config examples in the npm package, trimmed published scripts to `postinstall` only, verified the bundled skill before publish, and included README and LICENSE in the tarball.
+- Made explicit config paths authoritative, rejected relative upload paths, cleaned pending CDP requests on asset timeouts, and normalized fetched asset content to base64.
+- Updated `crossbeam-epoch` to clear `RUSTSEC-2026-0204` from the dev-dependency benchmark chain, and aligned Dependabot with the Rust 1.85 MSRV by holding back `criterion` minor updates.
 
 ### Documentation
 
-- Documented release/tag/changelog/npm provenance policy.
-- Clarified multi-client configuration examples, upload-base setup, profile behavior, and numeric tab ID schemas.
+- Documented release/tag/changelog/npm provenance policy, multi-client configuration examples, upload-base setup, profile behavior, and numeric tab ID schemas.
 
 ## [1.9.1] - 2026-06-21
 
-The first release since v1.7.0. Tool count goes from 28 to 52, and agents can now watch what a page does — not just drive it.
+First release since v1.7.0. Tool count goes from 28 to 52, and agents can now watch what a page does, not just drive it.
 
-### What's new
+### Added
 
-**See live traffic and logs.** A CDP event-subscription layer lets tools receive server-pushed events that were previously dropped on the read loop. Two tools use it:
-- `codex_network_monitor` — captures request↔response pairs as `[{url, method, status, mime_type}]` over a window. Useful for reverse-engineering APIs and debugging XHR/fetch.
-- `codex_console_logs` — captures `console.*` output over a window.
-
-**Background tabs no longer hang.** Chrome throttles background tabs, and CDP calls on them used to time out silently after 60s. Two fixes:
-- `codex_bring_to_front` activates a tab via `Page.bringToFront`.
-- Sticky CDP calls now use a 20s budget instead of sharing the 60s total, so a stuck call fails fast instead of burning the whole timeout.
-
-**More ways to read and interact.** `codex_wait_for_element` and `codex_wait_for_url` (SPAs), `codex_hover` / `codex_select_option` / `codex_drag`, `codex_storage` (local + session), `codex_get_url` / `codex_get_title`, `codex_screenshot_element`, `codex_print_pdf`, `codex_performance_metrics`, `codex_delete_cookies`, `codex_emulate_device`.
-
-**Smaller screenshots.** `codex_screenshot` now takes `format` (png/jpeg/webp) and `quality`. JPEG is much smaller than PNG, which matters when the model pays per token.
-
-**Terminal diagnostics.** `codex-browser-bridge --mode doctor` prints pipe health, Chrome version, and latency as JSON, without needing an agent.
-
-### New tools (24 since v1.7.0)
-
-| Group | Tools |
-|---|---|
-| Waiting | `wait_for_element`, `wait_for_url` |
-| Page info | `get_url`, `get_title`, `performance_metrics`, `emulate_device` |
-| Capture | `screenshot_element`, `print_pdf` |
-| Interaction | `hover`, `select_option`, `drag` |
-| State & network | `storage`, `delete_cookies`, `network_monitor`, `console_logs` |
-| Reliability | `bring_to_front` |
-| Earlier this cycle (v1.9.0) | `file_input`, `dialog`, `find_element`, `click_element`, `nav_and_wait`, `click_and_wait`, `form_fill`, `doctor` |
-
-### Architecture
-
-- **Event subscription** — the read loop (`client.rs`) now routes frames that carry a `method` and no `id` to subscribers, instead of dropping them. New `subscribe_events` / `unsubscribe_events` API. Foundation for `network_monitor`, `console_logs`, and future event-based tools.
-- **Structured network monitoring** — pairs `Network.requestWillBeSent` + `responseReceived` by `requestId`, returning a clean list instead of a raw event dump.
-- **Sticky-attach fast timeout** — silence past 20s now means the tab is background-throttled; we fall through to a full re-attach instead of waiting the full 60s.
+- Event subscription layer routes server-pushed CDP events to subscribers: `codex_network_monitor` captures request↔response pairs as `[{url, method, status, mime_type}]`, and `codex_console_logs` captures `console.*` output.
+- `codex_bring_to_front` activates a background tab via `Page.bringToFront`, and sticky CDP calls use a 20s budget instead of sharing the 60s total so throttled tabs fail fast.
+- `codex_wait_for_element`, `codex_wait_for_url`, `codex_hover`, `codex_select_option`, `codex_drag`, `codex_storage`, `codex_get_url`, `codex_get_title`, `codex_screenshot_element`, `codex_print_pdf`, `codex_performance_metrics`, `codex_delete_cookies`, and `codex_emulate_device`.
+- `codex_screenshot` accepts `format` (png/jpeg/webp) and `quality`; JPEG output is much smaller than PNG.
+- `codex-browser-bridge --mode doctor` prints pipe health, Chrome version, and latency as JSON without an agent.
 
 ### Fixed
 
-- Event subscription previously sent only `params` to subscribers (no `method`), so `network_monitor` could not tell event types apart. Subscribers now receive the whole frame.
+- Event subscription previously sent only `params` to subscribers, so `network_monitor` could not tell event types apart; subscribers now receive the whole frame.
+
+### Architecture
+
+- The read loop routes frames carrying a `method` and no `id` to subscribers instead of dropping them, exposed as `subscribe_events`/`unsubscribe_events`; network monitoring pairs request and response events by `requestId` into a clean list.
+- Silence past 20s on a sticky attach now means the tab is background-throttled, so the call falls through to a full re-attach instead of waiting the full 60s.
 
 ### Profiles
 
@@ -550,26 +303,18 @@ The first release since v1.7.0. Tool count goes from 28 to 52, and agents can no
 
 ### Added — 8 new MCP tools (28 → 36)
 
-- **`codex_file_input`** (`[Input]`): Upload files to `<input type=file>` via `DOM.setFileInputFiles`. Security: path traversal defense via `canonicalize` + prefix check, max 10 MB, regular files only. Configurable via `CODEX_BRIDGE_UPLOAD_BASE` env.
-- **`codex_dialog`** (`[Page]`): Handle JavaScript dialogs (alert/confirm/prompt) via `Page.handleJavaScriptDialog`. Accept/dismiss with optional prompt text.
-- **`codex_find_element`** (`[DOM]`): Find elements by ARIA role and/or accessible name in the AX tree. Returns node IDs for use with `codex_click_element`.
-- **`codex_click_element`** (`[Input]`): Click by accessibility node ID via `DOM.resolveNode` → `DOM.getBoxModel` → Input dispatch. No JS injection.
-- **`codex_nav_and_wait`** (`[Navigation]`): Composite: navigate + wait_for_load in one MCP call.
-- **`codex_click_and_wait`** (`[Input]`): Composite: click + wait_for_load in one MCP call.
-- **`codex_form_fill`** (`[Input]`): Fill multiple form fields via `{selector: value}` map, optionally submit.
-- **`codex_doctor`** (`[Session]`): Self-diagnostics — enumerate pipes, probe connectivity, report latencies and browser versions.
-
-### Architecture
-
-- **mcp.rs module split**: 815-line monolith → `src/mcp/{mod,types,schema,handlers}.rs`, each <400 lines.
-- **Centralized security**: `src/security.rs` — `validate_url`, `validate_file_path` with path traversal prevention.
-- **Tool profiles**: `basic` (25 tools) / `network` (32) / `full` (36) via `CODEX_BRIDGE_PROFILE` env or `--profile` CLI flag.
+- `codex_file_input`: upload files to `<input type=file>` via `DOM.setFileInputFiles`, with `canonicalize` plus prefix-check path traversal defense, 10 MB limit, regular files only, and `CODEX_BRIDGE_UPLOAD_BASE` configuration.
+- `codex_dialog`: handle JavaScript alert/confirm/prompt dialogs via `Page.handleJavaScriptDialog`, with accept/dismiss and optional prompt text.
+- `codex_find_element`: find elements by ARIA role and/or accessible name in the AX tree and return node IDs for `codex_click_element`.
+- `codex_click_element`: click by accessibility node ID via `DOM.resolveNode` → `DOM.getBoxModel` → input dispatch, with no JS injection.
+- `codex_nav_and_wait` and `codex_click_and_wait`: composite navigate/click plus wait-for-load calls.
+- `codex_form_fill`: fill multiple form fields from a `{selector: value}` map, optionally submitting.
+- `codex_doctor`: self-diagnostics that enumerate pipes, probe connectivity, and report latencies and browser versions.
 
 ### Changed
 
-- `validate_url` moved from `browser.rs` → `security.rs` (single canonical source).
-- `Tool` visibility relaxed to `pub(crate)` for profile filtering.
-- `Server` struct gains `new_with_profile()` constructor.
+- `mcp.rs` split into `src/mcp/{mod,types,schema,handlers}.rs`, each under 400 lines; centralized `src/security.rs` provides `validate_url` and `validate_file_path`.
+- Tool profiles: `basic` (25) / `network` (32) / `full` (36) via `CODEX_BRIDGE_PROFILE` or `--profile`; `validate_url` moved to `security.rs`, `Tool` visibility relaxed to `pub(crate)`, and `Server::new_with_profile()` added.
 
 ### Documentation
 
@@ -579,244 +324,152 @@ The first release since v1.7.0. Tool count goes from 28 to 52, and agents can no
 
 ### Added
 
-- **CDP error normalization** (`P0-1`): CDP-level errors (Target closed, etc.) now correctly surface as `isError: true` in MCP responses. New `BridgeError::Cdp` variant with method name and code.
-- **Sticky attach** (`P0-2`): Per-tab CDP session caching. Skips redundant detach+attach round-trips for repeated CDP calls on the same tab, reducing RTT by ~50% for multi-step agent operations.
-- **`codex_network_cookies`**: Cookie values redacted by default (`redact_values: true`).
-- **`codex_network_set_cookie`**: URL validation enforced.
-- **`codex_execute_cdp`**: CDP method allowlist blocks Browser/Debugger/Target/Emulation/Security/Tracing domains.
-- **`codex_page_assets`**: Exposes Codex extension `pageAssets` capability with frameId-aware resource fetching.
+- CDP error normalization: CDP-level errors (Target closed, and so on) surface as `isError: true` through a new `BridgeError::Cdp` variant carrying the method name and code.
+- Sticky attach: per-tab CDP session caching skips redundant detach+attach round-trips, cutting RTT by roughly 50% for repeated calls on the same tab.
+- `codex_network_cookies` redacts cookie values by default (`redact_values: true`), and `codex_network_set_cookie` enforces URL validation.
+- `codex_execute_cdp` uses a method allowlist that blocks the Browser/Debugger/Target/Emulation/Security/Tracing domains, and `codex_page_assets` exposes the extension `pageAssets` capability with frameId-aware fetching.
 
 ### Changed
 
-- **Tool descriptions unified**: All 28 tools now have group tags (`[Tabs]`, `[Navigation]`, `[DOM]`, `[Page]`, `[Input]`, `[CDP]`, `[Network]`, `[Session]`), cross-references, and clearer LLM guidance.
-- **`fullPage` → `full_page`**: Schema parameter renamed to snake_case (backward-compatible via fallback).
-- **`timeout_ms`**: Schema type `number` → `integer`.
-- **CLI extracted** (`S` principle): `browser.rs` 1100→857 lines, CLI REPL now in `src/cli.rs`.
+- All 28 tools gained group tags (`[Tabs]`, `[Navigation]`, `[DOM]`, `[Page]`, `[Input]`, `[CDP]`, `[Network]`, `[Session]`), cross-references, and clearer LLM guidance.
+- `fullPage` became `full_page` (backward-compatible fallback), `timeout_ms` became an integer schema type, and the CLI moved from `browser.rs` to `src/cli.rs`.
 
 ### Removed
 
-- **BridgeClient trait**: Removed as over-engineering (3/3 agent reviewers + ChatGPT agreed). No mock consumer existed. KISS principle restored — `browser.rs` uses `&Client` directly.
-- **Go legacy**: `internal/`, `cmd/`, `go.mod`, `go.sum`, `.golangci.yml` removed (−5382 lines).
-- **`is_debugger_error`**: Replaced by broader `is_session_invalid_error` with 8 patterns.
+- Removed the `BridgeClient` trait as over-engineering (no mock consumer existed), the Go legacy tree (`internal/`, `cmd/`, `go.mod`, `go.sum`, `.golangci.yml`, −5382 lines), and `is_debugger_error` in favor of `is_session_invalid_error` with eight patterns.
 
 ### Performance
 
-- **`encode_frame`**: Length header + payload merged into single `write_all` (1 syscall vs 2).
-- **MCP stdio**: `BufReader::read_until` with reusable `Vec` buffer replaces per-line `String` allocation.
-- **Sticky attach**: Skips detach+attach when CDP session is cached (50-60% RTT reduction for repeated calls on same tab).
+- `encode_frame` merges the length header and payload into one `write_all`; MCP stdio uses `BufReader::read_until` with a reusable buffer, and sticky attach avoids detach+attach on cached sessions.
 
 ### Security
 
-- **CDP error sanitization**: Error messages stripped of `\n` `\r` before surfacing (matching RPC error handling).
-- **Session cache cleanup**: `attached_tabs` cleared on `finalize`, populated from `claim_user_tab`, self-healing on errors.
-- **Cookie value redaction**: Default-on for `codex_network_cookies`.
+- CDP error messages are stripped of `\n` and `\r` before surfacing, the session cache is cleared on `finalize` and healed on errors, and cookie value redaction is on by default.
 
-### Governance
+### Documentation and Governance
 
-- **Repository SEO**: 15 GitHub topics, Discussions enabled, homepage set.
-- **npm metadata**: 15 keywords, `homepage` + `bugs` fields added.
-- **Client examples**: `examples/` (claude-code, openclaw, hermes-agent, cursor).
-- **`cargo clippy`**: Added to CI + release workflow with `-D warnings`.
-- **Go module caching**: `setup-go` cache enabled.
-- **Codecov**: Rust coverage via `cargo-llvm-cov` (replaces old Go coverage).
-- **`.gitignore`**: `docs/ask-gpt/` added (external review artifacts never committed).
-
-### Documentation
-
-- **README.zh-CN**: Synchronized with English README (Go references removed, npm recommended).
-- **CONTRIBUTING.md**: Rewritten for Rust-only development workflow.
-- **SECURITY.md**: Stale paths fixed.
-- **ROADMAP.md**: Updated with v1.7.0, v1.8.0, v1.9.0, v2.0.0 plans and SUPER scoring.
-- **ChatGPT architecture review**: External audit confirmed architecture direction, identified P0 priorities, validated BridgeClient removal.
-
-### Reviews
-
-- **SUPER multi-dimension review**: CDP error normalization + sticky attach scored PASS_WITH_FIXES (3/5), all 5 must-fix items resolved.
-- **3-agent architecture review**: Consensus on BridgeClient removal, sticky attach priority, CDP error importance.
-- **ChatGPT independent audit**: Validated architecture, recommended priorities (P0 CDP error → P0 sticky attach → P1 tool UX).
+- Added 15 GitHub topics, enabled Discussions, set the homepage, added npm keywords/`homepage`/`bugs`, and shipped `examples/` templates for claude-code, openclaw, hermes-agent, and cursor.
+- Added `cargo clippy -D warnings` to CI and release, Rust coverage via `cargo-llvm-cov`, and `.gitignore` coverage for `docs/ask-gpt/`.
+- Synchronized README.zh-CN, rewrote CONTRIBUTING.md for the Rust-only workflow, fixed stale SECURITY.md paths, and updated ROADMAP.md with v1.7.0–v2.0.0 plans.
+- External reviews: a SUPER multi-dimension review scored CDP error normalization and sticky attach PASS_WITH_FIXES with all five must-fix items resolved, and a 3-agent architecture review plus an independent ChatGPT audit confirmed the architecture direction and priorities.
 
 ## [1.7.0] - 2026-06-20
 
 ### Added
 
-- `codex_execute_cdp` — generic CDP executor. Pass any Chrome DevTools Protocol method name and params. Universal escape hatch for all CDP domains (Network, Performance, Storage, Emulation, etc.).
-- `codex_page_assets` — exposes the Codex extension's `pageAssets` capability. Lists all page resources (images, fonts, CSS, JS) via `Page.getResourceTree`. Optional content fetch via `Page.getResourceContent` with base64 return.
-- `codex_network_cookies` — get cookies via `Network.getCookies`. Supports URL filtering.
-- `codex_network_set_cookie` — set a cookie via `Network.setCookie`. Supports all standard cookie attributes.
+- `codex_execute_cdp`: generic CDP executor for any method and params, the universal escape hatch for all CDP domains.
+- `codex_page_assets`: lists page resources via `Page.getResourceTree` with optional base64 content fetch via `Page.getResourceContent`.
+- `codex_network_cookies` (URL-filtered `Network.getCookies`) and `codex_network_set_cookie` (standard cookie attributes).
 
 ### Changed
 
-- MCP tool count: 24 → 28
-- Browser helpers now include: `execute_cdp_generic`, `get_resource_tree`, `get_resource_content`, `get_cookies`, `set_cookie`
+- MCP tool count grew from 24 to 28, and browser helpers now include `execute_cdp_generic`, `get_resource_tree`, `get_resource_content`, `get_cookies`, and `set_cookie`.
 
 ### Tests
 
-- New e2e integration test suite (`tests/cdp_tools_e2e.rs`) with mock pipe infrastructure
-- 7 new e2e tests: CDP roundtrip, resource tree parsing, cookie parsing, error propagation
-- 4 new schema validation tests for new tools
-- Total test count: 85 → 92 (all passing)
+- Added `tests/cdp_tools_e2e.rs` with mock pipe infrastructure, 7 e2e tests, and 4 schema validation tests; total tests went from 85 to 92.
 
 ### Governance
 
-- AGENTS.md now documents MCP tool design patterns and security rules
-- Public repo security audit: no secrets, tokens, or sensitive data found
+- AGENTS.md documents MCP tool design patterns and security rules, and a public repo security audit found no secrets, tokens, or sensitive data.
 
 ## [1.6.0] - 2026-06-09
 
 ### Added
 
 - Rebuilt the bridge binary in Rust with parity coverage for the extension wire protocol, pipe discovery, MCP tools, CLI commands, and browser helpers.
-- CI now has a Windows Rust rewrite job for `cargo check`, `cargo test`, and x64/arm64 release-mode builds.
-- Release validation now checks `Cargo.toml` against the release tag and extracts notes from the tagged changelog section.
-- Rust rewrite docs now describe the npm compatibility plan and local build commands.
+- CI gained a Windows Rust rewrite job for `cargo check`, `cargo test`, and x64/arm64 release-mode builds.
+- Release validation checks `Cargo.toml` against the release tag and extracts notes from the tagged changelog section.
+- Rust rewrite docs describe the npm compatibility plan and local build commands.
 
 ## [1.5.4] - 2026-06-09
 
 ### Fixed
 
-- `codex_close_tab` now retires the tab CDP lock when Chrome reports that the target is already gone.
+- `codex_close_tab` retires the tab CDP lock when Chrome reports that the target is already gone.
 
 ## [1.5.3] - 2026-06-09
 
 ### Fixed
 
-- Release workflow now publishes the npm package after GitHub Release assets are created.
-- Manual release runs now checkout the requested tag before test, lint, asset build, and npm publish jobs.
-- npm publish now verifies that `npm/package.json` matches the release tag before publishing.
-- npm installer now prefers package-embedded binary checksums, with the release checksum file kept as a fallback for older packages and development overrides.
-- CUA click, type, and keypress actions now keep each high-level input sequence under one tab lock and retry debugger detach errors inside the sequence.
-- `codex_wait_for_load` now bounds each CDP request by the caller's timeout.
+- Release workflow publishes npm after GitHub Release assets are created, manual runs check out the requested tag before test, lint, build, and publish jobs, and npm publish verifies `npm/package.json` against the tag.
+- npm installer prefers package-embedded binary checksums, with the release checksum file kept as a fallback for older packages and development overrides.
+- CUA click, type, and keypress keep each high-level input sequence under one tab lock and retry debugger detach errors inside the sequence; `codex_wait_for_load` bounds each CDP request by the caller's timeout.
 - CDP tab locks are retired after successful tab close and session finalization.
-- README, SECURITY, and issue templates now name the local browser data that must be redacted before sharing output.
+- README, SECURITY, and issue templates name the local browser data that must be redacted before sharing output.
 
 ## [1.5.2] - 2026-06-09
 
 ### Fixed
 
-- Release tags now run test and lint jobs before GitHub Release assets are created.
-- CI now runs Node tests for installer checksum parsing.
-- Public issue and contributing docs now ask reporters to redact browser-local data before posting.
-- Ignore rules now cover generated coverage files, npm pack output, and package archives.
-- npm installer downloads from the project release for the package version by default. Development download overrides require `CODEX_BRIDGE_ALLOW_DEV_DOWNLOADS=1`.
-- README wording now states project relationships and browser-session permissions directly.
+- Release tags run test and lint jobs before GitHub Release assets are created, and CI runs Node tests for installer checksum parsing.
+- Public issue and contributing docs ask reporters to redact browser-local data, and ignore rules cover generated coverage files, npm pack output, and package archives.
+- The npm installer downloads assets for the package version by default, and development download overrides require `CODEX_BRIDGE_ALLOW_DEV_DOWNLOADS=1`.
+- README wording states project relationships and browser-session permissions directly.
 
 ## [1.5.1] - 2026-06-09
 
 ### Fixed
 
-- Serialized per-tab CDP detach, attach, and execute sequences to prevent concurrent actions on the same tab from detaching each other.
-- `codex_click` now returns an error when the selector is missing instead of reporting success after a JavaScript exception.
-- `codex_dom_click` now rejects short `DOM.getBoxModel` content arrays instead of panicking.
-- `codex_wait_for_load` now retries transient navigation-time CDP errors until the timeout.
-- Pipe discovery now ignores the bare `codex-browser-use` namespace entry and only returns concrete pipe names.
-- MCP JSON-RPC handling now ignores notifications, rejects malformed request envelopes, rejects zero-length frames, and validates required tool arguments before opening pipe calls.
-- The npm package now uses a committed JavaScript command wrapper, downloads release assets for the package version instead of `latest`, rejects unsupported CPU architectures, and checks package contents in CI.
-- Manual release workflow runs now require a valid `v*` release tag.
+- Serialized per-tab CDP detach, attach, and execute sequences so concurrent actions on one tab no longer detach each other.
+- `codex_click` errors when the selector is missing, `codex_dom_click` rejects short `DOM.getBoxModel` arrays instead of panicking, and `codex_wait_for_load` retries transient navigation-time CDP errors until the timeout.
+- Pipe discovery ignores the bare `codex-browser-use` namespace entry, and MCP JSON-RPC handling ignores notifications, rejects malformed envelopes and zero-length frames, and validates required tool arguments before opening pipe calls.
+- The npm package uses a committed JavaScript command wrapper, downloads assets for the package version instead of `latest`, rejects unsupported CPU architectures, and checks package contents in CI.
+- Manual release workflow runs require a valid `v*` release tag.
 
 ## [1.5.0] - 2026-06-05
 
 ### Fixed
 
-- **Pipe discovery broken after Codex Desktop 26.602+**: Newer Codex versions create pipe names with backslash separators (`codex-browser-use\<uuid>`) which PowerShell's `Get-ChildItem` treats as directories and skips. Switched to `[System.IO.Directory]::GetFileSystemEntries` and manual prefix stripping to discover both formats.
-- **`extractUUID` updated** to strip both `-` and `\` separators after the `codex-browser-use` prefix.
-- **Pipe warning threshold** raised from >1 to >2. Old-format and new-format pipes can coexist during Codex upgrades.
+- Pipe discovery works after Codex Desktop 26.602+: newer versions create pipe names with backslash separators (`codex-browser-use\<uuid>`), which PowerShell's `Get-ChildItem` treated as directories, so discovery now uses `[System.IO.Directory]::GetFileSystemEntries` with manual prefix stripping.
+- `extractUUID` strips both `-` and `\` separators after the prefix, and the pipe warning threshold moved from >1 to >2 because old and new formats can coexist during upgrades.
 
 ## [0.3.0] - 2026-05-19
 
 ### Fixed
 
-**Critical (5)**
-- MCP buffer limit: `bufio.Reader` 4KB default → 10MB to prevent `ErrBufferFull` crash on real messages
-- MCP protocol: `notifications/initialized` no longer produces error response (JSON-RPC 2.0 §4.1)
-- CLI whitespace-only input no longer panics (`args[0]` index out of range)
-- CLI EOF no longer spins at 100% CPU
-- Fill element-not-found now returns an explicit error instead of silently succeeding
-
-**High (7)**
-- All 19 MCP tool handlers now check `json.Unmarshal` errors (previously silently zeroed on type mismatch)
-- JS injection vector fixed: Go `%q` replaced with `json.Marshal` for JavaScript string literals in Click/Fill
-- `Response.ID` changed from `int` to `*int` so `id:0` is not misclassified as notification
-- `json.Marshal` errors in `writeResult`/`writeError` and handler `MarshalIndent` calls now checked
-- `NavigateBack`/`NavigateForward` now validate both array bounds instead of one
-- PowerShell pipe discovery subprocess now has 15s timeout via `context.WithTimeout`
-- `readLoop` was blocking send on duplicate responses; now uses non-blocking select
-
-**Medium (5)**
-- `CUAType` now dispatches keyDown+char+keyUp sequence per CDP spec; attaches debugger once
-- Health check during pipe auto-discovery uses 5s timeout (was 60s)
-- CLI `try` command JSON extraction uses `args[2:]` instead of fragile byte offset
-- `DOMSnapshot` fallback prepends marker to distinguish plain-text from AX tree
-- `DomCUAClick` checks `len(content) >= 5` before box model coordinate access
-
-**Low (10)**
-- `newUUID` returns error + `fallbackUUID` via `math/rand` instead of `panic`
-- `BRIDGE_DEBUG_LOG` open failure now logs warning to stderr
-- `os.Exit` moved out of `runMCP`/`runCLI` into `main()` so deferred cleanup runs
-- `extractUUID` uses conditional single-char strip instead of greedy `TrimLeft`
-- `time.After` replaced with `time.NewTimer` + deferred `Stop()` to prevent leaks
-- `ClaimUserTab` auto-attach error now logged
-- Screenshots typo fixed (was already resolved)
-- `SendNotification` test coverage added (`TestSendNotificationFrame`)
-- `WaitForLoadTimeout` test: `strings.HasPrefix` replaces fragile `[:7]` slice
-- E2E Screenshot test now validates non-empty base64 return value
+- Critical: raised the MCP read buffer from the 4 KB default to 10 MB, stopped answering `notifications/initialized` with an error, fixed CLI whitespace-only input panic and EOF busy-loop, and made fill report element-not-found instead of silent success.
+- High: all 19 MCP tool handlers check `json.Unmarshal` errors, Click/Fill JavaScript literals use `json.Marshal` instead of `%q`, `Response.ID` became `*int` so `id:0` is not misclassified as a notification, and `writeResult`/`writeError` marshal errors are checked.
+- High: history navigation validates both array bounds, PowerShell pipe discovery has a 15s timeout, and `readLoop` no longer blocks on duplicate response sends.
+- Medium: `CUAType` dispatches keyDown+char+keyUp per CDP spec after a single debugger attach, health checks use a 5s timeout, CLI `try` extracts JSON from `args[2:]`, DOM snapshot fallback is marked, and box-model access checks array length.
+- Low: `newUUID` returns an error with a `math/rand` fallback instead of panicking, `BRIDGE_DEBUG_LOG` open failures log a warning, `os.Exit` moved to `main()` so deferred cleanup runs, `extractUUID` strips one separator conditionally, timers are stopped on defer, and claim auto-attach errors are logged.
+- Low: added `SendNotification` coverage, replaced a fragile slice with `strings.HasPrefix` in the wait-for-load timeout test, and made the E2E screenshot test validate non-empty base64.
 
 ### Security
 
-- URL validation blocks dangerous schemes (`file:`, `javascript:`, `data:`, `vbscript:`) in `codex_navigate`
-- Named pipe spoofing warning when multiple `codex-browser-use-*` pipes exist (unexpected state could indicate a hostile process)
-- `ErrorObject` log injection sanitization: newline characters stripped from error messages before logging
-- `jsonEscaped` error fallback: returns `""` instead of propagating nil/invalid JSON into JavaScript evaluation strings
-- Missing MCP `ping` handler added (returns empty result per JSON-RPC 2.0)
-- Test mock fidelity improvements: recording server enforces exact method match, duplicate response detection
+- URL validation blocks `file:`, `javascript:`, `data:`, and `vbscript:` schemes, multiple `codex-browser-use-*` pipes raise a spoofing warning, error messages are stripped of newlines before logging, the JSON escape fallback returns `""` instead of propagating invalid JSON into evaluated scripts, and a missing `ping` handler was added.
+- Test mocks now enforce exact method matches and detect duplicate responses.
 
 ### Changed
 
-- `codex_dom_get_visible` description clarified: returns human-readable DOM tree (not node IDs); use `codex_dom_snapshot` for accessibility node IDs usable with `codex_dom_click`
-- `codex_screenshot` `fullPage` parameter documented as reserved (not yet implemented, always captures viewport)
+- `codex_dom_get_visible` is documented as returning a human-readable tree without node IDs (`codex_dom_snapshot` supplies node IDs), and `codex_screenshot` documents `fullPage` as reserved and viewport-only.
 
 ## [0.2.0] - 2026-05-16
 
 ### Added
-- `codex_navigate_back` and `codex_navigate_forward` MCP tools (history navigation was already in the client; now exposed)
-- `codex_wait_for_load` MCP tool: polls `document.readyState` until `complete` or timeout
-- `codex_screenshot` now returns MCP `image` content so agents can view the screenshot directly (previously only base64 text)
-- `MCPServer.SetVersion` so the build version flows into the MCP `initialize` handshake (`serverInfo.version`)
-- Unit tests across `protocol`, `client`, `discovery`, and `mcp` packages
-  - In-memory `net.Pipe` fake server for end-to-end RPC tests without a real Codex pipe
-  - Concurrent `SendRequest` stress test under `-race`
-  - Wire-format invariants for `executeCdp`, `claimUserTab`, history navigation, JS escaping, CUA event sequencing, DOM box-model math
-  - MCP handler integration tests that exercise the full client → MCP path
-- `NewMCPServerWithIO` constructor for testable I/O injection
-- CI now runs `go test -race -cover`
+
+- `codex_navigate_back` and `codex_navigate_forward` MCP tools expose the existing client history navigation.
+- `codex_wait_for_load` polls `document.readyState` until `complete` or timeout, and `codex_screenshot` returns MCP `image` content so agents can view screenshots directly.
+- `MCPServer.SetVersion` flows the build version into the MCP `initialize` handshake, and `NewMCPServerWithIO` allows testable I/O injection.
+- Unit tests across `protocol`, `client`, `discovery`, and `mcp` with an in-memory `net.Pipe` fake server, a concurrent `SendRequest` stress test under `-race`, wire-format invariants, and full client-to-MCP handler tests; CI runs `go test -race -cover`.
 
 ### Fixed
-- `discovery.extractUUID` no longer truncates UUIDs containing hyphens
-- Clearer error messages on pipe-not-found and dial failures
-- `Makefile install-local` now copies the `.exe` binary on Windows
-- Duplicate option numbering in README install sections
+
+- `discovery.extractUUID` no longer truncates UUIDs containing hyphens, pipe-not-found and dial errors are clearer, `Makefile install-local` copies the `.exe` on Windows, and duplicate README install options were removed.
 
 ### Internal
-- `client.NewFromConn` for wrapping an existing `net.Conn` (used by tests)
-- `cover.out` and `*.coverprofile` added to `.gitignore`
+
+- Added `client.NewFromConn` for wrapping an existing `net.Conn`, and ignored `cover.out` and `*.coverprofile`.
 
 ## [0.1.0] - 2026-05-16
 
 ### Added
-- Named pipe discovery (`codex-browser-use-*` pipes)
-- Pipe connection via go-winio
-- Session management: `createTab`, `getTabs`, `getUserTabs`, `claimUserTab`, `closeTab`
-- Navigation via CDP: `Page.navigate`, `Page.reload`, `Page.getNavigationHistory`
-- Screenshot via CDP: `Page.captureScreenshot` (base64 PNG)
-- DOM snapshot via CDP: `Accessibility.getFullAXTree`
-- JavaScript evaluation via CDP: `Runtime.evaluate`
-- Click/fill via CDP: `Runtime.evaluate` with `querySelector`
-- CUA input via CDP: `Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`
-- MCP server (stdio JSON-RPC) with 20 tools
-- CLI mode for interactive debugging
-- Discover mode for listing active pipes
 
-### Key findings
-- Wire protocol uses camelCase method names (`getInfo`, not `get_info`)
-- `executeCdp` requires `{target: {tabId}}` nested format
-- Must call `attach` before any CDP command
-- Each pipe connection creates a new browser session
+- Named pipe discovery for `codex-browser-use-*` pipes with go-winio connections.
+- Session management (`createTab`, `getTabs`, `getUserTabs`, `claimUserTab`, `closeTab`) and CDP navigation (`Page.navigate`, `Page.reload`, `Page.getNavigationHistory`).
+- CDP screenshot (base64 PNG), accessibility DOM snapshot, JavaScript evaluation, selector click/fill, and CUA input via `Input.dispatchMouseEvent`/`Input.dispatchKeyEvent`.
+- MCP server (stdio JSON-RPC) with 20 tools, an interactive CLI debug mode, and a discover mode for listing active pipes.
+
+### Notes
+
+- Wire protocol uses camelCase method names (`getInfo`, not `get_info`), `executeCdp` requires the nested `{target: {tabId}}` format, `attach` must precede any CDP command, and each pipe connection creates a new browser session.
