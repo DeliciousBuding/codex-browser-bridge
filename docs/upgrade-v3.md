@@ -1,9 +1,13 @@
-# Upgrading from 2.x to 3.0
+# Upgrading to 3.0.1
 
-`3.0.0` makes the bridge **native-only**: it relays the installed Codex
-`node_repl` (Browser Use) and `cua_repl` (Computer Use) runtimes directly. The
-separate Chromium extension adapter and its structured `codex_*` tools were
-removed rather than kept as a second surface.
+`3.0.0` made the installed Codex `node_repl` (Browser Use) and `cua_repl`
+(Computer Use) runtimes the default entries while retaining the explicit
+`--surface browser` compatibility adapter. `3.0.1` removes that adapter and its
+structured `codex_*` tools. The bridge now relays only the two native runtimes.
+
+The compatibility removal is included in `3.0.1` despite the patch version.
+If your configuration uses `--surface browser` or any of the removed flags
+below, update it before upgrading from 2.x or 3.0.0.
 
 ## What changed
 
@@ -22,18 +26,18 @@ removed rather than kept as a second surface.
      ```
    - See [docs/native-computer-use.md](native-computer-use.md) for discovery, environment policy, and elicitation approvals.
 
-3. **Removed 2.x surface**
+3. **Compatibility surface removed in 3.0.1**
    - `--surface browser`, `--mode cli`, `--pipe`, `--browser-family`, `--browser-instance`, `--profile`, `--upload-base`, `--max-text-bytes`, `--max-image-bytes`, `--max-output-bytes`, `--network-policy`, `--finalize`, `--session-file`, and `--keep-turn` no longer exist.
    - The structured `codex_*` tools, their `basic`/`network`/`full` profiles, the `codex://tabs` resource, the `login`/`extract-table` prompts, extension pipe discovery, and the extension-backed upload/download helpers are gone.
    - Bare CLI invocations without `--surface` now default to `--surface native-browser`.
 
 4. **Rust library**
-   - `src/` now contains only `main.rs`, `lib.rs`, `native.rs`, `cli.rs`, and `logging.rs`.
+   - Production code is in `main.rs`, `lib.rs`, `native/mod.rs`, `cli.rs`, and `logging.rs`; native unit tests are in `native/tests.rs`.
    - Library imports of the old browser/client/registry/discovery/locator/observation modules fail; migrate to the installed runtime's JavaScript API instead of re-adding a bridge-side implementation.
 
 5. **Retired tooling and docs**
    - `docs/official-parity.md`, the drift baseline, `scripts/check-agent-surface.js`, `scripts/live-e2e.ps1`, the protocol benchmark, and the extension adapter tests were removed with the adapter.
    - The bundled skill routes to `native-computer-use.md`.
 
-If you depend on the 2.x `codex_*` tools, stay on a 2.x release; 3.0 does not
-provide a compatibility path.
+If you depend on `codex_*` tools, keep the version you already use until you
+have migrated. `3.0.1` provides no compatibility surface.

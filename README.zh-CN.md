@@ -7,7 +7,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/DeliciousBuding/codex-browser-bridge/ci.yml?style=flat-square)](https://github.com/DeliciousBuding/codex-browser-bridge/actions)
 [![Coverage](https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square)](https://codecov.io/gh/DeliciousBuding/codex-browser-bridge)
 
-[项目网站](https://deliciousbuding.github.io/codex-browser-bridge/) · [English](README.md) · [原生接入指南](docs/native-computer-use.md) · [升级到 3.0](docs/upgrade-v3.md)
+[项目网站](https://deliciousbuding.github.io/codex-browser-bridge/) · [English](README.md) · [原生接入指南](docs/native-computer-use.md) · [升级到 3.0.1](docs/upgrade-v3.md)
 
 ## 选择入口
 
@@ -78,7 +78,7 @@ codex-browser-bridge --surface computer call js '{"code":"await cua.listWindows(
 
 ## 升级说明
 
-- **从 2.x 升级到 3.0：** 阅读 [docs/upgrade-v3.md](docs/upgrade-v3.md)（兼容浏览器适配层及其结构化工具已移除）。
+- **从 2.x 或 3.0.0 升级到 3.0.1：** 阅读 [docs/upgrade-v3.md](docs/upgrade-v3.md)（兼容浏览器适配层及其结构化工具已移除）。
 - **从 1.x 升级到 2.x：** 阅读 [docs/upgrade-v2.md](docs/upgrade-v2.md)。
 
 ## 平台支持

@@ -6,12 +6,12 @@
     "url": "https://github.com/DeliciousBuding/codex-browser-bridge",
     "source": "github"
   },
-  "version": "3.0.0",
+  "version": "3.0.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@delicious233/codex-browser-bridge",
-      "version": "3.0.0",
+      "version": "3.0.1",
       "transport": {
         "type": "stdio"
       },

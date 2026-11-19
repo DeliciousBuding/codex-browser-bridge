@@ -330,7 +330,7 @@ jobs:
 
       - name: Generate checksums
         shell: bash
-        run: sha256sum codex-browser-bridge*.exe codex-browser-bridge-linux-*-gnu codex-browser-bridge-darwin-* > checksums.txt
+        run: sha256sum codex-browser-bridge.exe codex-browser-bridge-arm64.exe codex-browser-bridge-linux-*-gnu codex-browser-bridge-darwin-* > checksums.txt
 
       - name: Guard published npm checksum drift
         shell: bash

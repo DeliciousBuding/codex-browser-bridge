@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-11-19
+
+### 破坏性变更
+
+- 删除 `--surface browser`、66 个结构化 `codex_*` 工具、旧 CLI 参数，以及扩展适配层的模块、测试和文档。现仅保留 `--surface native-browser`（默认，`node_repl`）与 `--surface computer`（`cua_repl`）；旧工具用户需迁移或保留旧版本。（[升级指南](docs/upgrade-v3.md)）
+
+### 新增
+
+- 新增 macOS arm64/x64 预编译二进制、安装器支持、校验和与 attestation；macOS GUI/TCC 验收仍未完成。
+- 新增 Cursor 插件与 MCP Registry manifest、OpenCode/VS Code 模板、Antigravity 配置和 skills.sh 安装说明。
+- CLI 新增配合 `--image-dir` 使用的 `--omit-inline-images`，保存截图和制品元数据，同时从 stdout 移除 base64 图片数据。
+
+### 调整
+
+- 内置 skill、接入指南、npm 包和安全说明统一为两个原生运行时入口，工具 schema 与浏览器行为由已安装运行时提供。
+- 为中继帧、出站队列、batch 输入和目录分页设置上限，将原生单元测试拆至 `src/native/tests.rs`。
+- 发布说明从中英两份 changelog 生成，共用一个安装段落。
+
+### 修复
+
+- 发现结果新增可直接 import 的 `file://` `browser_client_url`，优先选择已安装插件的具体版本而非 `latest` 别名。
+- 显式 `turn_ended` 后轮换自动生成的 turn ID，对齐原生浏览器选择顺序与非交互 CLI 的审批取消行为。
+- 修正 Windows 发布校验和生成路径，纳入两个已暂存的可执行资产。
+- 清除依赖精简后遗留的 Unix libc 直接引用。
+
 ## [3.0.0] - 2026-11-19
 
 ### 破坏性变更

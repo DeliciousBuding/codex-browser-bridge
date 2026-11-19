@@ -6,6 +6,31 @@ Format: one bullet per change, no hard line wraps. 中文版见 [CHANGELOG.zh-CN
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-11-19
+
+### Breaking
+
+- Removed `--surface browser`, the 66 structured `codex_*` tools, legacy CLI flags, and the extension adapter's modules, tests, and docs. Only `--surface native-browser` (default, `node_repl`) and `--surface computer` (`cua_repl`) remain. Users of the old tools must migrate or keep an older release. ([Upgrade Guide](docs/upgrade-v3.md))
+
+### Added
+
+- Added macOS arm64 and x64 prebuilt binaries, installer support, checksums, and attestations; macOS GUI/TCC acceptance remains unverified.
+- Added Cursor plugin and MCP Registry manifests, OpenCode and VS Code templates, Antigravity configuration, and skills.sh installation guidance.
+- Added CLI `--omit-inline-images` with `--image-dir` to save screenshots and artifact metadata while omitting base64 image data from stdout.
+
+### Changed
+
+- Aligned the bundled skill, setup guide, npm package, and security guidance with the two native runtimes; tool schemas and browser behavior come from the installed runtime.
+- Bounded relay frames and outbound queues, batch input, and catalog pagination; split native unit tests into `src/native/tests.rs`.
+- Rendered release notes from both changelogs with a shared install block.
+
+### Fixed
+
+- Added an importable `file://` `browser_client_url` to discovery and preferred concrete installed plugin versions over `latest` aliases.
+- Rotated generated turn IDs after an explicit `turn_ended` and aligned native browser selection and non-interactive CLI approval cancellation.
+- Corrected Windows release checksum generation to include both staged executable assets.
+- Removed direct Unix libc references left behind by the dependency cleanup.
+
 ## [3.0.0] - 2026-11-19
 
 ### Breaking

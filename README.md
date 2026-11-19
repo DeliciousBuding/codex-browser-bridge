@@ -7,7 +7,7 @@ MCP server and CLI for reusing the installed Codex **Browser Use** (`node_repl`)
 [![CI](https://img.shields.io/github/actions/workflow/status/DeliciousBuding/codex-browser-bridge/ci.yml?style=flat-square)](https://github.com/DeliciousBuding/codex-browser-bridge/actions)
 [![Coverage](https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square)](https://codecov.io/gh/DeliciousBuding/codex-browser-bridge)
 
-[Website](https://deliciousbuding.github.io/codex-browser-bridge/) · [中文文档](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/README.zh-CN.md) · [Native Setup](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md) · [Upgrading to 3.0](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v3.md)
+[Website](https://deliciousbuding.github.io/codex-browser-bridge/) · [中文文档](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/README.zh-CN.md) · [Native Setup](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md) · [Upgrading to 3.0.1](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v3.md)
 
 ## Choose an entry
 
@@ -78,7 +78,7 @@ It does not implement CDP, DOM snapshots, locators, observation cursors, tool pr
 
 ## Upgrading
 
-- **From 2.x to 3.0:** read [docs/upgrade-v3.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v3.md) (the compatibility browser adapter and its structured tools were removed).
+- **From 2.x or 3.0.0 to 3.0.1:** read [docs/upgrade-v3.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v3.md) (the compatibility browser adapter and its structured tools were removed).
 - **From 1.x to 2.x:** read [docs/upgrade-v2.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v2.md).
 
 ## Platform support

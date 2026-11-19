@@ -7,8 +7,9 @@ This project uses explicit SemVer tags, a curated changelog, GitHub Release asse
 - Use SemVer: `MAJOR.MINOR.PATCH`.
 - Release tags must be annotated tags named `vX.Y.Z`.
 - Pre-release tags may use SemVer pre-release syntax, for example `v2.0.0-beta.1`.
-- `Cargo.toml`, `npm/package.json`, and `.claude-plugin/plugin.json` must match
-  the tag without the leading `v`.
+- `Cargo.toml`, `Cargo.lock`, `npm/package.json`, `.claude-plugin/plugin.json`,
+  `.cursor-plugin/plugin.json`, `server.json`, and both npm pins in `mcp.json`
+  must match the tag without the leading `v`.
 - npm publishes stable versions to the `latest` dist-tag and SemVer pre-release versions to the `next` dist-tag.
 - Rust MSRV is part of the compatibility contract. Do not raise `rust-version` unless the release notes call it out.
 
@@ -38,8 +39,7 @@ Write one change per bullet and keep every bullet on a single line; do not hard-
 - Use Conventional Commits prefixes: `feat:`, `fix:`, `docs:`, `test:`, `ci:`, `chore:`, `refactor:`.
 - Prefer one logical change per commit.
 - The release commit lands directly on `main` and includes:
-  - version bumps in `Cargo.toml`, `npm/package.json`, and the Claude plugin
-    manifest
+  - version bumps in all version files and MCP package pins listed above
   - changelog section for `X.Y.Z`
   - README, skill, plugin, and example changes needed for user-facing behavior
 

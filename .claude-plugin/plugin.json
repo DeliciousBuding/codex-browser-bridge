@@ -1,7 +1,7 @@
 {
   "name": "codex-browser",
   "displayName": "Codex Browser",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Drive the installed Codex Browser Use (node_repl) and Computer Use (cua_repl) runtimes from Claude Code as two MCP servers.",
   "author": {
     "name": "DeliciousBuding",

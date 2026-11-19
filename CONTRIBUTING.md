@@ -21,7 +21,7 @@ See [SECURITY.md](SECURITY.md) and use the private reporting path there.
 
 Requirements:
 - Rust 1.88+
-- Windows, or Linux (release GNU binaries require glibc >= 2.39)
+- Windows, Linux (release GNU binaries require glibc >= 2.39), or macOS
 - Installed native Codex runtimes (`node_repl` / `cua_repl`) for live relay testing
 
 Build and test:
@@ -98,14 +98,15 @@ teardown, or policy rejection — rather than matching documentation wording.
 
 Maintainer-only. See [docs/release-process.md](docs/release-process.md) for the full contract.
 
-1. Bump the version in `Cargo.toml`, `npm/package.json`, and
-   `.claude-plugin/plugin.json`.
-2. Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md`.
+1. Bump the version in `Cargo.toml`, `Cargo.lock`, `npm/package.json`,
+   `.claude-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `server.json`,
+   and both npm pins in `mcp.json`.
+2. Add a `## [X.Y.Z] - YYYY-MM-DD` section to both changelogs.
 3. Run the local release preflight in `docs/release-process.md`, including
    plugin validation and npm package-content checks.
 4. Commit the release directly on `main` and push it.
 5. Tag from `main`: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
-6. The release workflow builds Windows and Linux GNU binaries
+6. The release workflow builds Windows, Linux GNU, and macOS binaries
    (x64 + arm64; Linux glibc >= 2.39), generates
    checksums and attestations, stages and publishes the GitHub Release, embeds
    those checksums into the npm package, then publishes npm with provenance. If
