@@ -3,7 +3,7 @@ name = "codex-browser-bridge"
 version = "3.0.0"
 edition = "2021"
 license = "MIT"
-description = "MCP and CLI access to the installed Codex browser and Computer Use runtimes."
+description = "Thin MCP and CLI relay to the installed Codex native browser and Computer Use runtimes."
 repository = "https://github.com/DeliciousBuding/codex-browser-bridge"
 rust-version = "1.88"
 
@@ -15,35 +15,22 @@ path = "src/main.rs"
 anyhow = "1.0"
 base64 = "0.22"
 clap = { version = "4.5", features = ["derive"] }
+process-wrap = { version = "=10.0.1", features = ["tokio1"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0", features = ["raw_value"] }
-thiserror = "2.0"
-tokio = { version = "1.48", features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+serde_json = "1.0"
+tokio = { version = "1.48", features = ["io-std", "io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 uuid = { version = "1.11", features = ["v4"] }
-toml = "0.8"
-fs2 = "0.4.3"
-process-wrap = { version = "=10.0.1", features = ["tokio1"] }
-regex = "1.12"
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 which = "8"
 
 [dev-dependencies]
 assert_cmd = "2.0"
-criterion = { version = "0.5", features = ["async_tokio"] }
 predicates = "3.1"
 tempfile = "3.14"
 
 [target.'cfg(windows)'.dev-dependencies]
 windows = { version = "0.62.2", features = ["Win32_System_Threading"] }
-
-# Benchmarks — `cargo bench`. Frame encode/decode is the hot path every
-# request/response traverses, so it gets a regression baseline.
-[[bench]]
-name = "protocol"
-harness = false

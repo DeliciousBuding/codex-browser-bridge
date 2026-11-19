@@ -807,51 +807,18 @@ fn native_surfaces_ignore_invalid_browser_toml_in_cwd() {
 }
 
 #[test]
-fn native_cli_mode_rejected_before_discovery_and_browser_rejects_native_flags() {
+fn removed_legacy_cli_mode_and_browser_surface_are_rejected_before_discovery() {
     let empty_home = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_codex-browser-bridge"))
-        .args(["--surface", "native-browser", "--mode", "cli"])
-        .env("CODEX_HOME", empty_home.path())
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("native CLI requires tools, call, or batch"),
-        "{stderr}"
-    );
-
-    for (args, expected) in [
-        (
-            vec![
-                "--surface",
-                "browser",
-                "--native-config",
-                "x.json",
-                "--mode",
-                "discover",
-            ],
-            "--native-config requires --surface computer or --surface native-browser",
-        ),
-        (
-            vec![
-                "--surface",
-                "browser",
-                "--image-dir",
-                "captures",
-                "--mode",
-                "discover",
-            ],
-            "--image-dir requires --surface computer or --surface native-browser",
-        ),
+    for args in [
+        vec!["--surface", "native-browser", "--mode", "cli"],
+        vec!["--surface", "browser", "--mode", "discover"],
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_codex-browser-bridge"))
             .args(args)
+            .env("CODEX_HOME", empty_home.path())
             .output()
             .unwrap();
         assert!(!out.status.success());
-        let err = String::from_utf8_lossy(&out.stderr);
-        assert!(err.contains(expected), "{err}");
     }
 }
 
