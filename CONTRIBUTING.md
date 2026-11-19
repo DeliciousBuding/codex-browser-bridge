@@ -86,7 +86,7 @@ interchangeable.
 
 Relay work touches a small surface:
 
-1. `src/native.rs`: discovery, environment policy, relay framing, tool policy, or cleanup.
+1. `src/native/mod.rs`: discovery, environment policy, relay framing, tool policy, or cleanup (`src/native/tests.rs` owns its unit tests).
 2. `src/cli.rs` / `src/main.rs`: CLI subcommands and flag validation.
 3. `tests/` or module tests: add coverage for the new behavior, including the failure path.
 4. Both READMEs and `docs/native-computer-use.md` when user-facing behavior changes.

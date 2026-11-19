@@ -66,13 +66,13 @@ codex-browser-bridge --surface computer --mode doctor
 codex-browser-bridge --surface computer call js '{"code":"await cua.listWindows();"}'
 ```
 
-Use `batch` for several native JS calls that share one worker. `tools`, `call`, and `batch` do not combine with `--mode`; `--image-dir` applies to `call` and `batch` only.
+Use `batch` for several native JS calls that share one worker. `tools`, `call`, and `batch` do not combine with `--mode`; `--image-dir` applies to `call` and `batch` only. Add `--omit-inline-images` with `--image-dir` to keep the saved files and `bridge_artifacts` while dropping the base64 `data` from stdout.
 
 **Requires:** the configured native runtime for each entry · Node.js 18+ only for the npm/npx path.
 
 ## Scope
 
-The binary is a thin, stateless Rust stdio relay of roughly 2,800 lines. It discovers the selected launch row, spawns one owned worker, forwards MCP frames in both directions, applies the launch row's tool filters and environment policy, and tears the worker tree down on exit.
+The binary is a thin, stateless Rust stdio relay of roughly 1,700 lines. It discovers the selected launch row, spawns one owned worker, forwards MCP frames in both directions, applies the launch row's tool filters and environment policy, and tears the worker tree down on exit.
 
 It does not implement CDP, DOM snapshots, locators, observation cursors, tool profiles, or browser sessions. Those belong to the installed runtime, and their behavior, permissions, and catalog are what clients see. The only transport path is stdio to that runtime.
 

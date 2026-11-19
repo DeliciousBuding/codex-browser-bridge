@@ -66,13 +66,13 @@ codex-browser-bridge --surface computer --mode doctor
 codex-browser-bridge --surface computer call js '{"code":"await cua.listWindows();"}'
 ```
 
-用 `batch` 在多条原生 JS 调用间复用同一个 worker。`tools`、`call`、`batch` 不能与 `--mode` 同时使用；`--image-dir` 只对 `call` 与 `batch` 有效。
+用 `batch` 在多条原生 JS 调用间复用同一个 worker。`tools`、`call`、`batch` 不能与 `--mode` 同时使用；`--image-dir` 只对 `call` 与 `batch` 有效。与 `--image-dir` 一起使用 `--omit-inline-images` 可保留已保存的文件与 `bridge_artifacts`，同时从 stdout 中移除 base64 `data`。
 
 **需要：** 对应入口的原生运行时已安装和配置；仅 npm/npx 路径需要 Node.js 18+。
 
 ## 范围
 
-二进制是一个约 2,800 行的薄无状态 Rust stdio 中继：发现所选 launch row、启动一个自有 worker、双向转发 MCP 帧、应用该行声明的工具过滤与环境策略，并在退出时收掉 worker 进程树。
+二进制是一个约 1,700 行的薄无状态 Rust stdio 中继：发现所选 launch row、启动一个自有 worker、双向转发 MCP 帧、应用该行声明的工具过滤与环境策略，并在退出时收掉 worker 进程树。
 
 它不实现 CDP、DOM 快照、定位器、观察游标、工具 profile 或浏览器 session；这些属于已安装运行时，客户端看到的行为、权限和目录都以运行时为准。传输路径只有一条：stdio 直连该运行时。
 

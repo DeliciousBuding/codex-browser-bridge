@@ -51,7 +51,9 @@ native runtimes:
   `session_id` / `turn_id` are filled from the active turn context, and the
   bridge rotates `turn_id` for the next task).
 - For multi-step CLI work, use `batch` to keep one worker. Pass `--image-dir`
-  only when you need saved image files alongside the JSON response.
+  only when you need saved image files alongside the JSON response; add
+  `--omit-inline-images` to drop the base64 payload from stdout and read the
+  saved files instead.
 
 See [native setup and verification](../../../docs/native-computer-use.md) for
 configuration, diagnostics, and platform verification.

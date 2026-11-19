@@ -199,9 +199,13 @@ codex-browser-bridge --surface computer --image-dir ./captures batch
 - `--image-dir` (valid with `call` or `batch`) writes returned image blocks to
   files and attaches `bridge_artifacts` metadata while keeping the original
   base64 image blocks in stdout JSON.
-- The only top-level options are `--mode`, `--surface`, `--native-config`, and
-  `--image-dir`; the removed 2.x browser flags are rejected by the argument
-  parser before startup.
+- `--omit-inline-images` (valid only with `--image-dir`) keeps the saved files
+  and `bridge_artifacts` metadata but removes the base64 `data` field from each
+  image block, so CLI agents can read screenshots from disk without the stdout
+  token cost.
+- The only top-level options are `--mode`, `--surface`, `--native-config`,
+  `--image-dir`, and `--omit-inline-images`; the removed 2.x browser flags are
+  rejected by the argument parser before startup.
 - The CLI is non-interactive and cancels `elicitation/create` requests with MCP
   result `{"action": "cancel"}`; approve applications through an interactive MCP
   host.

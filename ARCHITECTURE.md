@@ -45,8 +45,9 @@ targets for this bridge.
 
 | Module | Responsibility |
 |---|---|
-| `main.rs` | CLI entry. `--surface native-browser\|computer`, `--mode mcp\|discover\|doctor`, `--native-config`, `--image-dir`, and the `tools`/`call`/`batch` subcommands |
-| `native.rs` | Launch discovery, host environment policy, owned worker spawn, full-duplex stdio MCP relay, tool policy, CLI/doctor workers, and `turn_ended` cleanup |
+| `main.rs` | CLI entry. `--surface native-browser\|computer`, `--mode mcp\|discover\|doctor`, `--native-config`, `--image-dir`, `--omit-inline-images`, and the `tools`/`call`/`batch` subcommands |
+| `native/mod.rs` | Launch discovery, host environment policy, owned worker spawn, full-duplex stdio MCP relay, tool policy, CLI/doctor workers, and `turn_ended` cleanup |
+| `native/tests.rs` | Relay, launch-policy, cleanup, and CLI result unit tests for the native module |
 | `cli.rs` | Shared CLI subcommand definitions (`tools`, `call`, `batch`) forwarded to the native runtime |
 | `logging.rs` | Log initialization |
 | `lib.rs` | Module declarations |
@@ -166,7 +167,7 @@ separate workers; handles cannot move between them.
 ## Data flow — a tool call
 
 1. MCP client sends `tools/call` (for example `js`) over stdio.
-2. `native.rs::relay` checks the tool policy and fills missing correlation
+2. `native/mod.rs::relay` checks the tool policy and fills missing correlation
    metadata.
 3. The frame is written to the owned worker's stdin.
 4. The installed runtime executes it and returns a result or an

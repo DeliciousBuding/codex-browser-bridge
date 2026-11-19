@@ -755,6 +755,7 @@ fn native_rejects_browser_options_and_mode_command_conflicts_before_startup() {
         vec!["--image-dir", "captures", "--mode", "mcp"],
         vec!["--image-dir", "captures", "--mode", "doctor"],
         vec!["--image-dir", "captures", "tools"],
+        vec!["--omit-inline-images", "call", "js", "{}"],
     ] {
         let output = fixture.command().args(arguments).output().unwrap();
         assert!(!output.status.success());
@@ -835,6 +836,24 @@ fn native_image_dir_conflict_error_identifies_the_required_command() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("--image-dir requires a native call or batch command"),
+        "{stderr}"
+    );
+    assert!(!fixture.root.path().join("pids.json").exists());
+}
+
+#[test]
+fn native_omit_inline_images_requires_an_image_directory() {
+    let fixture = Fixture::new();
+    let output = fixture
+        .command()
+        .args(["--omit-inline-images", "call", "js", "{}"])
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--omit-inline-images requires --image-dir"),
         "{stderr}"
     );
     assert!(!fixture.root.path().join("pids.json").exists());

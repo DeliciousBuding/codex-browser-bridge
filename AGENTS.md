@@ -65,9 +65,10 @@ CI/release job 必须设置 `timeout-minutes`，长耗时测试步骤（Rust tes
 
 ```
 src/
-  main.rs       入口（clap CLI：--surface native-browser|computer，--mode mcp|discover|doctor，--native-config，--image-dir）
+  main.rs       入口（clap CLI：--surface native-browser|computer，--mode mcp|discover|doctor，--native-config，--image-dir，--omit-inline-images）
   lib.rs        模块声明
-  native.rs     launch row 发现、环境策略、自有 worker、全双工 MCP 中继、工具策略、CLI/doctor 与进程树清理
+  native/mod.rs launch row 发现、环境策略、自有 worker、全双工 MCP 中继、工具策略、CLI/doctor 与进程树清理
+  native/tests.rs  native 模块的单元测试（relay、launch 策略、清理与 CLI 结果）
   cli.rs        tools/call/batch 子命令定义
   logging.rs    日志初始化
 tests/

@@ -37,6 +37,10 @@ struct Args {
     #[arg(long)]
     image_dir: Option<std::path::PathBuf>,
 
+    /// Strip inline base64 image data from JSON output; requires `--image-dir` (`call` / `batch`).
+    #[arg(long)]
+    omit_inline_images: bool,
+
     #[command(subcommand)]
     command: Option<cli::Command>,
 }
@@ -56,13 +60,22 @@ async fn main() -> anyhow::Result<()> {
     {
         anyhow::bail!("--image-dir requires a native call or batch command");
     }
+    if args.omit_inline_images && args.image_dir.is_none() {
+        anyhow::bail!("--omit-inline-images requires --image-dir");
+    }
     let server = match args.surface {
         Surface::NativeBrowser => native::NativeServer::Browser,
         Surface::Computer => native::NativeServer::Computer,
     };
     let launch = native::Launch::discover(server, args.native_config.as_deref())?;
     if let Some(command) = args.command {
-        return native::run_cli(launch, command, args.image_dir.as_deref()).await;
+        return native::run_cli(
+            launch,
+            command,
+            args.image_dir.as_deref(),
+            args.omit_inline_images,
+        )
+        .await;
     }
     match args.mode {
         Mode::Mcp => native::run_mcp(launch).await,
