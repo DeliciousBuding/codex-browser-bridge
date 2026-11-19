@@ -6,6 +6,19 @@ Format: one bullet per change, no hard line wraps. 中文版见 [CHANGELOG.zh-CN
 
 ## [Unreleased]
 
+## [3.0.2] - 2026-11-19
+
+### Fixed
+
+- Confirm explicit `turn_ended` before clearing its execution context or rotating the default turn; retain rejected hooks for exit cleanup, preserve later executions, and report unanswered hooks without replaying them.
+- Preserve native CLI JSON-RPC error frames, including `code`, `data`, and extension fields, on stdout with a nonzero exit.
+- Validate CLI/doctor initialize responses against known legacy protocol versions and advertise form elicitation for explicit non-interactive cancellation.
+- Align CUA skill entry selection and tab cleanup with the installed runtime: use known targets directly, leave released user tabs and existing persistent tabs open, and distinguish completion summaries from turn cleanup.
+
+### Changed
+
+- Document native string formatting and result preservation, CLI event/protocol boundaries, and host-owned tool exposure, token budgets, and UI rendering.
+
 ## [3.0.1] - 2026-11-19
 
 ### Breaking

@@ -6,7 +6,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@delicious233/codex-browser-bridge@3.0.1",
+        "@delicious233/codex-browser-bridge@3.0.2",
         "--surface",
         "native-browser",
         "--mode",
@@ -18,7 +18,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@delicious233/codex-browser-bridge@3.0.1",
+        "@delicious233/codex-browser-bridge@3.0.2",
         "--surface",
         "computer",
         "--mode",

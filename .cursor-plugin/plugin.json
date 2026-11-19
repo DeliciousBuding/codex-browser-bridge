@@ -1,7 +1,7 @@
 {
   "name": "codex-browser",
   "description": "Relay Cursor to the installed Codex native Browser Use (node_repl) and Computer Use (cua_repl) runtimes as two MCP servers.",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "author": {
     "name": "DeliciousBuding"
   },
