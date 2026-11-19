@@ -147,6 +147,14 @@ impl Drop for Fixture {
 }
 
 #[cfg(unix)]
+const POSIX_SIGTERM: i32 = 15;
+
+#[cfg(unix)]
+extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
+
+#[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
     // A reparented zombie has exited and cannot perform input.
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
@@ -156,7 +164,7 @@ fn process_alive(pid: u32) -> bool {
     {
         return false;
     }
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    unsafe { kill(pid as i32, 0) == 0 }
 }
 
 #[cfg(windows)]
@@ -702,7 +710,7 @@ fn native_cli_sigterm_cancels_active_call_before_interrupt_cleanup() {
         .unwrap();
     let call = fixture
         .wait_for_frame(|row| row["method"] == "tools/call" && row["params"]["name"] == "js");
-    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGTERM) }, 0);
+    assert_eq!(unsafe { kill(child.id() as i32, POSIX_SIGTERM) }, 0);
     assert!(!wait(&mut child, Duration::from_secs(15)).success());
     fixture.assert_processes_exited();
     let frames = fixture.frames();
@@ -914,7 +922,7 @@ fn native_cli_sigterm_during_startup_terminates_tree_without_inventing_a_turn() 
         .spawn()
         .unwrap();
     fixture.wait_for_frame(|row| row["method"] == "initialize");
-    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGTERM) }, 0);
+    assert_eq!(unsafe { kill(child.id() as i32, POSIX_SIGTERM) }, 0);
     assert!(!wait(&mut child, Duration::from_secs(15)).success());
     fixture.assert_processes_exited();
     assert!(
