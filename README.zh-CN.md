@@ -1,34 +1,23 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/DeliciousBuding/codex-browser-bridge/main/assets/hero.png" alt="codex-browser-bridge" width="720">
-</p>
+# codex-browser-bridge
 
-<h1 align="center">codex-browser-bridge</h1>
+用于在 Claude Code、Antigravity、Cursor、OpenClaw、Hermes Agent 和 shell 脚本中复用本机已安装的 Codex **Browser Use**（`node_repl`）与 **Computer Use**（`cua_repl`）运行时的 MCP 服务与 CLI；同时保留直连 Chromium 扩展的兼容入口（`--surface browser`）。
 
-<p align="center">
-  为 Claude Code、Antigravity、Cursor、OpenClaw、Hermes Agent 和 shell 脚本同时解锁 <b>Codex Browser Use</b> 与 <b>Codex Native Computer Use</b>。
-  <br>通过 MCP 复用已安装的 Codex 运行时，也保留现有客户端使用的结构化浏览器工具。
-</p>
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/DeliciousBuding/codex-browser-bridge?style=flat-square)](https://github.com/DeliciousBuding/codex-browser-bridge/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/DeliciousBuding/codex-browser-bridge/ci.yml?style=flat-square)](https://github.com/DeliciousBuding/codex-browser-bridge/actions)
+[![Coverage](https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square)](https://codecov.io/gh/DeliciousBuding/codex-browser-bridge)
 
-<p align="center">
-  <a href="https://deliciousbuding.github.io/codex-browser-bridge/"><b>项目网站</b></a> ·
-  <a href="README.md">English</a> ·
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
-  <a href="https://github.com/DeliciousBuding/codex-browser-bridge/releases"><img src="https://img.shields.io/github/v/release/DeliciousBuding/codex-browser-bridge?style=flat-square" alt="Latest Release"></a>
-  <a href="https://github.com/DeliciousBuding/codex-browser-bridge/actions"><img src="https://img.shields.io/github/actions/workflow/status/DeliciousBuding/codex-browser-bridge/ci.yml?style=flat-square" alt="CI"></a>
-  <a href="https://codecov.io/gh/DeliciousBuding/codex-browser-bridge"><img src="https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square" alt="Coverage"></a>
-</p>
-
----
+[项目网站](https://deliciousbuding.github.io/codex-browser-bridge/) · [English](README.md) · [原生接入指南](docs/native-computer-use.md) · [升级到 3.0](docs/upgrade-v3.md)
 
 ## 选择入口
 
-| 入口 | 用途 |
-|---|---|
-| `--surface computer` | 使用已安装的 `cua_repl` 和 `cua` API。启用统一运行时后，一个 worker 可处理桌面和浏览器。 |
-| `--surface native-browser` | 需要已安装的 Browser/Chrome 插件提供的 `node_repl` JavaScript API 时使用。 |
-| `--surface browser`（默认） | 通过 Chromium 扩展使用现有的 66 个结构化 `codex_*` 工具。 |
+| 入口 | 运行时 | 用途 |
+|---|---|---|
+| `--surface native-browser` | Codex `node_repl` | 复用已安装的 Codex Browser/Chrome 插件 JavaScript API（`agent.browsers`、`tab.playwright`、`tab.dom_cua`）。 |
+| `--surface computer` | Codex `cua_repl` | 复用已安装的 Computer Use `cua` API，支持桌面窗口与统一浏览器目标。 |
+| `--surface browser` | Chromium 扩展管道 | 兼容模式：面向已有 2.x 工作流或未安装原生 Codex 运行时主机的结构化 `codex_*` 工具。 |
 
-[原生接入指南](docs/native-computer-use.md)说明如何选择、注册和授权。大多数客户端注册一个入口即可。
+[原生接入指南](docs/native-computer-use.md)说明如何发现运行时、环境变量策略和授权流程。Browser Use 与 Computer Use 分别注册，各自拥有独立的 worker 状态。
 
 ## 快速开始
 
@@ -38,9 +27,7 @@
 claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
 ```
 
-一条命令同时安装 Skill 和 MCP server，不用手写 JSON。插件默认使用 66 工具的 full profile，因为 Claude Code 通过 tool search 按需加载 schema，且只有 `codex_doctor` 标记为始终加载。首次启动时 `npx` 拉取固定版本的 npm 包，之后复用缓存或 PATH 上的全局二进制。
-
-插件注册结构化扩展工具。使用原版工具请参考[原生配置示例](examples/README.md)。
+插件注册两个原生 MCP 服务（`codex-browser` 与 `codex-computer`）。请先安装并配置 Codex 原生运行时；插件不打包运行时。如果本机只安装了其中一个运行时，另一个服务启动失败属于预期行为；如需单入口，可使用手工配置只保留对应项。
 
 ### 手工 MCP 配置
 
@@ -53,8 +40,7 @@ npm i -g @delicious233/codex-browser-bridge   # 或下载 release 二进制
   "mcpServers": {
     "codex-browser": {
       "command": "codex-browser-bridge",
-      "args": ["--mode", "mcp"],
-      "env": { "CODEX_BRIDGE_PROFILE": "basic" }
+      "args": ["--surface", "native-browser", "--mode", "mcp"]
     },
     "codex-computer": {
       "command": "codex-browser-bridge",
@@ -64,24 +50,28 @@ npm i -g @delicious233/codex-browser-bridge   # 或下载 release 二进制
 }
 ```
 
-不支持 tool search 的客户端从 46 工具的 `basic` profile 起步；`network` 增加 Cookie 和网络工具，`full` 补齐其余工具。Antigravity、Cursor、OpenClaw、Hermes Agent 的模板在 [examples/](examples/)。
+只安装了一个运行时，或只需要一套工具时，可以只保留对应注册。客户端模板见 [examples/](examples/)。
 
 ### CLI
 
 ```bash
-codex-browser-bridge call codex_list_browsers '{}'
-codex-browser-bridge call codex_navigate '{"tab_id":"1","url":"https://example.com"}'
+codex-browser-bridge --surface native-browser --mode doctor
+codex-browser-bridge --surface computer --mode doctor
 codex-browser-bridge --surface computer call js '{"code":"await cua.listWindows();"}'
-codex-browser-bridge --surface computer call js '{"code":"await cua.getTab();"}'
 ```
 
-每次 `call` 是一个进程、一个浏览器 turn，退出时结束。跨命令续接同一 turn 用 `--session-file`，单 turn 多步用 `batch` 读 JSONL。
+用 `batch` 在多条原生 JS 调用间复用同一个 worker。已有 `codex_*` 脚本请显式使用 `--surface browser`；不带 `--surface` 的裸命令仍默认 `--surface browser` 以保持脚本向后兼容。
 
-**需要：** ChatGPT 浏览器扩展及其本地 `codex-browser-use` 服务 · 桌面入口另需本机 Codex 桌面运行时 · 仅 npm/npx 路径需要 Node.js 18+。
+**需要：** 对应入口的原生运行时已安装和配置；仅 npm/npx 路径需要 Node.js 18+。
+
+## 升级说明
+
+- **从 2.x 升级到 3.0：** 阅读 [docs/upgrade-v3.md](docs/upgrade-v3.md)（插件与客户端模板已切换为原生 `node_repl` + `cua_repl`）。
+- **从 1.x 升级到 2.x：** 阅读 [docs/upgrade-v2.md](docs/upgrade-v2.md)。
 
 ## 兼容性
 
-最近一次完整浏览器审计：2026-10-24，ChatGPT 桌面应用（`OpenAI.Codex` 包）`26.1016.8120.0`，Edge 扩展 `1.26.1020.11845`。Computer Use 的验证状态见 [docs/native-computer-use.md](docs/native-computer-use.md)。
+最近一次扩展实测审计：2026-10-24，ChatGPT 桌面应用（`OpenAI.Codex` 包）`26.1016.8120.0`，Edge 扩展 `1.26.1020.11845`（源码/协议对照基线固定于 `26.1111.21308`）。原生 `node_repl` 与 `cua_repl` 的验证状态见 [docs/native-computer-use.md](docs/native-computer-use.md)。
 
 | 层面 | 状态 |
 |------|------|
@@ -96,14 +86,18 @@ codex-browser-bridge --surface computer call js '{"code":"await cua.getTab();"}'
 
 一个 MCP session 同时只控制一个扩展实例，不同浏览器 profile 的标签页不会合并。Linux 依次发现 `CODEX_BRIDGE_SOCKET_DIR`、`$XDG_RUNTIME_DIR/codex-browser-use`、`/tmp/codex-browser-use`，并校验 socket 所有权、模式和 peer UID。Linux/WSL 进程需要本环境内的 socket，不会自动跨 OS 发现 Windows pipe。
 
-## 浏览器实例选择
+## 兼容扩展适配层（`--surface browser`）
+
+以下各节**仅适用于**显式指定 `--surface browser`（直连 Chromium 扩展管道）的兼容模式。原生 `node_repl` 与 `cua_repl` 入口会忽略 `.codex-browser-bridge.toml` 与 `CODEX_BRIDGE_*` 浏览器 profile 配置。
+
+### 浏览器实例选择
 
 - `codex_list_browsers` 列出所有实时实例；`codex_bind_browser` 绑定精确 `browser_id`（`metadata.extensionInstanceId`）。pipe 名只是传输信息，不是身份。
 - 自动或按 family 选择要求 inventory 完整，且只有一个匹配实例；探测超时和未识别端点一律 fail closed。
 - 重连始终固定在所选实例。会话仍拥有标签时，重新绑定必须先 `codex_finalize`，或传 `end_previous_turn: true`。
 - 进程级固定用 `--browser-family` / `--browser-instance`、对应的 `CODEX_BRIDGE_*` 环境变量或 TOML 键。`--pipe` 是底层覆盖，不能与选择器同时使用。
 
-## 配置
+### 配置（仅 `--surface browser`）
 
 优先级：CLI 参数 > 环境变量 > 配置文件 > 内置默认值。默认读取工作目录下的 `.codex-browser-bridge.toml`；设置 `CODEX_BRIDGE_CONFIG` 后只读该路径，不再回退。
 
@@ -123,11 +117,14 @@ max_image_bytes = 3145728
 - attach 后启用焦点模拟，输入和截图不激活标签页、不抢焦点；需要展示页面时显式调用 `codex_bring_to_front`。滚动沿用 `Input.synthesizeScrollGesture`，超时代表结果未知，再次滚动前先检查页面。
 - `codex://tabs` 作为 MCP resource 暴露本 session 拥有的标签页；`login` 和 `extract-table` 覆盖两个常见工作流。
 
-## 全部 66 个 MCP 工具
+### 兼容 MCP 工具（`--surface browser`）
 
 Profile：`basic` 46 个工具、`network` 65 个工具、`full` 66 个工具。所有工具携带 MCP 行为注解（`readOnlyHint`、`destructiveHint`、`idempotentHint`、`openWorldHint`）。
 
-### 浏览器选择 `[Browser]`
+<details>
+<summary>展开全部 66 个兼容扩展工具</summary>
+
+#### 浏览器选择 `[Browser]`
 
 | 工具 | 说明 |
 |------|------|
@@ -247,42 +244,41 @@ CUA 指针移动须在有界窗口内收到回执，且从不重放。drag 耗�
 | `codex_webmcp` | 实验性顶层文档注册列表与调用 |
 | `codex_content_export` | 有界本地 GSuite/YouTube 导出，路径作用域为 `bridge_host` |
 
-## CLI
+</details>
+
+### 兼容 CLI（`--surface browser`）
 
 ```bash
-codex-browser-bridge --mode mcp                      # stdio MCP server
-codex-browser-bridge --mode discover                 # 列出实时传输
-codex-browser-bridge --mode cli                      # 交互式 REPL
-codex-browser-bridge tools codex_locator             # 单个 schema，不连接
-codex-browser-bridge --mode doctor                   # 诊断
+codex-browser-bridge --surface browser --mode mcp          # stdio MCP server
+codex-browser-bridge --surface browser --mode discover     # 列出实时扩展管道
+codex-browser-bridge --surface browser --mode cli          # 旧版交互式 REPL
+codex-browser-bridge --surface browser tools codex_locator # 单个 schema，不连接
+codex-browser-bridge --surface browser --mode doctor       # 管道诊断
 ```
 
 `call` 和 `batch` 复用与 MCP 相同的 schema、profile、handler 和安全检查。`batch` 从 stdin 每行读一个 `{name, arguments}`，遇错即停。`--session-file <path>` 让多个独立命令共用一个 turn：v2 文件绑定精确扩展实例，每次调用持 OS 锁，旧版或损坏文件直接失败而不会重置。`--keep-turn` 显式保留未结束的 turn。CLI 的 JSON 结果默认 16384 bytes，图片只返回摘要；该预算与 MCP content 限额相互独立。
 
 ## 架构
 
-共享原生中继与独立扩展通道见[架构说明](ARCHITECTURE.md)。
+共享原生 stdio 中继与独立兼容扩展通道见[架构说明](ARCHITECTURE.md)。
 
-从 1.x 升级时，先读 [docs/upgrade-v2.md](docs/upgrade-v2.md)，尤其是保存过续接文件或只用数字 ID 认领标签页的安装。
-
-## MCP 协议支持
+## MCP 协议支持（`--surface browser`）
 
 - **Legacy**（`2024-11-05` … `2025-11-25`）：经典 stdio 生命周期，`initialize` 版本协商，对旧客户端字节级兼容。
 - **Modern**（`2026-07-28`）：无状态请求，版本放在 `_meta`，支持 `server/discover`、`resultType` 和 `ttlMs`/`cacheScope`。不支持的版本返回 `-32022`。
 - `codex://tabs`、`login` 和 `extract-table` 提供给支持 MCP resources/prompts 的客户端。
+- 原生中继（`--surface native-browser` 与 `--surface computer`）直接透传 MCP 帧，不重写宿主握手或协议扩展。
 
 ## 维护
 
-Bridge 是兼容适配层，不是第二套浏览器运行时。上游桌面应用或扩展升级本身不要求发版。升级后依次执行：
+上游 Codex 桌面应用或浏览器扩展升级本身不要求发版。升级后优先验证原生中继：
 
-1. `codex-browser-bridge --mode doctor`
-2. `codex_list_browsers`
-3. 多实例时 `codex_bind_browser`
-4. `codex_get_info`
-5. `codex_user_tabs`
-6. 认领一个一次性标签页并读取标题或 DOM
+1. `codex-browser-bridge --surface native-browser --mode doctor`
+2. `codex-browser-bridge --surface computer --mode doctor`
 
-只有 pipe 契约变化或修复真实回归时才发 patch。不要把 Playwright 或另一套扩展作为兜底。能力矩阵在 [docs/official-parity.md](docs/official-parity.md)，漂移基线在 [docs/official-surface-baseline.json](docs/official-surface-baseline.json)。
+如果同时使用 `--surface browser` 兼容模式，可运行 `codex-browser-bridge --surface browser --mode doctor`，检查 `codex_list_browsers` / `codex_user_tabs` 并认领一个一次性标签页读取标题或 DOM。
+
+只有传输/启动器契约变化或修复真实回归时才发 patch。兼容能力矩阵在 [docs/official-parity.md](docs/official-parity.md)，漂移基线在 [docs/official-surface-baseline.json](docs/official-surface-baseline.json)。
 
 ## 安全
 

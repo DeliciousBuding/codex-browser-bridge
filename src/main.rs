@@ -23,43 +23,53 @@ enum Surface {
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Connect MCP clients to installed Codex runtimes or the Chromium extension")]
 struct Args {
+    /// Execution mode: `mcp` (stdio server), `discover` (print launch/pipe info),
+    /// `doctor` (handshake and catalog check), or `cli` (legacy browser REPL only).
     #[arg(long, value_enum, default_value_t = Mode::Mcp)]
     mode: Mode,
 
-    /// Select the extension adapter or an installed native Codex MCP service.
+    /// Target runtime: `native-browser` (Codex `node_repl`), `computer` (Codex `cua_repl`),
+    /// or `browser` (compatibility Chromium extension adapter).
     #[arg(long, value_enum, default_value_t = Surface::Browser)]
     surface: Surface,
 
-    /// Read-only MCP JSON containing the selected native service's launch row.
+    /// Read-only MCP JSON containing the selected native service's launch row (`native-browser` / `computer`).
     #[arg(long)]
     native_config: Option<std::path::PathBuf>,
 
-    /// Also save native CLI image content to this directory, keeping JSON data.
+    /// Also save native CLI image content to this directory, keeping JSON data (`call` / `batch`).
     #[arg(long)]
     image_dir: Option<std::path::PathBuf>,
 
+    /// Explicit extension pipe/socket path (`--surface browser` only).
     #[arg(long)]
     pipe: Option<String>,
 
+    /// Extension browser family filter (`--surface browser` only).
     #[arg(long)]
     browser_family: Option<String>,
 
+    /// Exact extension instance ID (`--surface browser` only).
     #[arg(long)]
     browser_instance: Option<String>,
 
+    /// Compatibility tool profile (`--surface browser` only).
     #[arg(long, value_enum)]
     profile: Option<Profile>,
 
+    /// Allowed directory root for file uploads (`--surface browser` only).
     #[arg(long)]
     upload_base: Option<String>,
 
+    /// Max MCP text content bytes (`--surface browser` only).
     #[arg(long)]
     max_text_bytes: Option<usize>,
 
+    /// Max MCP image content bytes (`--surface browser` only).
     #[arg(long)]
     max_image_bytes: Option<usize>,
 
-    /// Browser Use network policy JSON applied to every tab attach.
+    /// Browser Use network policy JSON applied to every tab attach (`--surface browser` only).
     ///
     /// Shape is the extension's own: {"timeout_ms":1..30000,"constraints":[
     /// {"kind":"domains"|"origins","mode":"allowlist"|"denylist","patterns":[]}]}.
@@ -67,7 +77,7 @@ struct Args {
     #[arg(long = "network-policy")]
     network_policy: Option<String>,
 
-    /// Maximum JSON bytes per command result (not a token count).
+    /// Maximum JSON bytes per command result (`--surface browser` only, not a token count).
     #[arg(long, global = true, default_value = "16384", value_parser = cli::parse_output_budget)]
     max_output_bytes: usize,
 
@@ -149,13 +159,16 @@ async fn main() -> anyhow::Result<()> {
         {
             anyhow::bail!("browser selection, profiles, output limits, network policy and --finalize require --surface browser; native results are preserved without browser output limits");
         }
+        if args.command.is_none() && matches!(args.mode, Mode::Cli) {
+            anyhow::bail!("native CLI requires tools, call, or batch");
+        }
         let launch = native::Launch::discover(server, args.native_config.as_deref())?;
         if let Some(command) = args.command {
             return native::run_cli(launch, command, args.image_dir.as_deref()).await;
         }
         return match args.mode {
             Mode::Mcp => native::run_mcp(launch).await,
-            Mode::Cli => anyhow::bail!("native CLI requires tools, call, or batch"),
+            Mode::Cli => unreachable!("native --mode cli rejected before discovery"),
             Mode::Doctor => native::run_doctor(launch).await,
             Mode::Discover => {
                 println!("{}", serde_json::to_string_pretty(&launch.summary())?);
@@ -163,8 +176,11 @@ async fn main() -> anyhow::Result<()> {
             }
         };
     }
-    if args.native_config.is_some() || args.image_dir.is_some() {
-        anyhow::bail!("--native-config and --image-dir require --surface computer or --surface native-browser");
+    if args.native_config.is_some() {
+        anyhow::bail!("--native-config requires --surface computer or --surface native-browser");
+    }
+    if args.image_dir.is_some() {
+        anyhow::bail!("--image-dir requires --surface computer or --surface native-browser");
     }
     let owns_turn = matches!(
         args.command.as_ref(),

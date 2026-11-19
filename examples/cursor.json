@@ -2,12 +2,13 @@
   "mcpServers": {
     "codex-browser": {
       "command": "codex-browser-bridge",
-      "args": ["--mode", "mcp"],
-      "transport": "stdio",
-      "env": {
-        "CODEX_BRIDGE_PROFILE": "full",
-        "CODEX_BRIDGE_UPLOAD_BASE": "C:\\Users\\<user>\\Downloads"
-      }
+      "args": ["--surface", "native-browser", "--mode", "mcp"],
+      "transport": "stdio"
+    },
+    "codex-computer": {
+      "command": "codex-browser-bridge",
+      "args": ["--surface", "computer", "--mode", "mcp"],
+      "transport": "stdio"
     }
   }
 }

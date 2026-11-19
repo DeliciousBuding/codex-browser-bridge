@@ -6,16 +6,16 @@ file records the *decisions*.
 
 ## Overview
 
-A single-process MCP (Model Context Protocol) server that bridges MCP clients
-(Claude Code, agents) to the ChatGPT desktop app's browser (formerly Codex
-Desktop; Chrome and Edge). It speaks stdio
-JSON-RPC to the client and a length-prefixed JSON wire protocol over a local
-Windows named pipe or Linux Unix socket to the ChatGPT browser extension, which then drives the browser via
-the Chrome DevTools Protocol (CDP).
+A single-process Rust MCP/CLI bridge with two transport paths:
 
-```
-Claude plugin marketplace ──installs──▶ skill + MCP config
-MCP client ──stdio JSON-RPC──▶ bridge ──local transport──▶ ChatGPT extension ──CDP──▶ Chromium browser
+1. **Native-first stdio relay (`--surface native-browser` / `--surface computer`, default in plugin and client templates)**: discovers the installed Codex `node_repl` or `cua_repl` launch row from `~/.codex/config.toml` (or `--native-config`), spawns one owned worker process tree (Windows Job Object / Unix process group), and relays full-duplex JSON-RPC frames—preserving tool schemas, bidirectional `elicitation/create` approvals, images, and `turn_ended` cleanup.
+2. **Compatibility Chromium extension adapter (`--surface browser`)**: speaks stdio JSON-RPC to the client and a length-prefixed JSON wire protocol over a local Windows named pipe or Linux Unix socket to the ChatGPT browser extension, which drives Chrome/Edge via CDP.
+
+```text
+Claude plugin marketplace ──installs──▶ routing skill + dual native mcp.json
+
+MCP client ──stdio JSON-RPC──▶ bridge ──stdio──▶ installed Codex node_repl / cua_repl
+                                      └──local pipe/socket (--surface browser)──▶ ChatGPT extension ──CDP──▶ Chromium
 ```
 
 Current releases publish Windows x64/arm64 and Linux GNU x64/arm64 binaries
@@ -27,16 +27,17 @@ full tool surface. A compiling macOS
 target does not establish macOS support.
 
 The repository is both the Claude plugin source and the generic MCP server
-source. A Claude plugin marketplace distributes the manifest, progressive
-skill, and MCP launch configuration; it does not wrap or duplicate the 66-tool
-protocol surface. Codex and ChatGPT desktop already have native browser access
-and are not plugin targets for this bridge.
+source. The Claude plugin registers `codex-browser` (`--surface native-browser`)
+and `codex-computer` (`--surface computer`) alongside a minimal routing skill;
+it does not wrap or duplicate the compatibility 66-tool surface. Codex and
+ChatGPT desktop already have native browser access and are not plugin targets
+for this bridge.
 
 ## Module map (`src/`)
 
 | Module | Responsibility |
 |---|---|
-| `main.rs` | CLI entry. `--surface browser\|native-browser\|computer`, `--mode mcp\|cli\|discover\|doctor`, `tools`, `call`, `batch`; loads config |
+| `main.rs` | CLI entry. `--surface browser\|native-browser\|computer`, `--mode mcp\|cli\|discover\|doctor`, `tools`, `call`, `batch`; loads browser TOML config only for `--surface browser` |
 | `native.rs` | Shared launcher, stdio MCP relay, CLI/doctor worker and process cleanup for installed `node_repl` and `cua_repl` |
 | `client.rs` | The pipe `Client`: requests, `execute_cdp`, reconnect, event subscriptions |
 | `pipe.rs` | Platform transport and dialing; Windows named pipe or validated Unix stream; `dial_named_pipe` remains a compatibility entrypoint |
@@ -53,8 +54,8 @@ and are not plugin targets for this bridge.
 | `webmcp.rs` | Top-document same-origin WebMCP registry with document epochs and stale-handle rejection |
 | `page_assets.rs` | Document-bound asset inventory, cached content, atomic local bundle/manifest output |
 | `export.rs` | Bounded atomic local GSuite and YouTube transcript exports |
-| `mcp/` | MCP server: JSON-RPC dispatch, 66 tool handlers, schema, profiles, resources/prompts, dual-era lifecycle |
-| `cli.rs` | Shell commands reuse MCP dispatch; bounded JSON output and same-session JSONL batch; legacy debug REPL |
+| `mcp/` | Compatibility extension MCP server: JSON-RPC dispatch, 66 tool handlers, schema, profiles, resources/prompts, dual-era lifecycle |
+| `cli.rs` | Shared CLI subcommands (`tools`/`call`/`batch`) plus browser-surface dispatch, bounded JSON output, and legacy debug REPL |
 | `security.rs` | URL scheme + file-path validation (path-traversal defense) |
 | `config.rs` | Optional TOML selectors, profile, upload root, response limits and network policy |
 | `doctor.rs` | Pipe connectivity diagnostics (`--mode doctor`) |
@@ -178,18 +179,11 @@ Codex / ChatGPT desktop already controls its browser extension natively; the
 bridge exists for Claude and other non-Codex MCP clients that need to reuse the
 same logged-in browser session.
 
-The plugin profile is `full` because Claude Code supports MCP tool search. It
-loads server instructions and tool names first, then discovers individual
-schemas on demand. `codex_doctor` alone carries
-`_meta["anthropic/alwaysLoad"] = true` so connectivity recovery remains
-immediate; eagerly loading more tools would defeat deferral. Manual MCP clients
-that do not support tool search keep the `basic` profile as their documented
-fallback.
-
-The skill follows the same progressive-disclosure boundary. `SKILL.md` contains
-only routing, the minimal workflow, and safety rules; task references for tabs,
-DOM/input, network/session, official parity, and recovery are read one at a
-time.
+The plugin registers `codex-browser` and `codex-computer` with the shared
+relay. Each owns a native worker, forwards its installed catalog and approval
+requests, and keeps the objects created by that worker. The skill routes to
+the original tool instructions. Extension profiles only apply to the separate
+compatibility adapter.
 
 ### Config precedence
 CLI flags > env > config file (`.codex-browser-bridge.toml`) > built-in

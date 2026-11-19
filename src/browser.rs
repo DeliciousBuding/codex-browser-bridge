@@ -2065,10 +2065,6 @@ pub async fn dom_cua_click_with_count(
     cua_click_with_count(client, tab_id, x, y, 1, click_count as u8, &[]).await
 }
 
-pub async fn dom_cua_type(client: &Client, tab_id: &str, text: &str) -> Result<()> {
-    cua_type(client, tab_id, text).await
-}
-
 // ── Generic CDP ──────────────────────────────────────────────
 
 /// CDP domains blocked from codex_execute_cdp for security.
@@ -2170,23 +2166,6 @@ pub async fn get_resource_tree(client: &Client, tab_id: &str) -> Result<Vec<Page
     let id = parse_tab_id("page_assets", tab_id)?;
     let raw = client.execute_cdp(id, "Page.getResourceTree", None).await?;
     parse_resource_tree(&raw)
-}
-
-pub async fn get_resource_content(
-    client: &Client,
-    tab_id: &str,
-    frame_id: &str,
-    url: &str,
-) -> Result<String> {
-    let id = parse_tab_id("page_assets", tab_id)?;
-    let raw = client
-        .execute_cdp(
-            id,
-            "Page.getResourceContent",
-            Some(json!({ "frameId": frame_id, "url": url })),
-        )
-        .await?;
-    extract_resource_content(&raw)
 }
 
 pub async fn get_resource_content_with_timeout(
@@ -2395,37 +2374,6 @@ fn parse_ax_tree(raw: &str) -> Result<Vec<ParsedAxNode>> {
 }
 
 // ── Composite ───────────────────────────────────────────────────
-
-/// Navigate to URL and wait for page load. Reduces 2 MCP calls to 1.
-pub async fn nav_and_wait(client: &Client, tab_id: &str, url: &str, timeout_ms: u64) -> Result<()> {
-    navigation_action_and_wait(
-        client,
-        tab_id,
-        Some(url),
-        None,
-        timeout_ms,
-        crate::observation::LoadState::Load,
-    )
-    .await
-}
-
-/// Click element by selector and wait for page load.
-pub async fn click_and_wait(
-    client: &Client,
-    tab_id: &str,
-    selector: &str,
-    timeout_ms: u64,
-) -> Result<()> {
-    navigation_action_and_wait(
-        client,
-        tab_id,
-        None,
-        Some(selector),
-        timeout_ms,
-        crate::observation::LoadState::Load,
-    )
-    .await
-}
 
 pub async fn navigation_action_and_wait(
     client: &Client,

@@ -747,6 +747,11 @@ fn native_rejects_browser_options_and_mode_command_conflicts_before_startup() {
         vec!["--max-output-bytes", "16384"],
         vec!["--network-policy", "{}"],
         vec!["--finalize", "call", "js", "{}"],
+        vec!["--session-file", "session.json", "call", "js", "{}"],
+        vec!["--keep-turn", "call", "js", "{}"],
+        vec!["--upload-base", ".", "--mode", "discover"],
+        vec!["--browser-instance", "inst-1", "--mode", "discover"],
+        vec!["--max-image-bytes", "2048", "--mode", "discover"],
         vec!["--image-dir", "captures", "--mode", "mcp"],
         vec!["--image-dir", "captures", "--mode", "doctor"],
         vec!["--image-dir", "captures", "tools"],
@@ -754,6 +759,99 @@ fn native_rejects_browser_options_and_mode_command_conflicts_before_startup() {
         let output = fixture.command().args(arguments).output().unwrap();
         assert!(!output.status.success());
         assert!(!fixture.root.path().join("pids.json").exists());
+    }
+}
+
+#[test]
+fn malformed_codex_config_toml_redacts_source_line() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("config.toml"),
+        "secret_token = \"private-secret-value\"\n[broken\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_codex-browser-bridge"))
+        .args(["--surface", "native-browser", "--mode", "discover"])
+        .env("CODEX_HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("invalid Codex configuration TOML at line"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("private-secret-value"), "{stderr}");
+    assert!(!stderr.contains("[broken"), "{stderr}");
+}
+
+#[test]
+fn native_surfaces_ignore_invalid_browser_toml_in_cwd() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.root.path().join(".codex-browser-bridge.toml"),
+        "not_valid_toml = [\n",
+    )
+    .unwrap();
+    let output = fixture
+        .command()
+        .current_dir(fixture.root.path())
+        .args(["--mode", "discover"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn native_cli_mode_rejected_before_discovery_and_browser_rejects_native_flags() {
+    let empty_home = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_codex-browser-bridge"))
+        .args(["--surface", "native-browser", "--mode", "cli"])
+        .env("CODEX_HOME", empty_home.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("native CLI requires tools, call, or batch"),
+        "{stderr}"
+    );
+
+    for (args, expected) in [
+        (
+            vec![
+                "--surface",
+                "browser",
+                "--native-config",
+                "x.json",
+                "--mode",
+                "discover",
+            ],
+            "--native-config requires --surface computer or --surface native-browser",
+        ),
+        (
+            vec![
+                "--surface",
+                "browser",
+                "--image-dir",
+                "captures",
+                "--mode",
+                "discover",
+            ],
+            "--image-dir requires --surface computer or --surface native-browser",
+        ),
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_codex-browser-bridge"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(expected), "{err}");
     }
 }
 

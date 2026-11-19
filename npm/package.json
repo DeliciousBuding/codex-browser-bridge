@@ -1,8 +1,8 @@
 {
   "name": "@delicious233/codex-browser-bridge",
-  "version": "2.1.1",
+  "version": "3.0.0",
   "private": false,
-  "description": "Browser extension access and opt-in native Codex Computer Use for other MCP agents.",
+  "description": "MCP access to installed Codex Browser and Computer Use runtimes, with a Chromium extension adapter.",
   "bin": {
     "codex-browser-bridge": "bin/codex-browser-bridge.js"
   },
@@ -17,6 +17,7 @@
     "README.md",
     "LICENSE",
     "docs/upgrade-v2.md",
+    "docs/upgrade-v3.md",
     "docs/native-computer-use.md",
     "bin/codex-browser-bridge.js",
     "checksums.json",

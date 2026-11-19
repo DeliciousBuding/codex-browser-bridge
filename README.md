@@ -1,34 +1,23 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/DeliciousBuding/codex-browser-bridge/main/assets/hero.png" alt="codex-browser-bridge" width="720">
-</p>
+# codex-browser-bridge
 
-<h1 align="center">codex-browser-bridge</h1>
+MCP server and CLI for reusing the installed Codex **Browser Use** (`node_repl`) and **Computer Use** (`cua_repl`) runtimes from Claude Code, Antigravity, Cursor, OpenClaw, Hermes Agent, and shell scripts, with a compatibility Chromium extension adapter (`--surface browser`).
 
-<p align="center">
-  Unlock <b>Codex Browser Use</b> and <b>Codex Native Computer Use</b> for Claude Code, Antigravity, Cursor, OpenClaw, Hermes Agent, and shell scripts.
-  <br>One MCP bridge for the installed Codex runtimes, with a structured browser adapter for existing clients.
-</p>
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/DeliciousBuding/codex-browser-bridge?style=flat-square)](https://github.com/DeliciousBuding/codex-browser-bridge/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/DeliciousBuding/codex-browser-bridge/ci.yml?style=flat-square)](https://github.com/DeliciousBuding/codex-browser-bridge/actions)
+[![Coverage](https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square)](https://codecov.io/gh/DeliciousBuding/codex-browser-bridge)
 
-<p align="center">
-  <a href="https://deliciousbuding.github.io/codex-browser-bridge/"><b>Website</b></a> ·
-  <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/README.zh-CN.md">中文</a> ·
-  <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
-  <a href="https://github.com/DeliciousBuding/codex-browser-bridge/releases"><img src="https://img.shields.io/github/v/release/DeliciousBuding/codex-browser-bridge?style=flat-square" alt="Latest Release"></a>
-  <a href="https://github.com/DeliciousBuding/codex-browser-bridge/actions"><img src="https://img.shields.io/github/actions/workflow/status/DeliciousBuding/codex-browser-bridge/ci.yml?style=flat-square" alt="CI"></a>
-  <a href="https://codecov.io/gh/DeliciousBuding/codex-browser-bridge"><img src="https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square" alt="Coverage"></a>
-</p>
-
----
+[Website](https://deliciousbuding.github.io/codex-browser-bridge/) · [中文文档](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/README.zh-CN.md) · [Native Setup](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md) · [Upgrading to 3.0](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v3.md)
 
 ## Choose an entry
 
-| Entry | Use it for |
-|---|---|
-| `--surface computer` | The installed `cua_repl` and its `cua` API. A unified installation can cover desktop and browser tasks in one worker. |
-| `--surface native-browser` | Workflows that need the installed Browser/Chrome plugin's `node_repl` JavaScript API. |
-| `--surface browser` (default) | The existing 66 structured `codex_*` tools over the Chromium extension transport. |
+| Entry | Runtime | Use it for |
+|---|---|---|
+| `--surface native-browser` | Codex `node_repl` | Installed Codex Browser/Chrome plugin JavaScript API (`agent.browsers`, `tab.playwright`, `tab.dom_cua`). |
+| `--surface computer` | Codex `cua_repl` | Installed Computer Use `cua` API for desktop windows and unified browser targets. |
+| `--surface browser` | Chromium extension pipe | Compatibility only: structured `codex_*` tools for existing 2.x workflows or hosts without native Codex runtimes. |
 
-[Native setup](docs/native-computer-use.md) explains which runtime to choose, approvals and per-client registration. Most clients only need one entry.
+See [Native setup](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md) for launch discovery, host environment policy, and elicitation approvals. Browser Use and Computer Use have separate MCP registrations and worker state.
 
 ## Quick Start
 
@@ -38,9 +27,7 @@
 claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge
 ```
 
-One command installs the skill and the MCP server; no JSON editing. The plugin starts on the 66-tool full profile because Claude Code loads schemas on demand through tool search, and `codex_doctor` is the only always-loaded schema. The first start pulls the pinned npm package through `npx`; later starts reuse the cache or a global binary.
-
-The plugin registers the structured extension adapter. For the original tools, use the [native examples](examples/README.md).
+The plugin registers both native MCP services (`codex-browser` and `codex-computer`). Install and configure the native Codex runtimes first; the plugin does not bundle them. If only one runtime is installed on your machine, the other entry failing to start is expected—use a single-entry manual configuration if you only want one.
 
 ### Manual MCP configuration
 
@@ -53,8 +40,7 @@ npm i -g @delicious233/codex-browser-bridge   # or download a release binary
   "mcpServers": {
     "codex-browser": {
       "command": "codex-browser-bridge",
-      "args": ["--mode", "mcp"],
-      "env": { "CODEX_BRIDGE_PROFILE": "basic" }
+      "args": ["--surface", "native-browser", "--mode", "mcp"]
     },
     "codex-computer": {
       "command": "codex-browser-bridge",
@@ -64,24 +50,28 @@ npm i -g @delicious233/codex-browser-bridge   # or download a release binary
 }
 ```
 
-Clients without tool search should start at the 46-tool `basic` profile; `network` adds cookies/network tools, `full` adds the remainder. Templates for Antigravity, Cursor, OpenClaw, and Hermes Agent live in [examples/](https://github.com/DeliciousBuding/codex-browser-bridge/tree/main/examples).
+Use only the entry you need if a client needs one service or if only one runtime is installed. Client templates are in [examples/](https://github.com/DeliciousBuding/codex-browser-bridge/tree/main/examples).
 
 ### CLI
 
 ```bash
-codex-browser-bridge call codex_list_browsers '{}'
-codex-browser-bridge call codex_navigate '{"tab_id":"1","url":"https://example.com"}'
+codex-browser-bridge --surface native-browser --mode doctor
+codex-browser-bridge --surface computer --mode doctor
 codex-browser-bridge --surface computer call js '{"code":"await cua.listWindows();"}'
-codex-browser-bridge --surface computer call js '{"code":"await cua.getTab();"}'
 ```
 
-Every `call` is one process and one browser turn, finalized on exit. Use `--session-file` to continue one turn across commands, or `batch` to run JSONL steps on a single turn.
+Use `batch` for several native JS calls that share one worker. Use `--surface browser` explicitly for an existing `codex_*` script; bare CLI invocations without `--surface` keep `--surface browser` as their default for backwards compatibility.
 
-**Requires:** the ChatGPT browser extension with its local `codex-browser-use` service · an installed Codex desktop runtime for the computer surface · Node.js 18+ for the npm/npx path.
+**Requires:** the configured native runtime for each native entry · Node.js 18+ for the npm/npx path.
+
+## Upgrading
+
+- **From 2.x to 3.0:** read [docs/upgrade-v3.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v3.md) (plugin and client templates switched from `codex_*` to native `node_repl` + `cua_repl`).
+- **From 1.x to 2.x:** read [docs/upgrade-v2.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v2.md).
 
 ## Compatibility
 
-Last full browser audit: 2026-10-24, ChatGPT desktop app (`OpenAI.Codex` package) `26.1016.8120.0` with Edge extension `1.26.1020.11845`. Computer Use verification is tracked in [docs/native-computer-use.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md).
+Last live extension audit: 2026-10-24, ChatGPT desktop app (`OpenAI.Codex` package) `26.1016.8120.0` with Edge extension `1.26.1020.11845` (source/protocol parity baseline pinned to `26.1111.21308`). Native `node_repl` and `cua_repl` verification is tracked in [docs/native-computer-use.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md).
 
 | Surface | Status |
 |---------|--------|
@@ -96,14 +86,18 @@ Last full browser audit: 2026-10-24, ChatGPT desktop app (`OpenAI.Codex` package
 
 One MCP session controls one extension instance at a time; tabs from different browser profiles are not merged. Linux discovers `CODEX_BRIDGE_SOCKET_DIR`, then `$XDG_RUNTIME_DIR/codex-browser-use`, then `/tmp/codex-browser-use`, and validates socket ownership, mode, and peer UID. A Linux/WSL process needs a socket in that environment; it does not find a Windows pipe across the OS boundary.
 
-## Browser Selection
+## Compatibility Extension Adapter (`--surface browser`)
+
+The sections below apply **only** when explicitly running `--surface browser` (the direct Chromium extension pipe adapter). Native `node_repl` and `cua_repl` entries ignore `.codex-browser-bridge.toml` and `CODEX_BRIDGE_*` browser profiles.
+
+### Browser Selection
 
 - `codex_list_browsers` shows every live instance; `codex_bind_browser` pins one exact `browser_id` (`metadata.extensionInstanceId`). Pipe names are transport metadata, not identity.
 - Automatic or family-only selection needs a complete inventory with exactly one live match. Timeouts and unidentified endpoints fail closed.
 - Reconnects stay pinned to the selected instance. Rebinding while tabs are owned requires `codex_finalize` first or `end_previous_turn: true`.
 - Process-level pinning: `--browser-family` / `--browser-instance`, the matching `CODEX_BRIDGE_*` variables, or TOML keys. `--pipe` is a low-level override and cannot be combined with a selector.
 
-## Configuration
+### Configuration (`--surface browser` only)
 
 Precedence: CLI flags > environment variables > config file > built-in defaults. The default file is `.codex-browser-bridge.toml` in the working directory; `CODEX_BRIDGE_CONFIG` pins an explicit path and disables that fallback.
 
@@ -123,11 +117,14 @@ max_image_bytes = 3145728
 - Attachments enable focus emulation, so input and screenshots do not activate tabs or focus windows. `codex_bring_to_front` is the explicit way to show a tab. Scrolling keeps `Input.synthesizeScrollGesture`; a timeout is an unknown outcome, so inspect the page before scrolling again.
 - `codex://tabs` exposes the session's owned tabs as an MCP resource. The `login` and `extract-table` prompts cover the two common workflows.
 
-## All 66 MCP Tools
+### Compatibility MCP Tools (`--surface browser`)
 
 Profiles: `basic` 46 tools, `network` 65 tools, `full` 66 tools. Every tool carries MCP behavior annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`).
 
-### Browser Selection `[Browser]`
+<details>
+<summary>Expand all 66 compatibility tools</summary>
+
+#### Browser Selection `[Browser]`
 
 | Tool | Description |
 |------|-------------|
@@ -247,42 +244,41 @@ CUA pointer moves need an acknowledgment inside the bounded operation window and
 | `codex_webmcp` | Experimental top-document registration list and invocation |
 | `codex_content_export` | Bounded local GSuite/YouTube exports with `bridge_host` path scope |
 
-## CLI
+</details>
+
+### Compatibility CLI (`--surface browser`)
 
 ```bash
-codex-browser-bridge --mode mcp                      # MCP server over stdio
-codex-browser-bridge --mode discover                 # list live transports
-codex-browser-bridge --mode cli                      # interactive REPL
-codex-browser-bridge tools codex_locator             # one schema, no connection
-codex-browser-bridge --mode doctor                   # diagnostics
+codex-browser-bridge --surface browser --mode mcp          # MCP server over stdio
+codex-browser-bridge --surface browser --mode discover     # list live extension pipes
+codex-browser-bridge --surface browser --mode cli          # legacy interactive REPL
+codex-browser-bridge --surface browser tools codex_locator # one schema, no connection
+codex-browser-bridge --surface browser --mode doctor       # pipe diagnostics
 ```
 
 `call` and `batch` reuse the same schemas, profiles, handlers, and safety checks as MCP. `batch` reads one `{name, arguments}` object per stdin line and stops on the first error. `--session-file <path>` shares one turn across separate commands: the v2 file binds the turn to an exact extension instance, takes an OS lock per invocation, and fails rather than resetting a legacy or corrupt file. `--keep-turn` deliberately leaves a turn open. CLI JSON results default to 16384 bytes and summarize images instead of emitting base64; that budget is separate from the MCP content limits.
 
 ## Architecture
 
-See [Architecture](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/ARCHITECTURE.md) for the shared native relay and separate extension transport.
+See [Architecture](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/ARCHITECTURE.md) for the shared native stdio relay and separate compatibility extension transport.
 
-Upgrading from 1.x? Read [docs/upgrade-v2.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v2.md) before updating an installation with saved continuation files or numeric-only tab claims.
-
-## MCP Protocol Support
+## MCP Protocol Support (`--surface browser`)
 
 - **Legacy** (`2024-11-05` … `2025-11-25`): classic stdio lifecycle with `initialize` version negotiation, byte-compatible with older clients.
 - **Modern** (`2026-07-28`): stateless requests with the version in `_meta`, `server/discover`, `resultType`, and `ttlMs`/`cacheScope` hints. Unsupported versions return `-32022`.
 - `codex://tabs`, `login`, and `extract-table` are exposed for clients that support MCP resources and prompts.
+- Native relays (`--surface native-browser` and `--surface computer`) forward MCP frames directly without normalizing or re-negotiating the host handshake.
 
 ## Maintenance
 
-The bridge is a compatibility adapter, not a second browser runtime. Upstream desktop-app or extension upgrades do not require a bridge release by themselves. After an upgrade, run:
+Upstream Codex desktop app or browser extension upgrades do not require a bridge release by themselves. After an upgrade, verify the native relays first:
 
-1. `codex-browser-bridge --mode doctor`
-2. `codex_list_browsers`
-3. `codex_bind_browser` when more than one instance is live
-4. `codex_get_info`
-5. `codex_user_tabs`
-6. Claim a disposable tab and read its title or DOM
+1. `codex-browser-bridge --surface native-browser --mode doctor`
+2. `codex-browser-bridge --surface computer --mode doctor`
 
-Ship a patch only for a real pipe-contract change or a fixed regression. Do not add Playwright or another extension as a fallback. The capability matrix lives in [docs/official-parity.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md) and the drift baseline in [docs/official-surface-baseline.json](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-surface-baseline.json).
+If you also use the `--surface browser` compatibility adapter, run `codex-browser-bridge --surface browser --mode doctor`, check `codex_list_browsers` / `codex_user_tabs`, and claim a disposable tab to read its title or DOM.
+
+Ship a patch only for a real transport/launcher contract change or a fixed regression. The compatibility capability matrix lives in [docs/official-parity.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md) and the drift baseline in [docs/official-surface-baseline.json](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-surface-baseline.json).
 
 ## Security
 

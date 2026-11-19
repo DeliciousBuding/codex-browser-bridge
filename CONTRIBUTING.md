@@ -22,7 +22,7 @@ See [SECURITY.md](SECURITY.md) and use the private reporting path there.
 Requirements:
 - Rust 1.88+
 - Windows, or Linux for the Unix transport (release GNU binaries require glibc >= 2.39)
-- A local ChatGPT browser-extension service and connected extension for live testing
+- Installed native Codex runtimes (`node_repl` / `cua_repl`) for live native relay testing, and/or a connected ChatGPT browser extension for `--surface browser` compatibility testing
 
 Build and test:
 
@@ -60,9 +60,9 @@ claude plugin validate --strict .
 
 `.claude-plugin/` and `mcp.json` are the Claude Code plugin surface.
 Codex / ChatGPT desktop use native browser integration and do not install this
-bridge as a plugin. The Claude plugin and manual JSON examples default to the
-full 66-tool source profile. Clients without tool search can opt into `basic`
-(46 tools) or `network` (65 tools), with the corresponding capability reduction.
+bridge as a plugin. The Claude plugin and manual JSON examples register the
+installed Browser Use and Computer Use services separately. The extension
+profiles only apply to the explicit compatibility adapter.
 
 Keep method-level coverage in `docs/official-parity.md` accurate. Added tools or
 CLI entrypoints do not establish parity with official locator, session, or

@@ -1,7 +1,9 @@
-# Official Browser Capability Parity
+# Extension Compatibility Reference (`--surface browser`)
 
-Use this reference when the task asks for a capability that is visible in the
-Codex Browser plugin but not obvious in the older bridge tool names.
+Use this reference **only** when a configuration explicitly runs
+`--surface browser` (`codex_*` structured tools). Default `3.0` plugin and
+client templates use the native `node_repl` / `cua_repl` services instead; see
+[native runtime setup](native-computer-use.md).
 
 ## Browser identity
 

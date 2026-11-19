@@ -23,7 +23,7 @@ const TAB_OWNING_TOOLS: &[&str] = &["codex_create_tab", "codex_claim_tab"];
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// List tool names, or fetch exactly one tool's MCP schema. No browser connection.
+    /// List tools or fetch one tool's MCP schema (no connection on `--surface browser`; starts worker on native surfaces).
     Tools { name: Option<String> },
     /// Call an MCP tool with a JSON object, without the MCP protocol envelope.
     Call {
@@ -31,7 +31,7 @@ pub enum Command {
         #[arg(default_value = "{}")]
         arguments: String,
     },
-    /// Read {"name":"codex_...","arguments":{}} JSONL from stdin in one session; stop on error.
+    /// Read {"name":"...","arguments":{}} JSONL from stdin in one session/worker; stop on error.
     Batch,
 }
 

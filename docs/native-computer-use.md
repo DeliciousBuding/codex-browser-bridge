@@ -10,10 +10,10 @@ objects, permissions, images, and errors.
 | `--surface computer` | Codex `cua_repl` | Use the installed Computer Use `cua` API and its configured surfaces. |
 | `--surface browser` (default) | Bridge extension adapter | Use the existing `codex_*` tools over the browser extension transport. |
 
-Codex itself uses the native services directly. For other hosts, start with
-one `cua_repl` registration if your unified configuration covers the task.
-Add `node_repl` for workflows that need the Browser plugin's own JavaScript
-API. Each registration owns a worker; handles cannot move between them.
+Codex itself uses the native services directly. The bridge's plugin and
+client templates register both services. If only one is installed or needed,
+register just that one. Each registration owns a worker; handles cannot move
+between them.
 Separate workers on one desktop still share physical input and focus.
 
 ## Runtime and setup
@@ -50,6 +50,13 @@ Local stdio launch follows Codex CLI's environment policy:
 - Desktop session variables (such as `DISPLAY` and `XAUTHORITY` on X11, or
   Wayland session variables) must be present in the launch row's `env` or
   `env_vars`.
+- For `--surface native-browser` (`node_repl`), when `[mcp_servers.node_repl]`
+  declares `BROWSER_USE_ACCESS_*` in `env_vars`, those host-provided variables
+  must be present in the launching process environment for the browser backend
+  to authorize access (`js` can still execute without them, while
+  `agent.browsers.list()` reports the browser access host unavailable).
+  `discover` and `doctor` report boolean presence flags under
+  `browser_access_env` without printing values.
 
 Startup and tool timeouts default to 30 seconds and 300 seconds unless overridden
 by `startup_timeout_sec`/`startup_timeout_ms` or `tool_timeout_sec` in the launch
@@ -64,16 +71,20 @@ codex-browser-bridge --surface computer --mode discover
 codex-browser-bridge --surface computer --mode doctor
 ```
 
-`discover` checks the launch row and explicit executable paths. `doctor`
+`discover` checks the launch row and explicit executable paths (and reports
+`browser_access_env` presence booleans for `native-browser`). `doctor`
 performs the MCP handshake, lists the filtered tool catalog, and shuts down the
 worker. Browser backend access is checked separately through the Browser JS API.
+Note that the Claude plugin registers both `codex-browser` and `codex-computer`;
+if only one runtime is installed on the host, the uninstalled server failing to
+start is expected—use a single-entry manual config if you only want one.
 
 For an MCP client, merge either or both entries into its local stdio configuration:
 
 ```json
 {
   "mcpServers": {
-    "codex-native-browser": {
+    "codex-browser": {
       "command": "codex-browser-bridge",
       "args": ["--surface", "native-browser", "--mode", "mcp"]
     },
@@ -85,8 +96,8 @@ For an MCP client, merge either or both entries into its local stdio configurati
 }
 ```
 
-The default Claude plugin still registers the extension adapter. Register the
-native entries explicitly. Use the installed plugin's instructions to
+The Claude plugin registers both native services under separate names.
+For a manual setup, use the entries above. Use the installed plugin's instructions to
 initialize Browser JS in the `node_repl` worker; forwarding its MCP catalog
 alone does not install those instructions in the receiving agent. Host-specific
 backends and approval prompts still depend on the installed runtime and
@@ -100,28 +111,53 @@ const agent = await (await import("file:///path/to/installed/browser-client.mjs"
   .setupBrowserRuntime();
 ```
 
-Use the returned `agent` in later `js` calls on the same MCP connection or in
-the same CLI `batch`. Use `doctor` to check startup and the tool catalog, then
-use `agent.browsers.list()` to check that the configured browser backend is
-available.
+Use `agent.browsers.list()` to find the intended backend. Get that browser
+using its returned ID and read its native documentation once:
+
+```js
+const browser = await agent.browsers.get(browserId);
+nodeRepl.write(await browser.documentation());
+```
+
+Reuse `agent`, `browser` and tab handles for later calls. If the native
+documentation refers to a specific capability guide, fetch that guide
+when needed rather than requesting the full documentation again.
+
+## Tool discovery and instructions
+
+Each service exposes its native `js` under the registration's own namespace:
+`codex-browser` uses `node_repl`, and `codex-computer` uses `cua_repl`. The
+client determines the displayed tool identifier; Codex's `mcp__…__js` name
+is a Codex convention. The bridge forwards initialization instructions,
+tool descriptions and tool results. The short skill chooses the service;
+it does not copy either runtime's full API or confirmation policy.
+
+- For desktop work, call `js` with `await cua.getState()` and read the
+  instructions and state returned by the installed runtime.
+- For webpage work with the Browser API, bootstrap the installed Browser
+  client as above and read its own instructions. A successful plain-JS
+  call only proves that the REPL runs; `agent.browsers.list()` checks the
+  browser backend. A generic Playwright import is not this bootstrap.
+- Keep the same MCP connection across steps. Use `js_reset` when exposed
+  and start again from the runtime's instructions after reset. If a host
+  provides tool search, it can defer schemas; the bridge does not control
+  when that host puts instructions into the model's context.
+- Use `doctor` for setup or troubleshooting. During normal work, bootstrap
+  once per worker, ask for the state needed for the next decision, and request
+  an image when the task needs it. The bridge does not truncate native
+  instructions or suppress results to save context.
+
+The bridge does not import Codex's system prompt, app-private context,
+secrets, or approval decisions into another MCP host. Backend availability
+and policy depend on that installation; a successful handshake is not proof
+that a particular backend can execute an action.
 
 ## Native methods and authorization
 
 Native catalogs can contain `js`, `js_reset`, `js_add_node_module_dir`, and
 `turn_ended`. The installed service and tool filters determine availability.
-Call `js` and read its returned
-documentation and state before issuing UI actions. When launched from
-`unified-computer-use` (`CUA_REPL_ENABLED_SURFACES="browser,computer"`), the
-persistent `cua` binding inside `js` covers both desktop applications
-(`cua.listApps()`, `cua.listWindows()`, `cua.getApp({windowId})`,
-`cua.computer.launch_app()`) and browser tabs (`cua.listBrowsers()`,
-`cua.getBrowser()`, `cua.createBrowserTab()`, `cua.getTab()`, `cua.listTabs()`)
-through a shared `Target` interface (`getAXState()`, `getScreenshot()`,
-`getAXStateAndScreenshot()`, `click(elementIndex | [x, y])`, `drag`, `scroll`,
-`selectText`, `setValue`, `performSecondaryAction`, `paste`, `pressKey`,
-`typeText`). Use `--surface browser` when you want standalone `codex_*` MCP
-tools over the Chromium extension pipe without running `cua_repl`; use
-`--surface computer` when you want the stateful `cua_repl` JavaScript runtime.
+With the unified configuration, `cua_repl` can also operate browser tabs
+through its `cua` API. That API remains separate from the Browser plugin's API.
 
 `enabled_tools` is applied before `disabled_tools` across advertised catalogs,
 direct `tools/call` requests, and the end-of-session `turn_ended` cleanup hook.

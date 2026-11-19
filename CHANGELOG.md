@@ -4,16 +4,49 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-19
+
+### Changed
+
+- **Breaking:** The Claude plugin, manual client examples, and npm setup hint
+  now register Browser Use (`node_repl`) and Computer Use (`cua_repl`)
+  independently (`codex-browser` and `codex-computer`). Their native catalogs
+  replace the 66-tool `codex_*` catalog in those integrations. Pass
+  `--surface browser` explicitly for existing scripts or clients that still
+  need `codex_*` tools. See [docs/upgrade-v3.md](docs/upgrade-v3.md).
+- Trim the bundled skill to concise native-first routing (`SKILL.md` plus
+  `native-computer-use.md` and compatibility `official-parity.md`), removing
+  five orphaned 2.x `codex_*` reference files and the obsolete Go-era
+  `Makefile`.
+- Remove four unused legacy Rust library wrappers (`dom_cua_type`,
+  `get_resource_content`, `nav_and_wait`, `click_and_wait`) and remove the
+  `windows` crate from production dependencies (`CREATE_NO_WINDOW` is already
+  applied directly on `tokio::process::Command`; tests keep it as a Windows
+  dev-dependency).
+
 ### Added
 
 - Relay the installed Codex Browser/Chrome `node_repl` with
   `--surface native-browser`, using the same launcher and MCP forwarding as
-  native Computer Use. Existing extension tools keep their current entry.
+  native Computer Use, plus `browser_access_env` boolean diagnostics in
+  `discover`/`doctor`.
+- Add [docs/upgrade-v3.md](docs/upgrade-v3.md) covering the 2.x to 3.0.0
+  native-first transition.
 
 ### Fixed
 
+- Redact malformed `~/.codex/config.toml` parse errors to line numbers only so
+  private paths or tokens in host config are never echoed to stderr.
+- Keep filtering late `tools/list` catalog responses even after a client
+  cancels the request, avoid duplicate synthetic `turn_ended` calls after an
+  explicit host `turn_ended`, and tolerate missing `turn_ended` (`-32601`)
+  during session teardown.
+- Validate native CLI `call`/`batch` tool names, JSON object arguments, line
+  numbers, and `--mode cli` usage before launch discovery, and pass `Interrupt`
+  cleanup on failed CLI runs.
 - Report an unanswered native tool call as interrupted when its MCP connection
-  closes, and reject malformed tool calls before forwarding.
+  closes, and reject malformed `tools/call` IDs with `-32600` instead of
+  dropping them.
 - Report locator checkbox postcondition timeouts consistently without replaying
   the click.
 

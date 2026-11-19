@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>codex-browser-bridge — Codex Browser Use + Native Computer Use for every agent</title>
-<meta name="description" content="Break the wall: 66 browser MCP tools over the ChatGPT desktop app's extension pipe, plus opt-in native Codex Computer Use through cua_repl. One Rust binary. Zero SDK bloat.">
+<title>codex-browser-bridge — MCP access to installed Codex Browser Use and Computer Use</title>
+<meta name="description" content="A local stdio MCP server and CLI that relays the installed Codex node_repl (Browser Use) and cua_repl (Computer Use) runtimes, with a compatibility Chromium extension adapter.">
 <meta name="theme-color" content="#06070a">
 <link rel="canonical" href="https://deliciousbuding.github.io/codex-browser-bridge/">
 <meta property="og:type" content="website">
-<meta property="og:title" content="codex-browser-bridge — Break the Wall">
-<meta property="og:description" content="A stdio bridge for installed Codex Browser and Computer Use, with a structured Chromium extension adapter.">
+<meta property="og:title" content="codex-browser-bridge">
+<meta property="og:description" content="A stdio bridge for installed Codex Browser Use and Computer Use, with a compatibility Chromium extension adapter.">
 <meta property="og:url" content="https://deliciousbuding.github.io/codex-browser-bridge/">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23090b10'/%3E%3Cpath d='M8 11h9a5 5 0 0 1 0 10H8' stroke='%237aa2ff' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Cpath d='M8 21h9a5 5 0 0 0 0-10H8' stroke='%235eead4' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
@@ -544,9 +544,9 @@
       <b>codex-browser-bridge</b><span> / bridge</span>
     </a>
     <div class="nav-links">
-      <a href="#surfaces" data-en="Surfaces" data-zh="双表面">Surfaces</a>
-      <a href="#code" data-en="Code" data-zh="接入代码">Code</a>
-      <a href="#tools" data-en="66+4 Tools" data-zh="66+4 工具">66+4 Tools</a>
+      <a href="#surfaces" data-en="Entries" data-zh="入口架构">Entries</a>
+      <a href="#code" data-en="Setup" data-zh="接入代码">Setup</a>
+      <a href="#tools" data-en="Catalog" data-zh="工具目录">Catalog</a>
       <a href="#trust" data-en="Trust model" data-zh="可信边界">Trust model</a>
     </div>
     <div class="nav-right">
@@ -570,23 +570,22 @@
       <div>
         <div class="eyebrow">
           <i class="dot" aria-hidden="true"></i>
-          <span class="ver">v2.1.1</span><span class="sep">·</span>
+          <span class="ver">v3.0</span><span class="sep">·</span>
           <span data-en="Single Rust Binary" data-zh="单一 Rust 二进制">Single Rust Binary</span><span class="sep">·</span>
-          <span data-en="Zero SDK Bloat" data-zh="零 SDK 负担">Zero SDK Bloat</span>
+          <span data-en="Native-First MCP Relay" data-zh="原生优先 MCP 中继">Native-First MCP Relay</span>
         </div>
         <h1>
-          <span data-en="Break the wall." data-zh="打破那堵墙。">Break the wall.</span><br>
-          <span class="grad" data-en="Codex Browser Use" data-zh="Codex 浏览器操作">Codex Browser Use</span><br>
-          <span class="grad" data-en="and Native Computer Use," data-zh="与原生电脑操作，">and Native Computer Use,</span><br>
-          <span class="thin" data-en="for every agent." data-zh="为每一个 Agent。">for every agent.</span>
+          <span class="grad" data-en="Codex Browser Use" data-zh="Codex Browser Use">Codex Browser Use</span><br>
+          <span class="grad" data-en="and Computer Use" data-zh="与 Computer Use">and Computer Use</span><br>
+          <span class="thin" data-en="for any MCP client." data-zh="接入任意 MCP 客户端。">for any MCP client.</span>
         </h1>
         <p class="lede">
-          <span data-en="Your ChatGPT browser extension and the installed cua_repl runtime are already on this machine. The bridge turns them into an MCP surface any agent can drive —" data-zh="你机器上早已装着 ChatGPT 浏览器扩展和 cua_repl 运行时。桥接器把它们变成任何 Agent 都能驱动的 MCP 接口——">Your ChatGPT browser extension and the installed cua_repl runtime are already on this machine. The bridge turns them into an MCP surface any agent can drive —</span>
+          <span data-en="A local stdio MCP and CLI bridge for the installed Codex node_repl (Browser Use) and cua_repl (Computer Use) runtimes, with a compatibility Chromium extension adapter —" data-zh="一个面向本机已安装 Codex node_repl（Browser Use）与 cua_repl（Computer Use）运行时的本地 stdio MCP 与 CLI 桥接器，并保留直连 Chromium 扩展的兼容入口——">A local stdio MCP and CLI bridge for the installed Codex node_repl (Browser Use) and cua_repl (Computer Use) runtimes, with a compatibility Chromium extension adapter —</span>
           <strong data-en=" no profile copies, no WebDriver, no second extension." data-zh="不复制配置、不用 WebDriver、不装第二个扩展。"> no profile copies, no WebDriver, no second extension.</strong>
         </p>
 
         <div class="install">
-          <div class="install-label" data-en="Install in one command" data-zh="一条命令安装">Install in one command</div>
+          <div class="install-label" data-en="Claude Code plugin" data-zh="Claude Code 插件安装">Claude Code plugin</div>
           <div class="cmd">
             <span class="prompt" aria-hidden="true">$</span>
             <code id="installCmd"><span>claude plugin install codex-browser --marketplace</span> <span class="nowrap">DeliciousBuding/codex-browser-bridge</span></code>
@@ -605,14 +604,14 @@
             <span data-en="Releases" data-zh="版本发布">Releases</span><span class="arr" aria-hidden="true">↗</span>
           </a>
           <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md">
-            <span data-en="Native Computer Use guide" data-zh="原生电脑操作指南">Native Computer Use guide</span><span class="arr" aria-hidden="true">↗</span>
+            <span data-en="Native setup guide" data-zh="原生接入指南">Native setup guide</span><span class="arr" aria-hidden="true">↗</span>
           </a>
-          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md">
-            <span data-en="Official parity matrix" data-zh="官方对照矩阵">Official parity matrix</span><span class="arr" aria-hidden="true">↗</span>
+          <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v3.md">
+            <span data-en="Upgrading to 3.0" data-zh="升级到 3.0">Upgrading to 3.0</span><span class="arr" aria-hidden="true">↗</span>
           </a>
         </div>
         <div class="hero-note">
-          <span data-en="MIT · Windows / Linux / macOS source · npm or a single binary" data-zh="MIT 许可 · Windows / Linux / macOS 源码 · npm 或单二进制">MIT · Windows / Linux / macOS source · npm or a single binary</span>
+          <span data-en="MIT · Windows / Linux binaries · macOS source · npm or standalone executable" data-zh="MIT 许可 · Windows / Linux 二进制 · macOS 源码 · npm 或独立可执行文件">MIT · Windows / Linux binaries · macOS source · npm or standalone executable</span>
         </div>
       </div>
 
@@ -620,25 +619,23 @@
         <div class="term">
           <div class="term-bar">
             <div class="tl"><i></i><i></i><i></i></div>
-            <div class="term-title">bridge://session-42</div>
-            <div class="term-live"><i></i>LIVE</div>
+            <div class="term-title">codex-browser-bridge v3.0</div>
+            <div class="term-live"><i></i>STDIO</div>
           </div>
           <div class="term-body">
             <div class="row"><span class="t-dim">$</span> <span class="t-cmd">claude plugin install codex-browser</span></div>
-            <div class="row"><span class="t-ok">✓</span> marketplace added <span class="t-dim">·</span> <span class="t-val">codex-browser@2.1.1</span></div>
-            <div class="row"><span class="t-ok">✓</span> mcp server registered <span class="t-dim">·</span> <span class="t-val">stdio · full profile</span></div>
+            <div class="row"><span class="t-ok">✓</span> codex-browser <span class="t-arrow">→</span> <span class="t-val">--surface native-browser (node_repl)</span></div>
+            <div class="row"><span class="t-ok">✓</span> codex-computer <span class="t-arrow">→</span> <span class="t-val">--surface computer (cua_repl)</span></div>
             <div class="sp"></div>
-            <div class="row"><span class="t-dim">&gt;</span> <span class="t-cmd">claim the dashboard and capture it</span></div>
+            <div class="row"><span class="t-dim">$</span> <span class="t-cmd">codex-browser-bridge --surface native-browser --mode doctor</span></div>
+            <div class="row"><span class="t-tool">● status</span> <span class="t-arrow">→</span> <span class="t-val">native_mcp_connected</span> <span class="t-dim">· tools: [js, js_reset, …]</span></div>
             <div class="sp"></div>
-            <div class="row"><span class="t-tool">● codex_list_browsers</span> <span class="t-arrow">→</span> <span class="t-val">1 instance · edge</span> <span class="t-dim">26.1016</span></div>
-            <div class="row"><span class="t-tool">● codex_user_tabs</span> <span class="t-arrow">→</span> <span class="t-val">7 tabs</span> <span class="t-dim">· 3 unclaimed</span></div>
-            <div class="row"><span class="t-tool">● codex_claim_tab</span> <span class="t-arrow">→</span> <span class="t-val">#42 "Dashboard"</span> <span class="t-dim">owned</span></div>
-            <div class="row"><span class="t-tool">● codex_observe</span> <span class="t-arrow">→</span> <span class="t-val">networkidle</span> <span class="t-dim">· 0 gaps</span></div>
-            <div class="row"><span class="t-tool">● codex_screenshot</span> <span class="t-arrow">→</span> <span class="t-val">1280×800 png</span> <span class="t-dim">· 214 KB</span></div>
-            <div class="row"><span class="t-ok">✓</span> turn ended <span class="t-dim">· owned tabs released</span></div>
+            <div class="row"><span class="t-dim">$</span> <span class="t-cmd">codex-browser-bridge --surface computer --mode doctor</span></div>
+            <div class="row"><span class="t-tool">● status</span> <span class="t-arrow">→</span> <span class="t-val">native_mcp_connected</span> <span class="t-dim">· elicitation passthrough</span></div>
+            <div class="row"><span class="t-ok">✓</span> turn_ended <span class="t-dim">· owned process tree closed</span></div>
             <div class="term-foot">
-              <span><b>66</b> browser tools</span>
-              <span><b>4</b> native cua tools</span>
+              <span><b>2</b> native runtimes</span>
+              <span><b>66</b> compat tools</span>
               <span><b>0</b> profile copies</span>
             </div>
           </div>
@@ -651,9 +648,9 @@
   <div class="stats" aria-hidden="true">
     <div class="wrap stats-in">
       <div class="stat"><div class="n">2<em> native</em></div><div class="l">node_repl · cua_repl</div></div>
-      <div class="stat"><div class="n">66<em> tools</em></div><div class="l" data-en="Extension adapter" data-zh="扩展适配入口">Extension adapter</div></div>
-      <div class="stat"><div class="n">2<em>eras</em></div><div class="l" data-en="MCP protocol" data-zh="MCP 协议">MCP protocol</div></div>
-      <div class="stat"><div class="n">0<em>copies</em></div><div class="l" data-en="of your profile" data-zh="复制你的配置">of your profile</div></div>
+      <div class="stat"><div class="n">66<em> compat</em></div><div class="l" data-en="--surface browser tools" data-zh="--surface browser 兼容工具">--surface browser tools</div></div>
+      <div class="stat"><div class="n">2<em> eras</em></div><div class="l" data-en="MCP protocol" data-zh="MCP 协议">MCP protocol</div></div>
+      <div class="stat"><div class="n">0<em> copies</em></div><div class="l" data-en="of your profile" data-zh="复制你的配置">of your profile</div></div>
     </div>
   </div>
 
@@ -661,62 +658,60 @@
   <section class="sec" id="surfaces">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker"><span class="hash">//</span><span data-en="Dual-surface architecture" data-zh="双表面架构">Dual-surface architecture</span></div>
-        <h2 data-en="One bridge for installed Codex runtimes." data-zh="一个桥接器，复用已安装的 Codex 运行时。">One bridge for installed Codex runtimes.</h2>
-        <p data-en="Codex keeps its browser and computer runtimes behind the desktop app. The bridge speaks their native protocols directly, so Claude Code and every other MCP client can reach both — with the host's own configuration, permissions and cleanup semantics preserved." data-zh="Codex 把浏览器与电脑运行时藏在桌面应用后面。桥接器直接与它们的原生协议通信，让 Claude Code 和其他任何 MCP 客户端都能触达两者，同时保留宿主自身的配置、权限与清理语义。">Codex keeps its browser and computer runtimes behind the desktop app. The bridge speaks their native protocols directly, so Claude Code and every other MCP client can reach both — with the host's own configuration, permissions and cleanup semantics preserved.</p>
+        <div class="kicker"><span class="hash">//</span><span data-en="Three entries" data-zh="三个入口">Three entries</span></div>
+        <h2 data-en="Native-first relay, with a compatibility adapter." data-zh="原生运行时优先，保留扩展兼容适配层。">Native-first relay, with a compatibility adapter.</h2>
+        <p data-en="The plugin and client templates register Codex's installed node_repl and cua_repl runtimes directly. The structured Chromium extension adapter remains available via --surface browser for existing 2.x workflows." data-zh="插件与客户端模板直接注册本机已安装的 Codex node_repl 与 cua_repl 运行时。结构化 Chromium 扩展适配层继续通过 --surface browser 为已有 2.x 工作流提供兼容。">The plugin and client templates register Codex's installed node_repl and cua_repl runtimes directly. The structured Chromium extension adapter remains available via --surface browser for existing 2.x workflows.</p>
       </div>
 
       <div class="surfaces">
-        <!-- computer -->
-        <article class="surface computer">
+        <!-- native browser -->
+        <article class="surface browser">
           <div class="s-top">
-            <span class="s-tag">--surface computer</span>
-            <span class="s-status" data-en="Opt-in" data-zh="按需启用">Opt-in</span>
+            <span class="s-tag">--surface native-browser</span>
+            <span class="s-status" data-en="Primary · Browser" data-zh="主入口 · 浏览器">Primary · Browser</span>
           </div>
-          <h3><span data-en="Native Computer Use," data-zh="原生 Computer Use，">Native Computer Use,</span><br><span data-en="unlocked for everyone." data-zh="向所有 Agent 开放。">unlocked for everyone.</span></h3>
-          <p class="s-copy" data-en="The installed Codex cua_repl service is a stateful JavaScript runtime for desktop windows and browser tabs alike. The bridge discovers it, relays it, and cleans it up." data-zh="已安装的 Codex cua_repl 服务是一个有状态 JavaScript 运行时，能同时操作桌面窗口与浏览器标签页。桥接器负责发现、转发与收尾。">The installed Codex cua_repl service is a stateful JavaScript runtime for desktop windows and browser tabs alike. The bridge discovers it, relays it, and cleans it up.</p>
-          <div class="s-code"><span class="d">// one Target interface, two worlds</span>
-const wins = <span class="k">await</span> cua.listWindows();
-<span class="k">const</span> app = <span class="k">await</span> cua.getApp({ windowId: wins[0].windowId });
-<span class="k">const</span> state = <span class="k">await</span> app.getAXStateAndScreenshot();
-<span class="k">await</span> app.click(state.elements[0].index);
-<span class="k">await</span> app.typeText(<span class="s">"hello from the bridge"</span>);</div>
+          <h3><span data-en="Installed Browser Use" data-zh="原生 Browser Use">Installed Browser Use</span><br><span data-en="via Codex node_repl." data-zh="直连 Codex node_repl。">via Codex node_repl.</span></h3>
+          <p class="s-copy" data-en="Relays the installed [mcp_servers.node_repl] service over stdio so external MCP clients use the official Browser/Chrome plugin JavaScript API, backend selection, and permissions." data-zh="通过 stdio 转发本机已安装的 [mcp_servers.node_repl] 服务，让外部 MCP 客户端直接使用官方 Browser/Chrome 插件的 JavaScript API、后端选择与权限体系。">Relays the installed [mcp_servers.node_repl] service over stdio so external MCP clients use the official Browser/Chrome plugin JavaScript API, backend selection, and permissions.</p>
+          <div class="s-code"><span class="d">// bootstrap once per node_repl worker</span>
+<span class="k">const</span> { setupBrowserRuntime } = <span class="k">await</span> import(pluginClientUrl);
+<span class="k">const</span> agent = <span class="k">await</span> setupBrowserRuntime();
+<span class="k">const</span> browser = <span class="k">await</span> agent.browsers.get(browserId);
+nodeRepl.write(<span class="k">await</span> browser.documentation());</div>
           <ul class="s-list">
-            <li><span data-en="Connects any MCP agent or shell script to Codex's installed cua_repl (@oai/cua + @oai/sky + @oai/browser-desktop)." data-zh="把任何 MCP Agent 或 shell 脚本接到 Codex 已安装的 cua_repl（@oai/cua + @oai/sky + @oai/browser-desktop）。">Connects any MCP agent or shell script to Codex's installed <b>cua_repl</b> (@oai/cua + @oai/sky + @oai/browser-desktop).</span></li>
-            <li><span data-en="Unified cua Target API: listWindows, getApp({windowId}), launch_app(), listBrowsers, getTab(), shared getAXStateAndScreenshot, click(elementIndex | [x,y]), drag, scroll, pressKey and typeText." data-zh="统一的 cua Target API：listWindows、getApp({windowId})、launch_app()、listBrowsers、getTab()，以及共享的 getAXStateAndScreenshot、click(elementIndex | [x,y])、drag、scroll、pressKey、typeText。">Unified <b>cua Target API</b>: listWindows, getApp({windowId}), launch_app(), listBrowsers, getTab(), shared getAXStateAndScreenshot, click(elementIndex | [x,y]), drag, scroll, pressKey and typeText.</span></li>
-            <li><span data-en="Full-duplex, cancel-safe JSON-RPC stdio relay with bidirectional elicitation/create application approval passthrough." data-zh="全双工、可安全取消的 JSON-RPC stdio 中继，双向透传 elicitation/create 应用授权。">Full-duplex, cancel-safe JSON-RPC stdio relay with bidirectional <b>elicitation/create</b> application approval passthrough.</span></li>
-            <li><span data-en="turn_ended execution-context cleanup, then Windows Job Object / Unix process-group teardown. Timed-out calls are never replayed." data-zh="turn_ended 执行上下文清理，随后以 Windows Job Object / Unix 进程组收尾。超时的调用绝不重放。">turn_ended execution-context cleanup, then <b>Windows Job Object / Unix process-group</b> teardown. Timed-out calls are never replayed.</span></li>
-            <li><span data-en="Preserves the host launch row: env, env_vars, timeouts, enabled_tools and disabled_tools — the bridge never rewrites your config." data-zh="完整保留宿主启动行：env、env_vars、超时、enabled_tools 与 disabled_tools——桥接器从不改写你的配置。">Preserves the host launch row: env, env_vars, timeouts, enabled_tools and disabled_tools — the bridge never rewrites your config.</span></li>
+            <li><span data-en="Reads [mcp_servers.node_repl] from ~/.codex/config.toml (or --native-config) without modifying user config." data-zh="读取 ~/.codex/config.toml 中的 [mcp_servers.node_repl]（或 --native-config），从不改写用户配置。">Reads <b>[mcp_servers.node_repl]</b> from ~/.codex/config.toml (or --native-config) without modifying user config.</span></li>
+            <li><span data-en="Preserves the runtime's own catalog, schemas, images, and bidirectional elicitation/create approval prompts." data-zh="原样保留运行时的工具目录、schema、图片与双向 elicitation/create 审批弹窗。">Preserves the runtime's own catalog, schemas, images, and bidirectional <b>elicitation/create</b> approval prompts.</span></li>
+            <li><span data-en="Reports boolean browser_access_env diagnostics in discover/doctor without exposing host token values." data-zh="在 discover/doctor 中输出 browser_access_env 布尔诊断字段，不暴露宿主环境变量值。">Reports boolean <b>browser_access_env</b> diagnostics in discover/doctor without exposing host token values.</span></li>
+            <li><span data-en="Runs turn_ended cleanup and closes the owned worker process tree on EOF, SIGINT, or SIGTERM." data-zh="在 EOF、SIGINT 或 SIGTERM 时执行 turn_ended 清理并关闭自有 worker 进程树。">Runs <b>turn_ended</b> cleanup and closes the owned worker process tree on EOF, SIGINT, or SIGTERM.</span></li>
           </ul>
           <div class="s-foot">
             <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md">
-              <span data-en="Read the native guide" data-zh="阅读原生指南">Read the native guide</span> <span aria-hidden="true">→</span>
+              <span data-en="Read the native setup guide" data-zh="阅读原生接入指南">Read the native setup guide</span> <span aria-hidden="true">→</span>
             </a>
           </div>
         </article>
 
-        <!-- browser -->
-        <article class="surface browser">
+        <!-- computer -->
+        <article class="surface computer">
           <div class="s-top">
-            <span class="s-tag">--surface browser</span>
-            <span class="s-status" data-en="Default" data-zh="默认表面">Default</span>
+            <span class="s-tag">--surface computer</span>
+            <span class="s-status" data-en="Primary · Desktop" data-zh="主入口 · 桌面">Primary · Desktop</span>
           </div>
-          <h3><span data-en="Direct Chromium pipe," data-zh="直连 Chromium 管道，">Direct Chromium pipe,</span><br><span data-en="66 tools deep." data-zh="66 个工具全开。">66 tools deep.</span></h3>
-          <p class="s-copy" data-en="Native-messaging straight into your logged-in Chrome or Edge profile. No Codex desktop app required, no new extension, no remote debugging port." data-zh="原生消息直连你已登录的 Chrome / Edge 配置。不需要运行 Codex 桌面应用，不装新扩展，不开远程调试端口。">Native-messaging straight into your logged-in Chrome or Edge profile. No Codex desktop app required, no new extension, no remote debugging port.</p>
-          <div class="s-code"><span class="d">// transport discovery</span>
-Windows  \\.\pipe\codex-browser-use\*
-Linux    /tmp/codex-browser-use/*.sock
-         <span class="d">$XDG_RUNTIME_DIR/codex-browser-use</span></div>
+          <h3><span data-en="Installed Computer Use" data-zh="原生 Computer Use">Installed Computer Use</span><br><span data-en="via Codex cua_repl." data-zh="直连 Codex cua_repl。">via Codex cua_repl.</span></h3>
+          <p class="s-copy" data-en="Discovers and relays the installed Codex cua_repl service for desktop windows and unified browser targets, preserving host env policy, tool filters, and cleanup." data-zh="发现并转发本机已安装的 Codex cua_repl 服务，用于操作桌面窗口与统一浏览器目标，完整保留宿主环境策略、工具过滤与清理语义。">Discovers and relays the installed Codex cua_repl service for desktop windows and unified browser targets, preserving host env policy, tool filters, and cleanup.</p>
+          <div class="s-code"><span class="d">// stateful cua runtime over one worker</span>
+<span class="k">const</span> wins = <span class="k">await</span> cua.listWindows();
+<span class="k">const</span> app = <span class="k">await</span> cua.getApp({ windowId: wins[0].windowId });
+<span class="k">const</span> state = <span class="k">await</span> app.getAXStateAndScreenshot();
+<span class="k">await</span> app.click(state.elements[0].index);</div>
           <ul class="s-list">
-            <li><span data-en="Direct native-messaging pipe or Unix socket to the extension — the bridge is the client, not a second runtime." data-zh="原生消息命名管道或 Unix socket 直连扩展——桥接器是客户端，不是第二个运行时。">Direct native-messaging <b>pipe or Unix socket</b> to the extension — the bridge is the client, not a second runtime.</span></li>
-            <li><span data-en="Background focus emulation (Emulation.setFocusEmulationEnabled): input and screenshots never steal your foreground focus." data-zh="后台焦点模拟（Emulation.setFocusEmulationEnabled）：输入与截图不会抢走你的前台焦点。">Background focus emulation (<b>Emulation.setFocusEmulationEnabled</b>): input and screenshots never steal your foreground focus.</span></li>
-            <li><span data-en="codex_observe with networkidle, url_glob, safe url_regex and level-filtered logs — explicit cursors, explicit gaps." data-zh="codex_observe 支持 networkidle、url_glob、安全 url_regex 与按级别过滤的日志——游标显式，缺口显式。">codex_observe with <b>networkidle</b>, url_glob, safe url_regex and level-filtered logs — explicit cursors, explicit gaps.</span></li>
-            <li><span data-en="codex_locator composes and / or / has / has_not with exact select descriptors and element_info inspection." data-zh="codex_locator 组合 and / or / has / has_not，支持精确选项描述符与 element_info 检查。">codex_locator composes <b>and / or / has / has_not</b> with exact select descriptors and element_info inspection.</span></li>
-            <li><span data-en="Tabs.selected resolution, same-origin iframe DOM snapshots, and failure-safe input that is never replayed." data-zh="Tabs.selected 定位、同源 iframe DOM 快照，以及绝不重放的失败安全输入。"><b>Tabs.selected</b> resolution, same-origin iframe DOM snapshots, and failure-safe input that is never replayed.</span></li>
+            <li><span data-en="Discovers [mcp_servers.cua_repl] in Codex config or the generated unified-computer-use .mcp.json." data-zh="自动发现 Codex 配置中的 [mcp_servers.cua_repl] 或 unified-computer-use 生成的 .mcp.json。">Discovers <b>[mcp_servers.cua_repl]</b> in Codex config or the generated unified-computer-use .mcp.json.</span></li>
+            <li><span data-en="Full-duplex, cancel-safe JSON-RPC stdio relay with bidirectional elicitation/create application approval passthrough." data-zh="全双工、可安全取消的 JSON-RPC stdio 中继，双向透传 elicitation/create 应用授权。">Full-duplex, cancel-safe JSON-RPC stdio relay with bidirectional <b>elicitation/create</b> application approval passthrough.</span></li>
+            <li><span data-en="CLI call and batch modes support --image-dir artifact capture while preserving original base64 blocks." data-zh="CLI 的 call 与 batch 模式支持 --image-dir 保存图片产物，同时保留原始 base64 内容。">CLI <b>call</b> and <b>batch</b> modes support --image-dir artifact capture while preserving original base64 blocks.</span></li>
+            <li><span data-en="Windows Job Object / Unix process-group teardown; timed-out or interrupted calls are never replayed." data-zh="Windows Job Object / Unix 进程组收尾；超时或中断的调用绝不重放。"><b>Windows Job Object / Unix process-group</b> teardown; timed-out or interrupted calls are never replayed.</span></li>
           </ul>
           <div class="s-foot">
             <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/official-parity.md">
-              <span data-en="Inspect the parity matrix" data-zh="查看对照矩阵">Inspect the parity matrix</span> <span aria-hidden="true">→</span>
+              <span data-en="Compatibility matrix (--surface browser)" data-zh="扩展兼容矩阵（--surface browser）">Compatibility matrix (--surface browser)</span> <span aria-hidden="true">→</span>
             </a>
           </div>
         </article>
@@ -726,7 +721,7 @@ Linux    /tmp/codex-browser-use/*.sock
         <div class="arch-flow">
           <div class="arch-node">
             <div class="t" data-en="Clients" data-zh="客户端">Clients</div>
-            <div class="v">Claude Code · Cursor<br>OpenClaw · shell</div>
+            <div class="v">Claude Code · Cursor<br>Antigravity · OpenClaw · shell</div>
           </div>
           <div class="arch-arrow" aria-hidden="true">→</div>
           <div class="arch-node hot">
@@ -735,11 +730,11 @@ Linux    /tmp/codex-browser-use/*.sock
           </div>
           <div class="arch-arrow" aria-hidden="true">→</div>
           <div class="arch-node">
-            <div class="t" data-en="Choose one entry" data-zh="按需选择入口">Choose one entry</div>
-            <div class="v"><code>--surface computer</code> → <code>cua_repl</code><br><code>--surface native-browser</code> → <code>node_repl</code><br><code>--surface browser</code> → Chromium extension</div>
+            <div class="t" data-en="Three entries" data-zh="三个入口">Three entries</div>
+            <div class="v"><code>--surface native-browser</code> → <code>node_repl</code><br><code>--surface computer</code> → <code>cua_repl</code><br><code>--surface browser</code> → Chromium extension (compat)</div>
           </div>
         </div>
-        <div class="arch-note" data-en="One unified runtime can handle desktop and browser tasks. Use native-browser when you need the installed Browser plugin's JavaScript API." data-zh="统一运行时可同时处理桌面和浏览器任务。需要已安装 Browser 插件的 JavaScript API 时，使用 native-browser。">One unified runtime can handle desktop and browser tasks. Use native-browser when you need the installed Browser plugin's JavaScript API.</div>
+        <div class="arch-note" data-en="The Claude plugin and client examples register native-browser and computer by default. Pass --surface browser explicitly for existing 2.x codex_* workflows." data-zh="Claude 插件与客户端模板默认注册 native-browser 与 computer。已有 2.x codex_* 工作流请显式传入 --surface browser。">The Claude plugin and client examples register native-browser and computer by default. Pass --surface browser explicitly for existing 2.x codex_* workflows.</div>
       </div>
     </div>
   </section>
@@ -748,9 +743,9 @@ Linux    /tmp/codex-browser-use/*.sock
   <section class="sec" id="code">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker"><span class="hash">//</span><span data-en="Three ways in" data-zh="三种接入方式">Three ways in</span></div>
-        <h2 data-en="Plug it in. Then hand it real work." data-zh="接上它，然后把真实工作交给它。">Plug it in. Then hand it real work.</h2>
-        <p data-en="The Claude plugin registers the structured extension adapter. Register the native service you need separately." data-zh="Claude 插件注册结构化扩展工具。原生服务按需单独注册。">The Claude plugin registers the structured extension adapter. Register the native service you need separately.</p>
+        <div class="kicker"><span class="hash">//</span><span data-en="Quick setup" data-zh="快速接入">Quick setup</span></div>
+        <h2 data-en="Register the runtimes you use." data-zh="按需注册你的运行时。">Register the runtimes you use.</h2>
+        <p data-en="The Claude plugin registers native Browser Use and Computer Use separately. Manual configurations can keep both or just one entry; --surface browser stays available for compatibility." data-zh="Claude 插件分别注册原生 Browser Use 与 Computer Use。手工配置可保留两个或只保留一个入口；--surface browser 保留用于向后兼容。">The Claude plugin registers native Browser Use and Computer Use separately. Manual configurations can keep both or just one entry; --surface browser stays available for compatibility.</p>
       </div>
 
       <div class="code-shell">
@@ -762,7 +757,7 @@ Linux    /tmp/codex-browser-use/*.sock
             <span class="idx">02</span><span data-en="Native Computer Use" data-zh="原生 Computer Use">Native Computer Use</span>
           </button>
           <button class="tab" role="tab" id="tab-3" aria-controls="panel-3" aria-selected="false" tabindex="-1" data-tab="3">
-            <span class="idx">03</span><span data-en="Browser Use" data-zh="浏览器操作">Browser Use</span>
+            <span class="idx">03</span><span data-en="Native Browser &amp; Compat" data-zh="原生浏览器与兼容模式">Native Browser &amp; Compat</span>
           </button>
         </div>
 
@@ -802,11 +797,7 @@ npm i -g @delicious233/codex-browser-bridge</pre>
   <span class="tk-p">"mcpServers"</span>: {
     <span class="tk-p">"codex-browser"</span>: {
       <span class="tk-p">"command"</span>: <span class="tk-s">"codex-browser-bridge"</span>,
-      <span class="tk-p">"args"</span>: [<span class="tk-s">"--mode"</span>, <span class="tk-s">"mcp"</span>, <span class="tk-s">"--profile"</span>, <span class="tk-s">"full"</span>],
-      <span class="tk-p">"transport"</span>: <span class="tk-s">"stdio"</span>,
-      <span class="tk-p">"env"</span>: {
-        <span class="tk-p">"CODEX_BRIDGE_BROWSER_FAMILY"</span>: <span class="tk-s">"edge"</span>
-      }
+      <span class="tk-p">"args"</span>: [<span class="tk-s">"--surface"</span>, <span class="tk-s">"native-browser"</span>, <span class="tk-s">"--mode"</span>, <span class="tk-s">"mcp"</span>]
     },
     <span class="tk-p">"codex-computer"</span>: {
       <span class="tk-p">"command"</span>: <span class="tk-s">"codex-browser-bridge"</span>,
@@ -867,29 +858,30 @@ JSONL</pre>
         <div class="panel" id="panel-3" role="tabpanel" aria-labelledby="tab-3" hidden>
           <div class="panel-head">
             <div>
-              <h3 data-en="Observe, locate, capture — with no replay" data-zh="观察、定位、截图——绝不重放">Observe, locate, capture — with no replay</h3>
-              <p data-en="Arm observation before the action so early events are not lost. Locators compose declaratively; a dispatched input is never retried behind your back. Same tab, three JSONL steps." data-zh="在动作之前开启观察，避免丢失早期事件。定位器以声明式组合；已发出的输入绝不会在背后重试。同一个标签页，三步 JSONL。">Arm observation before the action so early events are not lost. Locators compose declaratively; a dispatched input is never retried behind your back. Same tab, three JSONL steps.</p>
+              <h3 data-en="Native Browser bootstrap (node_repl), plus --surface browser compatibility" data-zh="原生浏览器初始化（node_repl）与 --surface browser 兼容模式">Native Browser bootstrap (node_repl), plus --surface browser compatibility</h3>
+              <p data-en="Check launch discovery with doctor, bootstrap the installed Browser client once per worker, and reuse browser/tab handles. Existing 2.x scripts can keep using --surface browser explicitly." data-zh="先用 doctor 核对发现与握手，每个 worker 初始化一次已安装的 Browser 客户端并复用句柄；已有 2.x 脚本可继续显式使用 --surface browser。">Check launch discovery with doctor, bootstrap the installed Browser client once per worker, and reuse browser/tab handles. Existing 2.x scripts can keep using --surface browser explicitly.</p>
             </div>
           </div>
 
           <div class="block">
             <div class="block-bar">
-              <span class="fname">codex-browser-bridge batch</span><span class="kind">jsonl</span>
+              <span class="fname">native-browser · node_repl</span><span class="kind">javascript</span>
               <button class="copy" type="button" data-copy="#code-browser">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>
                 <span data-en="Copy" data-zh="复制">Copy</span>
               </button>
             </div>
-<pre class="code" id="code-browser"><span class="tk-c">// 1 · observe before acting: frames, dialogs, events, logs, explicit gaps</span>
-{"name":"codex_observe","arguments":{"tab_id":42,"action":"start","wait_until":"networkidle"}}
+<pre class="code" id="code-browser"><span class="tk-c">// 1 · verify launch row &amp; catalog first</span>
+<span class="tk-c">// $ codex-browser-bridge --surface native-browser --mode doctor</span>
 
-<span class="tk-c">// 2 · declarative locator: role + accessible name, composed with has_text</span>
-{"name":"codex_locator","arguments":{"tab_id":42,"action":"click","role":"link","name":"Invoices","has_text":{"regex":"^Invoices"}}}
-
-<span class="tk-c">// 3 · capture one element with structural metadata</span>
-{"name":"codex_screenshot_element","arguments":{"tab_id":42,"selector":"#invoice-total","include_info":true}}</pre>
+<span class="tk-c">// 2 · bootstrap once inside tools/call → js</span>
+<span class="tk-k">const</span> { setupBrowserRuntime } = <span class="tk-k">await</span> import(<span class="tk-s">"file:///path/to/installed/browser-client.mjs"</span>);
+<span class="tk-k">const</span> agent = <span class="tk-k">await</span> setupBrowserRuntime();
+<span class="tk-k">const</span> browsers = <span class="tk-k">await</span> agent.browsers.<span class="tk-f">list</span>();
+<span class="tk-k">const</span> browser = <span class="tk-k">await</span> agent.browsers.<span class="tk-f">get</span>(browsers[<span class="tk-n">0</span>].id);
+nodeRepl.<span class="tk-f">write</span>(<span class="tk-k">await</span> browser.<span class="tk-f">documentation</span>());</pre>
           </div>
-          <div class="panel-note"><span class="i">!</span><span data-en="Use --profile basic (46 tools) when context is tight, network (65) for cookies and CDP, full (66) by default in the plugin. Tabs are owned per session and released on turn end." data-zh="上下文紧张时用 --profile basic（46 工具），需要 Cookie 与 CDP 时用 network（65），插件默认 full（66）。标签页按会话持有，回合结束时释放。">Use --profile basic (46 tools) when context is tight, network (65) for cookies and CDP, full (66) by default in the plugin. Tabs are owned per session and released on turn end.</span></div>
+          <div class="panel-note"><span class="i">!</span><span data-en="Need the legacy 66 structured codex_* tools? Pass --surface browser --mode mcp explicitly. See docs/upgrade-v3.md." data-zh="需要旧版 66 个结构化 codex_* 工具？显式传入 --surface browser --mode mcp，详见 docs/upgrade-v3.md。">Need the legacy 66 structured codex_* tools? Pass --surface browser --mode mcp explicitly. See docs/upgrade-v3.md.</span></div>
         </div>
       </div>
     </div>
@@ -899,9 +891,9 @@ JSONL</pre>
   <section class="sec" id="tools">
     <div class="wrap">
       <div class="sec-head">
-        <div class="kicker"><span class="hash">//</span><span data-en="Tool explorer" data-zh="工具浏览">Tool explorer</span></div>
-        <h2 data-en="Every tool, on this page. No manual required." data-zh="全部工具都在这一页，无需翻手册。">Every tool, on this page. No manual required.</h2>
-        <p data-en="Browse the 66 extension tools and examples of native tool names. Use the installed runtime's catalog to see which native tools are enabled." data-zh="浏览 66 个扩展工具及原生工具名称示例。实际启用的原生工具以已安装运行时的目录为准。">Browse the 66 extension tools and examples of native tool names. Use the installed runtime's catalog to see which native tools are enabled.</p>
+        <div class="kicker"><span class="hash">//</span><span data-en="Compatibility catalog" data-zh="工具目录">Compatibility catalog</span></div>
+        <h2 data-en="Native tool names and the compatibility adapter catalog." data-zh="原生运行时工具示例与扩展兼容目录。">Native tool names and the compatibility adapter catalog.</h2>
+        <p data-en="Native entries advertise whatever tools the installed node_repl or cua_repl exposes (typically js, js_reset, turn_ended). The searchable list below also documents the 66 compatibility tools under --surface browser." data-zh="原生入口实际暴露的工具由本机已安装的 node_repl / cua_repl 决定（常见为 js、js_reset、turn_ended）。下方可搜索列表同时收录 --surface browser 下的 66 个兼容工具。">Native entries advertise whatever tools the installed node_repl or cua_repl exposes (typically js, js_reset, turn_ended). The searchable list below also documents the 66 compatibility tools under --surface browser.</p>
       </div>
 
       <div class="tools-top">
@@ -974,8 +966,8 @@ JSONL</pre>
       <div class="cta">
         <div class="cta-grid">
         <div>
-        <h2 data-en="Your browser is already logged in. Use it." data-zh="你的浏览器已经登录好了。直接用。">Your browser is already logged in. Use it.</h2>
-        <p data-en="Install the plugin, restart your client, and ask for the tabs. For desktop work, add the native surface and let cua_repl do what it was built for." data-zh="安装插件，重启客户端，然后让它列出标签页。桌面工作则加上原生表面，让 cua_repl 做它本来该做的事。">Install the plugin, restart your client, and ask for the tabs. For desktop work, add the native surface and let cua_repl do what it was built for.</p>
+        <h2 data-en="Use your installed Codex runtimes from any MCP client." data-zh="在任意 MCP 客户端中复用已安装的 Codex 运行时。">Use your installed Codex runtimes from any MCP client.</h2>
+        <p data-en="Install the Claude Code plugin to register codex-browser (node_repl) and codex-computer (cua_repl), or configure either service manually in your MCP client." data-zh="安装 Claude Code 插件即可同时注册 codex-browser（node_repl）与 codex-computer（cua_repl），也可以在你的 MCP 客户端中按需单独配置。">Install the Claude Code plugin to register codex-browser (node_repl) and codex-computer (cua_repl), or configure either service manually in your MCP client.</p>
         <div class="cmd">
           <span class="prompt" aria-hidden="true">$</span>
           <code id="installCmd2"><span>claude plugin install codex-browser --marketplace</span> <span class="nowrap">DeliciousBuding/codex-browser-bridge</span></code>
@@ -993,7 +985,6 @@ JSONL</pre>
         </div>
         <aside class="cta-side" aria-hidden="true">
           <div class="h" data-en="At a glance" data-zh="速览">At a glance</div>
-          <div class="cta-row"><span>version</span><b>v2.1.1</b></div>
           <div class="cta-row"><span>browser</span><b>66 tools</b></div>
           <div class="cta-row"><span>native</span><b>node_repl · cua_repl</b></div>
           <div class="cta-row"><span>MCP</span><b>dual-era</b></div>
@@ -1041,7 +1032,7 @@ JSONL</pre>
     </div>
     <div class="foot-bottom">
       <span>© 2026 DeliciousBuding · MIT</span>
-      <span data-en="v2.1.1 · one binary · no telemetry" data-zh="v2.1.1 · 单一二进制 · 无遥测">v2.1.1 · one binary · no telemetry</span>
+      <span data-en="one binary · no bridge telemetry" data-zh="单一二进制 · 桥接器不发送遥测">one binary · no bridge telemetry</span>
     </div>
   </div>
 </footer>

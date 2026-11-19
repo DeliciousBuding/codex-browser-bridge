@@ -1,8 +1,8 @@
 {
   "name": "codex-browser",
   "displayName": "Codex Browser",
-  "version": "2.1.1",
-  "description": "Control an existing logged-in Chromium browser through the ChatGPT desktop app's browser extension.",
+  "version": "3.0.0",
+  "description": "Use the installed Codex Browser Use and Computer Use runtimes through MCP.",
   "author": {
     "name": "DeliciousBuding",
     "url": "https://github.com/DeliciousBuding"

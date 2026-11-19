@@ -218,9 +218,10 @@ async function run() {
       installedConfig.mcpServers["codex-browser"].command,
       path.join(outDir, "codex-browser-bridge.exe")
     );
-    assert.deepStrictEqual(installedConfig.mcpServers["codex-browser"].args, ["--mode", "mcp"]);
+    assert.deepStrictEqual(installedConfig.mcpServers["codex-browser"].args, ["--surface", "native-browser", "--mode", "mcp"]);
+    assert.deepStrictEqual(installedConfig.mcpServers["codex-computer"].args, ["--surface", "computer", "--mode", "mcp"]);
     assert.strictEqual(installedConfig.mcpServers["codex-browser"].transport, "stdio");
-    assert.strictEqual(installedConfig.mcpServers["codex-browser"].env.CODEX_BRIDGE_PROFILE, "basic");
+    assert.strictEqual(installedConfig.mcpServers["codex-browser"].env, undefined);
 
     assert.strictEqual(
       JSON.parse(mcpConfigForTarget("C:\\Tools\\codex-browser-bridge.exe")).mcpServers["codex-browser"].command,

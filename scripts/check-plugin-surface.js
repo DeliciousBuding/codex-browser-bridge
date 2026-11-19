@@ -97,26 +97,27 @@ requireAbsent(
   "the repository no longer publishes a Codex marketplace"
 );
 
-const server = mcp.mcpServers && mcp.mcpServers["codex-browser"];
-if (!server) {
-  failures.push("mcp.json must define mcpServers.codex-browser");
-} else {
-  if (server.type !== "stdio") failures.push("plugin MCP transport must be stdio");
-  if (server.command !== "npx") failures.push("plugin MCP command must be npx");
-  const expectedArgs = [
-    "-y",
-    `@delicious233/codex-browser-bridge@${packageJson.version}`,
-    "--mode",
-    "mcp",
-  ];
-  if (
-    !Array.isArray(server.args) ||
-    JSON.stringify(server.args) !== JSON.stringify(expectedArgs)
-  ) {
-    failures.push(`plugin MCP args must be ${expectedArgs.join(" ")}`);
+const expectedServers = { "codex-browser": "native-browser", "codex-computer": "computer" };
+if (Object.keys(mcp.mcpServers || {}).length !== Object.keys(expectedServers).length) {
+  failures.push("plugin must register Browser Use and Computer Use separately");
+}
+for (const [name, surface] of Object.entries(expectedServers)) {
+  const server = mcp.mcpServers?.[name];
+  if (!server) {
+    failures.push(`mcp.json must define mcpServers.${name}`);
+    continue;
   }
-  if (!server.env || server.env.CODEX_BRIDGE_PROFILE !== "full") {
-    failures.push("plugin MCP profile must default to full for tool-search clients");
+  if (server.type !== "stdio") failures.push(`${name} must use stdio`);
+  if (server.command !== "npx") failures.push(`${name} must use npx`);
+  const expectedArgs = [
+    "-y", `@delicious233/codex-browser-bridge@${packageJson.version}`,
+    "--surface", surface, "--mode", "mcp",
+  ];
+  if (JSON.stringify(server.args) !== JSON.stringify(expectedArgs)) {
+    failures.push(`${name} args must be ${expectedArgs.join(" ")}`);
+  }
+  if (server.env?.CODEX_BRIDGE_PROFILE) {
+    failures.push(`${name} must use the installed native catalog without a bridge profile`);
   }
 }
 
@@ -143,9 +144,13 @@ for (const readme of ["README.md", "README.zh-CN.md"]) {
 
 const skillRoot = path.join(root, "skills", "codex-browser");
 requireFile("skills/codex-browser/SKILL.md");
+const skillText = readText("skills/codex-browser/SKILL.md");
 for (const reference of fs.readdirSync(path.join(skillRoot, "references"))) {
   if (reference.endsWith(".md")) {
     requireFile(path.join("skills", "codex-browser", "references", reference));
+    if (!skillText.includes(`references/${reference}`)) {
+      failures.push(`skills/codex-browser/SKILL.md must link or remove orphaned references/${reference}`);
+    }
   }
 }
 

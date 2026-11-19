@@ -142,14 +142,13 @@ pins the same committed plugin version. Before tagging, verify that:
 
 - `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` resolve the
   repository root and reuse `mcp.json`.
-- `mcp.json` launches the pinned npm package through `npx` with the `full`
-  profile. The package pin must equal `plugin.json`, `npm/package.json`, and the
-  release tag.
+- `mcp.json` launches the pinned npm package through `npx` for both native
+  services. Both package pins must equal `plugin.json`, `npm/package.json`,
+  and the release tag.
 - The plugin does not bundle platform executables. The first MCP start
   downloads the package and binary; a global npm install remains an optional
   warm path and is required for the manual MCP examples.
-- Only `codex_doctor` carries `anthropic/alwaysLoad=true`; all other schemas
-  remain available to tool search.
+- Each server's catalog comes from its installed runtime and launch policy.
 - No Codex plugin manifest or Codex marketplace is present. Codex / ChatGPT
   desktop use native browser integration and do not install this bridge as a
   plugin.
@@ -165,9 +164,9 @@ claude mcp list
 ```
 
 The install must report `codex-browser@codex-browser-bridge`, the details view
-must list one skill and one MCP server, and `claude mcp list` must show
-`plugin:codex-browser:codex-browser` connected when the ChatGPT desktop app and
-browser extension are running.
+must list one skill and two MCP servers. With both native runtimes configured,
+`claude mcp list` must show `plugin:codex-browser:codex-browser` and
+`plugin:codex-browser:codex-computer` connected.
 
 The GitHub Release is published before npm. Do not announce the plugin upgrade
 until the `publish-npm` job finishes; `npx` cannot install the new package

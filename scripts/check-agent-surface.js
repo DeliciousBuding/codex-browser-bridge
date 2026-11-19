@@ -16,22 +16,6 @@ function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 }
 
-function readSkillBundle() {
-  const skillRoot = path.join(
-    repoRoot,
-    "skills",
-    "codex-browser"
-  );
-  const files = [path.join(skillRoot, "SKILL.md")];
-  const references = path.join(skillRoot, "references");
-  if (fs.existsSync(references)) {
-    for (const entry of fs.readdirSync(references).sort()) {
-      if (entry.endsWith(".md")) files.push(path.join(references, entry));
-    }
-  }
-  return files.map((file) => fs.readFileSync(file, "utf8")).join("\n");
-}
-
 function fail(message) {
   throw new Error(message);
 }
@@ -90,26 +74,21 @@ function assertProfileCountsInText(label, text, counts) {
 
 function assertExamples() {
   const readme = read("examples/README.md");
-  for (const example of expectedExamples) {
+  for (const example of [...expectedExamples, "native-browser.json", "native-computer-use.json"]) {
     const config = JSON.parse(read(path.join("examples", example)));
-    const server = config.mcpServers && config.mcpServers["codex-browser"];
-    if (!server) {
-      fail(`${example} must define mcpServers.codex-browser`);
-    }
-    if (server.command !== "codex-browser-bridge") {
-      fail(`${example} must use codex-browser-bridge as the command`);
-    }
-    if (!Array.isArray(server.args) || !server.args.includes("--mode")) {
-      fail(`${example} must include --mode in args`);
-    }
-    if (!server.env || !server.env.CODEX_BRIDGE_PROFILE) {
-      fail(`${example} must set CODEX_BRIDGE_PROFILE`);
-    }
-    if (server.env.CODEX_BRIDGE_PROFILE !== "full") {
-      fail(`${example} must expose the documented full tool surface by default`);
-    }
-    if (!server.env.CODEX_BRIDGE_UPLOAD_BASE) {
-      fail(`${example} must document CODEX_BRIDGE_UPLOAD_BASE`);
+    const surfaces = example === "native-browser.json" ? ["native-browser"]
+      : example === "native-computer-use.json" ? ["computer"] : ["computer", "native-browser"];
+    const servers = Object.values(config.mcpServers || {});
+    const args = servers.map((server) => {
+      if (server.command !== "codex-browser-bridge" || server.env?.CODEX_BRIDGE_PROFILE) {
+        fail(`${example} must launch the native service without a bridge profile`);
+      }
+      return JSON.stringify(server.args);
+    }).sort();
+    if (JSON.stringify(args) !== JSON.stringify(surfaces.map(
+      (surface) => JSON.stringify(["--surface", surface, "--mode", "mcp"])
+    ))) {
+      fail(`${example} must register ${surfaces.join(" and ")}`);
     }
     assertContains(readme, `[${example}](${example})`, "examples/README.md");
   }
@@ -154,10 +133,6 @@ function main() {
     assertToolCoverage(doc, uniqueToolNames);
     assertProfileCounts(doc, counts);
   }
-  const skillBundle = readSkillBundle();
-  assertToolCoverageInText("codex-browser skill bundle", skillBundle, uniqueToolNames);
-  assertProfileCountsInText("codex-browser skill bundle", skillBundle, counts);
-
   assertExamples();
   assertNpmPackageFiles();
 

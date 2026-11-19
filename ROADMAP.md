@@ -4,7 +4,8 @@
 
 The primary goal is to let external clients use Codex's installed native
 runtimes through standard MCP. Follow the installed service's catalog and
-permissions. Use one registration when the unified runtime covers the task.
+permissions. Register Browser Use and Computer Use separately so each exposes
+its original API; clients with only one installed service can register just that one.
 Keep the direct extension adapter for clients that rely on its existing
 structured tools and for installations without the Codex desktop runtime.
 
@@ -13,13 +14,20 @@ Detailed contracts and status matrices:
 [docs/native-computer-use.md](docs/native-computer-use.md), and
 [CHANGELOG.md](CHANGELOG.md).
 
-## Delivered (`v2.0.0` – `v2.1.1`)
+## Delivered (`v2.0.0` – `v3.0.0`)
 
-- **Browser session & transport (`#40`)**: deterministic browser selection
-  (`--pipe`, `--browser-family`, `--browser-instance`), OS single-owner locks,
-  instance-bound CLI v2 session continuation, exact tab-claim snapshots,
-  serialized rebind/finalize, and background focus emulation
-  (`Emulation.setFocusEmulationEnabled`) on tab attach.
+- **Native-first dual-runtime relay (`v3.0.0`)**: `--surface native-browser`
+  relays the installed Codex `node_repl` Browser runtime alongside
+  `--surface computer` (`cua_repl`) through one cancel-safe full-duplex JSON-RPC
+  stdio transport; Claude plugin (`mcp.json`) and client templates (`examples/`)
+  now register both native services by default, while the bundled skill routes
+  concisely and delegates full instructions to each installed runtime.
+- **Browser session & transport (`#40`, compatibility `--surface browser`)**:
+  deterministic browser selection (`--pipe`, `--browser-family`,
+  `--browser-instance`), OS single-owner locks, instance-bound CLI v2 session
+  continuation, exact tab-claim snapshots, serialized rebind/finalize, and
+  background focus emulation (`Emulation.setFocusEmulationEnabled`) on tab
+  attach.
 - **Browser observation, locators & files (`#40`, `v2.1.1`)**: opt-in per-tab
   observation with frame/loader state, `commit`/`domcontentloaded`/`load`/`networkidle`
   navigation waits, `url`/`url_glob`/safe-`url_regex` matchers, level-filtered

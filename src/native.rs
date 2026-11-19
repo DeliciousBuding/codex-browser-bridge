@@ -1,4 +1,4 @@
-//! Thin access to the installed native Computer Use MCP service.
+//! Thin access to the installed native Codex MCP services (`node_repl` and `cua_repl`).
 //! No app objects, input engine, permissions, or screenshots are reimplemented.
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -25,6 +25,7 @@ const MAX_CLI_LINE_BYTES: usize = 1024 * 1024;
 const MAX_NATIVE_CATALOG_PAGES: usize = 100;
 const MAX_NATIVE_CATALOG_ITEMS: usize = 2048;
 const MAX_NATIVE_CATALOG_CURSOR_BYTES: usize = 64 * 1024;
+const MAX_TRACKED_CATALOG_REQUESTS: usize = 1024;
 const CLIENT_PROTOCOL_VERSION: &str = "2025-06-18";
 
 #[cfg(unix)]
@@ -119,9 +120,8 @@ impl NativeEnvVar {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeServer {
-    #[default]
     Computer,
     Browser,
 }
@@ -142,30 +142,45 @@ impl NativeServer {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
+struct LaunchRow {
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+    #[serde(default)]
+    env_vars: Vec<NativeEnvVar>,
+    #[serde(default)]
+    cwd: Option<PathBuf>,
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    startup_timeout_sec: Option<f64>,
+    #[serde(default)]
+    startup_timeout_ms: Option<u64>,
+    #[serde(default)]
+    tool_timeout_sec: Option<f64>,
+    #[serde(default)]
+    enabled_tools: Option<Vec<String>>,
+    #[serde(default)]
+    disabled_tools: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Launch {
     #[serde(skip)]
     server: NativeServer,
     pub command: String,
-    #[serde(default)]
     pub args: Vec<String>,
-    #[serde(default)]
     pub env: BTreeMap<String, String>,
-    #[serde(default)]
     pub env_vars: Vec<NativeEnvVar>,
-    #[serde(default)]
     pub cwd: Option<PathBuf>,
-    #[serde(default)]
     pub enabled: Option<bool>,
-    #[serde(default)]
     pub startup_timeout_sec: Option<f64>,
-    #[serde(default)]
     pub startup_timeout_ms: Option<u64>,
-    #[serde(default)]
     pub tool_timeout_sec: Option<f64>,
-    #[serde(default)]
     pub enabled_tools: Option<Vec<String>>,
-    #[serde(default)]
     pub disabled_tools: Option<Vec<String>>,
 }
 
@@ -189,7 +204,22 @@ impl Launch {
         // templates can be stale or lack the host's current X11 environment.
         let native_config = home.join("config.toml");
         if native_config.is_file() {
-            let document: toml::Value = toml::from_str(&std::fs::read_to_string(&native_config)?)?;
+            let text = std::fs::read_to_string(&native_config)
+                .context("read Codex native configuration")?;
+            let document: toml::Value = toml::from_str(&text).map_err(|err: toml::de::Error| {
+                let line = err.span().map(|span| {
+                    text.as_bytes()[..span.start.min(text.len())]
+                        .iter()
+                        .filter(|b| **b == b'\n')
+                        .count()
+                        + 1
+                });
+                anyhow::anyhow!(
+                    "invalid Codex configuration TOML{}",
+                    line.map(|line| format!(" at line {line}"))
+                        .unwrap_or_default()
+                )
+            })?;
             if let Some(row) = document
                 .get("mcp_servers")
                 .and_then(|v| v.get(server.name()))
@@ -233,8 +263,21 @@ impl Launch {
     }
 
     fn from_row(server: NativeServer, row: Value) -> Result<Self> {
-        let mut launch: Self = serde_json::from_value(row)?;
-        launch.server = server;
+        let row: LaunchRow = serde_json::from_value(row)?;
+        let launch = Self {
+            server,
+            command: row.command,
+            args: row.args,
+            env: row.env,
+            env_vars: row.env_vars,
+            cwd: row.cwd,
+            enabled: row.enabled,
+            startup_timeout_sec: row.startup_timeout_sec,
+            startup_timeout_ms: row.startup_timeout_ms,
+            tool_timeout_sec: row.tool_timeout_sec,
+            enabled_tools: row.enabled_tools,
+            disabled_tools: row.disabled_tools,
+        };
         launch.validated()
     }
 
@@ -383,12 +426,7 @@ impl Launch {
         command.creation_flags(0x08000000); // CREATE_NO_WINDOW
         let mut command = process_wrap::tokio::CommandWrap::from(command);
         #[cfg(windows)]
-        {
-            command.wrap(process_wrap::tokio::CreationFlags(
-                windows::Win32::System::Threading::CREATE_NO_WINDOW,
-            ));
-            command.wrap(process_wrap::tokio::JobObject);
-        }
+        command.wrap(process_wrap::tokio::JobObject);
         #[cfg(unix)]
         command.wrap(process_wrap::tokio::ProcessGroup::leader());
         command.wrap(process_wrap::tokio::KillOnDrop);
@@ -396,7 +434,7 @@ impl Launch {
     }
 
     pub fn summary(&self) -> Value {
-        json!({
+        let mut out = json!({
             "surface":self.server.surface(),"status":"launch_configuration_found",
             "command":self.command,"args":self.args,"cwd":self.cwd,
             "env_keys":self.env.keys().collect::<Vec<_>>(),
@@ -407,7 +445,21 @@ impl Launch {
             "enabled_tools":self.enabled_tools,
             "disabled_tools":self.disabled_tools,
             "live_support":"not established by discovery"
-        })
+        });
+        if matches!(self.server, NativeServer::Browser) {
+            if let Ok(env) = self.environment() {
+                let has = |target: &str| {
+                    env.keys()
+                        .any(|key| key.to_string_lossy().eq_ignore_ascii_case(target))
+                };
+                out["browser_access_env"] = json!({
+                    "executor_id": has("BROWSER_USE_ACCESS_EXECUTOR_ID"),
+                    "pipe_path": has("BROWSER_USE_ACCESS_PIPE_PATH"),
+                    "verifying_identity": has("BROWSER_USE_ACCESS_VERIFYING_IDENTITY")
+                });
+            }
+        }
+        out
     }
 }
 
@@ -543,6 +595,7 @@ struct OutboundFrame {
 struct JsonReader<R> {
     reader: BufReader<R>,
     buffer: Vec<u8>,
+    side: &'static str,
 }
 
 impl<R: AsyncRead + Unpin> JsonReader<R> {
@@ -552,7 +605,9 @@ impl<R: AsyncRead + Unpin> JsonReader<R> {
             .read_until(b'\n', &mut self.buffer)
             .await?;
         if self.buffer.len() > MAX_NATIVE_FRAME_BYTES {
-            bail!("native MCP frame exceeds 64 MiB");
+            self.buffer.clear();
+            self.buffer.shrink_to(0);
+            bail!("{} MCP frame exceeds 64 MiB", self.side);
         }
         if bytes == 0 && self.buffer.is_empty() {
             return Ok(None);
@@ -638,10 +693,15 @@ struct JsonTransport<R, W> {
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> JsonTransport<R, W> {
     fn new(reader: R, writer: W) -> Self {
+        Self::for_side(reader, writer, "native")
+    }
+
+    fn for_side(reader: R, writer: W, side: &'static str) -> Self {
         Self {
             reader: JsonReader {
                 reader: BufReader::new(reader),
                 buffer: Vec::new(),
+                side,
             },
             writer: JsonWriter {
                 writer,
@@ -787,6 +847,13 @@ where
                         }
                         break;
                     } else if row["id"] == id && row.get("error").is_some() {
+                        if is_missing_cleanup_tool(&row["error"]) {
+                            tracing::debug!(
+                                error = %row["error"],
+                                "native runtime does not expose turn_ended; skipping synthetic hook"
+                            );
+                            break;
+                        }
                         bail!("native cleanup failed: {}", row["error"]);
                     } else if row["method"] == "ping" && row.get("id").is_some() {
                         native
@@ -827,13 +894,53 @@ pub async fn run_mcp(launch: Launch) -> Result<()> {
     let tools = launch.tool_policy();
     let (mut process, output, input) = OwnedProcess::spawn(&launch)?;
     let mut native = JsonTransport::new(output, input);
-    let mut host = JsonTransport::new(tokio::io::stdin(), tokio::io::stdout());
+    let mut host = JsonTransport::for_side(tokio::io::stdin(), tokio::io::stdout(), "client");
     let result = relay(&mut host, &mut native, shutdown_signal(), &tools).await;
     // ChildStdin::shutdown is a no-op on supported platforms. Dropping the
     // handle delivers EOF before the process receives its graceful deadline.
     drop(native);
     let terminated = process.close().await;
     finish(result, terminated)
+}
+
+fn is_missing_cleanup_tool(error: &Value) -> bool {
+    if error.get("code").and_then(Value::as_i64) == Some(-32601) {
+        return true;
+    }
+    let Some(message) = error.get("message").and_then(Value::as_str) else {
+        return false;
+    };
+    let lower = message.to_ascii_lowercase();
+    lower.contains("unknown tool") || lower.contains("method not found")
+}
+
+fn clear_executing_if_ended(executing: &mut Option<Value>, arguments: Option<&Value>) {
+    let Some(active_meta) = executing.as_ref() else {
+        return;
+    };
+    let Ok(active_ctx) = active_meta
+        .get("x-codex-turn-metadata")
+        .context("missing")
+        .and_then(parse_context)
+    else {
+        *executing = None;
+        return;
+    };
+    let Some(args) = arguments.and_then(Value::as_object) else {
+        *executing = None;
+        return;
+    };
+    let same_session = args
+        .get("session_id")
+        .and_then(Value::as_str)
+        .is_none_or(|id| id == active_ctx["session_id"].as_str().unwrap_or_default());
+    let same_turn = args
+        .get("turn_id")
+        .and_then(Value::as_str)
+        .is_none_or(|id| id == active_ctx["turn_id"].as_str().unwrap_or_default());
+    if same_session && same_turn {
+        *executing = None;
+    }
 }
 
 async fn relay<HR, HW, NR, NW, F>(
@@ -853,7 +960,7 @@ where
     let default_turn = Uuid::new_v4().to_string();
     let mut executing: Option<Value> = None;
     let mut active = BTreeMap::<String, (Value, bool)>::new();
-    let mut tool_lists = BTreeSet::<String>::new();
+    let mut catalog_requests = BTreeSet::<String>::new();
     let mut write_failed = false;
     let mut host_eof = false;
     tokio::pin!(stop);
@@ -879,9 +986,16 @@ where
                     };
                     let request_id = row.get("id").cloned();
                     if row["method"] == "tools/call" {
-                        let Some(id) = request_id.filter(|id| id.is_string() || id.is_i64() || id.is_u64()) else {
+                        let Some(id) = request_id else {
                             continue;
                         };
+                        if !(id.is_string() || id.is_i64() || id.is_u64()) {
+                            host_writer.enqueue(json!({
+                                "jsonrpc":"2.0","id":Value::Null,
+                                "error":{"code":-32600,"message":"native tools/call id must be a string or integer"}
+                            }), None)?;
+                            continue;
+                        }
                         let tool_name = row["params"]["name"].as_str().filter(|name| !name.is_empty());
                         let Some(tool_name) = tool_name else {
                             host_writer.enqueue(json!({
@@ -903,6 +1017,7 @@ where
                             continue;
                         }
                         let executes_js = tool_name == "js";
+                        let ends_turn = tool_name == "turn_ended";
                         if let Err(error) = prepare_call_meta(
                                 &mut row["params"],
                                 &mut executing,
@@ -918,11 +1033,17 @@ where
                                 host_writer.enqueue(reply, None)?;
                                 continue;
                             }
+                        if ends_turn {
+                            clear_executing_if_ended(&mut executing, row["params"].get("arguments"));
+                        }
                         active.insert(id.to_string(), (id, true));
                     } else if row["method"] == "tools/list" {
                         if let Some(id) = request_id {
                             let key = id.to_string();
-                            tool_lists.insert(key.clone());
+                            if catalog_requests.len() >= MAX_TRACKED_CATALOG_REQUESTS {
+                                catalog_requests.pop_first();
+                            }
+                            catalog_requests.insert(key.clone());
                             active.insert(key, (id, false));
                         }
                     } else if row.get("method").is_some() {
@@ -942,7 +1063,7 @@ where
                     if row.get("method").is_none() {
                         if let Some(id) = row.get("id").map(ToString::to_string) {
                             active.remove(&id);
-                            if tool_lists.remove(&id) {
+                            if catalog_requests.remove(&id) {
                                 if let Some(result) = row.get_mut("result") {
                                     tools.filter_catalog(result);
                                 }
@@ -955,7 +1076,6 @@ where
                     match flushed {
                         Ok(Some(id)) => {
                             active.remove(&id);
-                            tool_lists.remove(&id);
                         }
                         Ok(None) => {}
                         Err(error) => {
@@ -1293,7 +1413,6 @@ pub async fn run_doctor(launch: Launch) -> Result<()> {
             "protocol": protocol,
             "tools": tools.iter().map(|tool| tool["name"].clone()).collect::<Vec<_>>(),
             "status": "native_mcp_connected",
-            "ui_actions": 0,
             "cleanup_confirmed": true
         }))?
     );
@@ -1322,15 +1441,19 @@ pub async fn run_cli(
                 println!("{}", serde_json::to_string(&output)?);
             }
             crate::cli::Command::Call { name, arguments } => {
-                print_tool_result(
-                    worker
-                        .tool(&name, serde_json::from_str(&arguments)?)
-                        .await?,
-                    image_dir,
-                )?;
+                if name.trim().is_empty() {
+                    bail!("native call requires a nonempty tool name");
+                }
+                let parsed: Value =
+                    serde_json::from_str(&arguments).context("invalid arguments JSON")?;
+                if !parsed.is_object() {
+                    bail!("arguments must be a JSON object");
+                }
+                print_tool_result(worker.tool(&name, parsed).await?, image_dir)?;
             }
             crate::cli::Command::Batch => {
                 let mut reader = BufReader::new(tokio::io::stdin());
+                let mut line_number = 0usize;
                 loop {
                     let mut line = Vec::new();
                     let bytes =
@@ -1340,21 +1463,29 @@ pub async fn run_cli(
                     if bytes == 0 {
                         break;
                     }
+                    line_number += 1;
                     if line.len() > MAX_CLI_LINE_BYTES {
-                        bail!("native batch line exceeds 1 MiB");
+                        bail!("native batch line {line_number} exceeds 1 MiB");
                     }
                     if line.iter().all(u8::is_ascii_whitespace) {
                         continue;
                     }
-                    let call: Value = serde_json::from_slice(&line)?;
-                    let name = call["name"].as_str().context("batch name missing")?;
+                    let call: Value = serde_json::from_slice(&line)
+                        .with_context(|| format!("invalid batch JSON at line {line_number}"))?;
+                    let name = call
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .filter(|name| !name.trim().is_empty())
+                        .with_context(|| format!("batch name missing at line {line_number}"))?;
+                    let arguments = call.get("arguments").cloned().unwrap_or_else(|| json!({}));
+                    if !arguments.is_object() {
+                        bail!("batch arguments must be a JSON object at line {line_number}");
+                    }
                     print_tool_result(
                         worker
-                            .tool(
-                                name,
-                                call.get("arguments").cloned().unwrap_or_else(|| json!({})),
-                            )
-                            .await?,
+                            .tool(name, arguments)
+                            .await
+                            .with_context(|| format!("batch stopped at line {line_number}"))?,
                         image_dir,
                     )?;
                 }
@@ -1363,7 +1494,10 @@ pub async fn run_cli(
         Ok::<_, anyhow::Error>(())
     };
     let (result, event) = tokio::select! {
-        result = run => (result, "Stop"),
+        result = run => {
+            let event = if result.is_ok() { "Stop" } else { "Interrupt" };
+            (result, event)
+        },
         _ = shutdown_signal() => (
             Err(anyhow::anyhow!("native action interrupted; outcome unknown and not replayed")),
             "Interrupt"
@@ -1681,11 +1815,45 @@ mod tests {
         let mut line = String::new();
         timeout_read_line(&mut fixture, &mut line).await;
         assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), initialize);
+        let initialized = json!({"jsonrpc":"2.0","id":1,"result":{
+            "protocolVersion":"2025-03-26","capabilities":{"tools":{},"nativeCapability":{"required":true}},
+            "serverInfo":{"name":"synthetic-native","version":"1"},
+            "instructions":"Native startup instructions"
+        }});
+        fw.write_all(format!("{initialized}\n").as_bytes())
+            .await
+            .unwrap();
+        let mut client = BufReader::new(client_io);
+        line.clear();
+        timeout_read_line(&mut client, &mut line).await;
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), initialized);
+
+        let list = json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}});
+        client
+            .get_mut()
+            .write_all(format!("{list}\n").as_bytes())
+            .await
+            .unwrap();
+        line.clear();
+        timeout_read_line(&mut fixture, &mut line).await;
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), list);
+        let catalog = json!({"jsonrpc":"2.0","id":2,"result":{"tools":[{
+            "name":"js","description":"Native JS instructions","inputSchema":{"type":"object"},
+            "nativeTool":{"keep":true},"annotations":{"nativeHint":"required"}
+        }]}});
+        fw.write_all(format!("{catalog}\n").as_bytes())
+            .await
+            .unwrap();
+        line.clear();
+        timeout_read_line(&mut client, &mut line).await;
+        assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), catalog);
+
         let request = json!({"jsonrpc":"2.0","id":"external","method":"tools/call",
             "nativeEnvelope":{"required":true},
             "params":{"name":"js","arguments":{"code":"synthetic"},
                 "nativeTimeoutMs":5000}});
-        client_io
+        client
+            .get_mut()
             .write_all(format!("{request}\n").as_bytes())
             .await
             .unwrap();
@@ -1694,14 +1862,13 @@ mod tests {
         let forwarded: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(forwarded["params"]["nativeTimeoutMs"], 5000);
         assert_eq!(forwarded["nativeEnvelope"], request["nativeEnvelope"]);
-        let result = json!({"jsonrpc":"2.0","id":"external","result":{"tools":[{
-            "name":"js","inputSchema":{"type":"object"},
-            "nativeTool":{"keep":true},"annotations":{"nativeHint":"required"}
-        }]}});
+        let result = json!({"jsonrpc":"2.0","id":"external","result":{
+            "content":[{"type":"text","text":"Native per-session instructions and result"}],
+            "_meta":{"nativeExtension":true}
+        }});
         fw.write_all(format!("{result}\n").as_bytes())
             .await
             .unwrap();
-        let mut client = BufReader::new(client_io);
         line.clear();
         timeout_read_line(&mut client, &mut line).await;
         assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), result);
@@ -2369,5 +2536,162 @@ mod tests {
         let second = PathBuf::from(artifacts[1]["path"].as_str().unwrap());
         assert_eq!(std::fs::read(first).unwrap(), b"hello");
         assert_eq!(std::fs::read(second).unwrap(), b"world");
+    }
+
+    #[tokio::test]
+    async fn relay_filters_late_tools_list_response_after_cancellation() {
+        let (host_client, host_bridge) = tokio::io::duplex(32768);
+        let (native_bridge, native_server) = tokio::io::duplex(32768);
+        let (hr, hw) = tokio::io::split(host_bridge);
+        let (nr, nw) = tokio::io::split(native_bridge);
+        let mut host_transport = JsonTransport::new(hr, hw);
+        let mut native_transport = JsonTransport::new(nr, nw);
+        let policy = ToolPolicy {
+            enabled: Some(BTreeSet::from(["js".to_string()])),
+            disabled: BTreeSet::new(),
+        };
+        let relay_task = tokio::spawn(async move {
+            relay(
+                &mut host_transport,
+                &mut native_transport,
+                std::future::pending::<()>(),
+                &policy,
+            )
+            .await
+        });
+
+        let (hcr, hcw) = tokio::io::split(host_client);
+        let mut client = JsonTransport::new(hcr, hcw);
+        let (nsr, nsw) = tokio::io::split(native_server);
+        let mut server = JsonTransport::new(nsr, nsw);
+
+        send(
+            &mut client,
+            json!({"jsonrpc":"2.0","id":11,"method":"tools/list","params":{}}),
+        )
+        .await;
+        assert_eq!(receive(&mut server).await["method"], "tools/list");
+        send(
+            &mut client,
+            json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":11}}),
+        )
+        .await;
+        assert_eq!(
+            receive(&mut server).await["method"],
+            "notifications/cancelled"
+        );
+        send(
+            &mut server,
+            json!({
+                "jsonrpc":"2.0","id":11,
+                "result":{"tools":[{"name":"js"},{"name":"turn_ended"}]}
+            }),
+        )
+        .await;
+        let reply = receive(&mut client).await;
+        let names: Vec<_> = reply["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["js"]);
+        drop(client);
+        relay_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn relay_skips_duplicate_turn_ended_after_explicit_host_turn_ended() {
+        let (host_client, host_bridge) = tokio::io::duplex(32768);
+        let (native_bridge, native_server) = tokio::io::duplex(32768);
+        let (hr, hw) = tokio::io::split(host_bridge);
+        let (nr, nw) = tokio::io::split(native_bridge);
+        let mut host_transport = JsonTransport::new(hr, hw);
+        let mut native_transport = JsonTransport::new(nr, nw);
+        let policy = ToolPolicy::default();
+        let relay_task = tokio::spawn(async move {
+            relay(
+                &mut host_transport,
+                &mut native_transport,
+                std::future::pending::<()>(),
+                &policy,
+            )
+            .await
+        });
+
+        let (hcr, hcw) = tokio::io::split(host_client);
+        let mut client = JsonTransport::new(hcr, hcw);
+        let (nsr, nsw) = tokio::io::split(native_server);
+        let mut server = JsonTransport::new(nsr, nsw);
+
+        send(
+            &mut client,
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"js","arguments":{"code":"1+1"}}}),
+        )
+        .await;
+        let js_req = receive(&mut server).await;
+        send(
+            &mut server,
+            json!({"jsonrpc":"2.0","id":1,"result":{"content":[]}}),
+        )
+        .await;
+        let _ = receive(&mut client).await;
+
+        let ctx = js_req["params"]["_meta"]["x-codex-turn-metadata"].clone();
+        send(
+            &mut client,
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"turn_ended","arguments":{"hook_event_name":"Stop","session_id":ctx["session_id"],"turn_id":ctx["turn_id"]}}}),
+        )
+        .await;
+        assert_eq!(receive(&mut server).await["params"]["name"], "turn_ended");
+        send(
+            &mut server,
+            json!({"jsonrpc":"2.0","id":2,"result":{"content":[]}}),
+        )
+        .await;
+        let _ = receive(&mut client).await;
+
+        drop(client);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), server.receive())
+                .await
+                .unwrap()
+                .unwrap()
+                .is_none(),
+            "EOF must not synthesize a duplicate turn_ended"
+        );
+        relay_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn cleanup_tolerates_missing_turn_ended_tool() {
+        let (native_bridge, native_server) = tokio::io::duplex(32768);
+        let (nr, nw) = tokio::io::split(native_bridge);
+        let mut native_transport = JsonTransport::new(nr, nw);
+        let (nsr, nsw) = tokio::io::split(native_server);
+        let mut server = JsonTransport::new(nsr, nsw);
+
+        let responder = tokio::spawn(async move {
+            let req = receive(&mut server).await;
+            assert_eq!(req["params"]["name"], "turn_ended");
+            send(
+                &mut server,
+                json!({"jsonrpc":"2.0","id":req["id"],"error":{"code":-32601,"message":"unknown tool turn_ended"}}),
+            )
+            .await;
+        });
+
+        let meta = json!({"x-codex-turn-metadata":{"session_id":"s1","turn_id":"t1"}});
+        cleanup_session(
+            &mut native_transport,
+            false,
+            Vec::new(),
+            Some(meta),
+            &ToolPolicy::default(),
+            "Stop",
+        )
+        .await
+        .unwrap();
+        responder.await.unwrap();
     }
 }

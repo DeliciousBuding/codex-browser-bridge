@@ -267,11 +267,13 @@ function mcpConfigForTarget(target) {
       mcpServers: {
         "codex-browser": {
           command: target,
-          args: ["--mode", "mcp"],
+          args: ["--surface", "native-browser", "--mode", "mcp"],
           transport: "stdio",
-          env: {
-            CODEX_BRIDGE_PROFILE: "basic",
-          },
+        },
+        "codex-computer": {
+          command: target,
+          args: ["--surface", "computer", "--mode", "mcp"],
+          transport: "stdio",
         },
       },
     },
@@ -288,7 +290,7 @@ function logInstallHints(root, log, target, platform = process.platform) {
     [
       "Claude Code plugin (recommended):",
       "  claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge",
-      "  -> one command; the plugin launches this package via npx on first use",
+      "  -> the plugin starts this bridge via npx and connects to both installed native services",
       "  -> this global install is optional and keeps startup warm",
       "Codex / ChatGPT desktop already have native browser integration; do not install this bridge as a Codex plugin.",
     ].join("\n")

@@ -15,11 +15,11 @@
 - `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`：Claude Code 插件，复用根 `mcp.json`
 - `mcp.json` 通过 `npx` 启动固定版本的 npm 包；插件本身不分发 Windows 二进制。全局 npm 安装是可选的快速路径，手工 MCP 示例仍使用它。
 
-Codex / ChatGPT desktop 已经能通过现有浏览器扩展直接控制浏览器，不再把 bridge 包装成 Codex 插件，也不安装这个重复入口。bridge 继续作为通用 MCP server，供 Claude Code、Cursor、OpenClaw、Hermes Agent 等非 Codex 客户端复用同一登录态。
+Codex / ChatGPT desktop 已经能通过内置原生运行时直接控制浏览器与桌面，不再把 bridge 包装成 Codex 插件，也不安装这个重复入口。bridge 作为通用 MCP/CLI 桥接层，供 Claude Code、Cursor、Antigravity、OpenClaw、Hermes Agent 等非 Codex 客户端复用已安装的原生运行时。
 
-Claude 插件默认使用 `full` profile，因为 Claude Code 会通过 tool search 延迟加载 tool schema；只有 `codex_doctor` 使用 `anthropic/alwaysLoad=true`。不支持 tool search 的手工 MCP 配置仍推荐 `basic`。不要自造第二套工具路由器，也不要为节省 token 删除专用工具。
+`v3.0+` 插件与客户端示例默认直接注册两个原生服务：`codex-browser`（`--surface native-browser`，转发已安装的 `node_repl`）与 `codex-computer`（`--surface computer`，转发已安装的 `cua_repl`），不再默认加载旧的 66 个 `codex_*` 兼容工具或 `CODEX_BRIDGE_PROFILE`。只有显式使用 `--surface browser` 的兼容配置才加载 `codex_*`（`basic`=46、`network`=65、`full`=66；其中 `codex_doctor` 使用 `anthropic/alwaysLoad=true`）。
 
-## MCP 工具设计规范
+## 兼容扩展层 MCP 工具设计规范（`--surface browser`）
 
 新增 MCP 工具遵循以下模式：
 
@@ -83,8 +83,9 @@ CI/release job 必须设置 `timeout-minutes`，长耗时测试步骤（Rust tes
 
 ```
 src/
-  main.rs       入口（clap CLI，--mode --profile --pipe --upload-base --max-text-bytes --max-image-bytes）
+  main.rs       入口（clap CLI，--surface browser|native-browser|computer，--mode，--native-config，--image-dir 等）
   lib.rs        模块声明
+  native.rs     原生 Codex 运行时（node_repl / cua_repl）发现、全双工 MCP 转发、CLI/doctor worker 与进程树清理
   mcp/
     mod.rs      Server 结构体, run_stdio, JSON-RPC 分发（双纪元 era 检测入口）
     lifecycle.rs MCP 版本协商 + 双纪元生命周期（legacy initialize / 2026-07-28 stateless、server/discover、resultType/缓存提示、-32022）

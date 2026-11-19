@@ -1,6 +1,6 @@
 {
   "name": "codex-browser-bridge",
-  "description": "Claude Code browser automation for the ChatGPT desktop app's browser extension.",
+  "description": "Use installed Codex Browser and Computer Use runtimes from Claude Code.",
   "owner": {
     "name": "DeliciousBuding",
     "url": "https://github.com/DeliciousBuding"
@@ -9,7 +9,7 @@
     {
       "name": "codex-browser",
       "source": "./",
-      "description": "Control an existing logged-in Chromium browser through the ChatGPT desktop app's browser extension."
+      "description": "Connect Claude Code to the installed Browser Use and Computer Use services."
     }
   ]
 }
