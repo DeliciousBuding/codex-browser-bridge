@@ -85,7 +85,7 @@ jobs:
           VERSION: ${{ steps.validate.outputs.version }}
           COMMIT_SHA: ${{ steps.validate.outputs.commit_sha }}
         run: |
-          git fetch origin main --depth=1
+          git fetch origin refs/heads/main:refs/remotes/origin/main
           TAG_TYPE="$(git cat-file -t "$TAG")"
           if [ "$TAG_TYPE" != "tag" ]; then
             echo "Release tag $TAG must be an annotated tag" >&2
