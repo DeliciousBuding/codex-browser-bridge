@@ -74,7 +74,7 @@ The workflow uses GitHub-hosted runners, `id-token: write`, Node 24, npm >= 11.5
 
 If npm publish fails after the GitHub Release is public, fix the publishing blocker and rerun the same release workflow from `main`. Do not rebuild or replace binaries manually. The rerun guard compares the already published npm package checksums, when present, against the current release assets before allowing `gh release upload --clobber`.
 
-CI and release jobs use explicit `timeout-minutes`, with tighter step timeouts around Rust tests, coverage, and the live E2E timeout harness. Keep those limits in place when editing workflows so a harness regression fails instead of consuming the default GitHub runner timeout.
+CI and release jobs use explicit `timeout-minutes`, with tighter step timeouts around Rust tests and coverage. Keep those limits in place when editing workflows so a harness regression fails instead of consuming the default GitHub runner timeout.
 
 ## Binary Platform Contract
 
@@ -115,7 +115,6 @@ cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 node scripts/check-actions-pinned.js
 node scripts/check-release-contract.js
-node scripts/check-agent-surface.js
 node scripts/check-plugin-surface.js
 claude plugin validate --strict .
 cd npm && npm test

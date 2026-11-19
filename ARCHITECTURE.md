@@ -6,160 +6,141 @@ file records the *decisions*.
 
 ## Overview
 
-A single-process Rust MCP/CLI bridge with two transport paths:
+A single-process Rust MCP/CLI relay over stdio. It has one transport path and
+two targets:
 
-1. **Native-first stdio relay (`--surface native-browser` / `--surface computer`, default in plugin and client templates)**: discovers the installed Codex `node_repl` or `cua_repl` launch row from `~/.codex/config.toml` (or `--native-config`), spawns one owned worker process tree (Windows Job Object / Unix process group), and relays full-duplex JSON-RPC frames—preserving tool schemas, bidirectional `elicitation/create` approvals, images, and `turn_ended` cleanup.
-2. **Compatibility Chromium extension adapter (`--surface browser`)**: speaks stdio JSON-RPC to the client and a length-prefixed JSON wire protocol over a local Windows named pipe or Linux Unix socket to the ChatGPT browser extension, which drives Chrome/Edge via CDP.
+- `--surface native-browser` (default) relays the installed Codex `node_repl`
+  Browser Use runtime.
+- `--surface computer` relays the installed Codex `cua_repl` Computer Use
+  runtime.
+
+For either target the bridge discovers the launch row from
+`~/.codex/config.toml` (or `$CODEX_HOME/config.toml`, or an explicit
+`--native-config` JSON), spawns one owned worker process tree (Windows Job
+Object / Unix process group), and relays full-duplex JSON-RPC frames. Tool
+schemas, pagination cursors, images, errors, `elicitation/create` approvals,
+and the runtime's own MCP extensions pass through unmodified.
 
 ```text
 Claude plugin marketplace ──installs──▶ routing skill + dual native mcp.json
 
 MCP client ──stdio JSON-RPC──▶ bridge ──stdio──▶ installed Codex node_repl / cua_repl
-                                      └──local pipe/socket (--surface browser)──▶ ChatGPT extension ──CDP──▶ Chromium
 ```
 
+There is no custom CDP client, DOM or observation engine, locator engine,
+tool profile system, or browser session layer. Those responsibilities belong
+to the installed runtime, and the bridge does not duplicate or shadow them.
+
 Current releases publish Windows x64/arm64 and Linux GNU x64/arm64 binaries
-(glibc >= 2.39 for the Linux release builds). Linux discovery uses
-`CODEX_BRIDGE_SOCKET_DIR` when set, otherwise
-`$XDG_RUNTIME_DIR/codex-browser-use`, then `/tmp/codex-browser-use`; native
-Rust/Node gates run on Ubuntu 24.04 x64 and arm64. The Linux arm64 extension synthetic smoke is now verified; it is not the
-full tool surface. A compiling macOS
-target does not establish macOS support.
+(glibc >= 2.39 for the Linux release builds). A compiling macOS target does
+not establish macOS runtime support.
 
 The repository is both the Claude plugin source and the generic MCP server
 source. The Claude plugin registers `codex-browser` (`--surface native-browser`)
-and `codex-computer` (`--surface computer`) alongside a minimal routing skill;
-it does not wrap or duplicate the compatibility 66-tool surface. Codex and
-ChatGPT desktop already have native browser access and are not plugin targets
-for this bridge.
+and `codex-computer` (`--surface computer`) alongside a minimal routing skill.
+Codex and ChatGPT desktop already have native browser access and are not plugin
+targets for this bridge.
 
 ## Module map (`src/`)
 
 | Module | Responsibility |
 |---|---|
-| `main.rs` | CLI entry. `--surface browser\|native-browser\|computer`, `--mode mcp\|cli\|discover\|doctor`, `tools`, `call`, `batch`; loads browser TOML config only for `--surface browser` |
-| `native.rs` | Shared launcher, stdio MCP relay, CLI/doctor worker and process cleanup for installed `node_repl` and `cua_repl` |
-| `client.rs` | The pipe `Client`: requests, `execute_cdp`, reconnect, event subscriptions |
-| `pipe.rs` | Platform transport and dialing; Windows named pipe or validated Unix stream; `dial_named_pipe` remains a compatibility entrypoint |
-| `protocol.rs` | Length-prefixed frame encode/decode, `Request`/`Response`, session-param merge |
-| `discovery.rs` | Enumerate Windows pipes or Linux `CODEX_BRIDGE_SOCKET_DIR`, XDG runtime, or `/tmp` socket endpoints |
-| `registry.rs` | Probe live extension instances, expose stable `extensionInstanceId` identity, and fail closed on ambiguous browser selection |
-| `browser.rs` | Browser tool implementations over `Client` (navigate, DOM, screenshot, management, history, network_monitor, …) |
-| `input.rs` | Bounded failure-safe keyboard chords; shared modifier parsing |
-| `pointer.rs` | CUA pointer click/move/scroll/drag, official button/modifier/path fields, no-replay mutation path |
-| `locator.rs` / `locator.js` | Bounded declarative matching/actionability and shared trusted input; no mutation retry |
-| `observation.rs` | Exact-tab bounded cursor journal, loader/frame state and document-bound dialog/chooser IDs |
-| `file_results.rs` | Shared explicit roots, count/byte/time budgets, staged atomic no-overwrite publication |
-| `clipboard.rs` | Bounded session-virtual clipboard and paste integration; never reads the OS clipboard |
-| `webmcp.rs` | Top-document same-origin WebMCP registry with document epochs and stale-handle rejection |
-| `page_assets.rs` | Document-bound asset inventory, cached content, atomic local bundle/manifest output |
-| `export.rs` | Bounded atomic local GSuite and YouTube transcript exports |
-| `mcp/` | Compatibility extension MCP server: JSON-RPC dispatch, 66 tool handlers, schema, profiles, resources/prompts, dual-era lifecycle |
-| `cli.rs` | Shared CLI subcommands (`tools`/`call`/`batch`) plus browser-surface dispatch, bounded JSON output, and legacy debug REPL |
-| `security.rs` | URL scheme + file-path validation (path-traversal defense) |
-| `config.rs` | Optional TOML selectors, profile, upload root, response limits and network policy |
-| `doctor.rs` | Pipe connectivity diagnostics (`--mode doctor`) |
-| `error.rs` | `BridgeError` (`Connection`, `PipeIo`, `Cdp`, `Rpc`, `Protocol`, …) |
+| `main.rs` | CLI entry. `--surface native-browser\|computer`, `--mode mcp\|discover\|doctor`, `--native-config`, `--image-dir`, and the `tools`/`call`/`batch` subcommands |
+| `native.rs` | Launch discovery, host environment policy, owned worker spawn, full-duplex stdio MCP relay, tool policy, CLI/doctor workers, and `turn_ended` cleanup |
+| `cli.rs` | Shared CLI subcommand definitions (`tools`, `call`, `batch`) forwarded to the native runtime |
+| `logging.rs` | Log initialization |
+| `lib.rs` | Module declarations |
 
 ## Key design decisions
 
-### Single Client, request-driven reconnect
-One `Client` holds the pipe connection. The `read_loop` routes responses to
-pending requests and CDP events to subscribers. If the read loop dies (pipe
-break / Codex restart / extension refresh) the client **no longer bricks**:
+### A relay, not an adapter
 
-- read-loop exit sets `alive=false`, drains pending, reclaims the writer
-- the next `send_request` runs `ensure_alive` → `reconnect_locked` (discover +
-  dial, 3-attempt backoff 0/100/250 ms, 5 s cooldown on full failure) → swaps
-  the writer, restarts the read loop, clears `attached_tabs`
-- connection-level errors (`Connection`, `PipeIo`) trigger one reconnect+retry;
-  protocol / RPC / CDP errors do not
+The bridge speaks MCP on both sides. It does not translate between a bridge
+tool vocabulary and the runtime's own API. Whatever the installed service
+advertises—tool names, schemas, resource extension fields, `_meta`
+conventions—reaches the client as-is. This keeps the surface honest: the
+client sees the runtime, not a re-encoding of it.
 
-In-flight requests at the moment of disconnect are sacrificed once — the caller
-gets a `Connection` error and can retry. This is simpler and more robust than
-replaying pending requests by id (whose responses would never arrive).
+The boundary is deliberate. Anything that would require the bridge to
+understand CDP, layout, accessibility, or browser state would be a second
+implementation of the runtime, and would drift.
 
-### Injectable connection factory
-Reconnect must dial a fresh pipe, but dialing is platform-specific. The factory
-(`Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<PipeStream>>>>>`) lets
-production use real discovery while tests inject a `duplex()` mock. Deliberately
-**not** a trait — one use, no `async_trait`, no abstraction layer (the project
-previously removed a `BridgeClient` trait for being unused ceremony).
+### Host-owned handshake
 
-### Browser identity and pinned reconnect
+`run_mcp` forwards the client's `initialize` and subsequent frames to the
+worker. The external MCP host negotiates the protocol version, drives
+pagination, handles interactive elicitation, and enforces its own request
+deadlines. The bridge owns none of those policies.
 
-The existence of many `codex-browser-use-*` pipes is normal: stale transport
-names, multiple profiles, and multiple browser families can coexist. Pipe names
-are not browser identity.
+The CLI/doctor paths are the exception: they need a catalog without a client,
+so they initialize the worker themselves (protocol version `2025-06-18`) and
+traverse paginated `tools/list` responses within bounded page, item, and
+cursor limits.
 
-`registry.rs` probes every reachable pipe through `getInfo` and exposes
-`metadata.extensionInstanceId` as `browser_id`, together with family, name,
-version, profile, capabilities, and transport diagnostics. An unbound session
-auto-selects only when exactly one live instance exists. Multiple instances
-require `--browser-instance`, config/env pinning, or `codex_bind_browser`.
+### Tool policy from the launch row
 
-Reconnects are pinned to the selected extension instance and fail if that
-instance disappears. They never rotate to another healthy Edge/Chrome/profile,
-because doing so would silently change cookies, tabs, and user state.
+`enabled_tools` is applied before `disabled_tools` across advertised catalogs,
+direct `tools/call` requests, and the end-of-session `turn_ended` hook. A
+disabled tool request fails locally with `-32602` instead of reaching the
+worker. If `turn_ended` is disabled, cleanup skips the hook and terminates
+the owned worker tree.
 
-### Sticky CDP attach
-Each tab needs a CDP debugger session. `attached_tabs` caches known-attached
-tabs to skip the detach+attach round-trip on repeated calls. A 20 s fast-timeout
-on the sticky path falls through to a full re-attach if a background-throttled
-tab goes silent, instead of burning the whole 60 s budget.
+### Call correlation metadata
 
-### Turn lifecycle and capability mapping
+When a `tools/call` request omits Codex correlation metadata, the relay fills
+`_meta.callId`, `_meta["x-codex-turn-metadata"]` (`session_id` and `turn_id`),
+`_meta.sessionId`, and `_meta.threadId` (preferring `thread_id` when
+supplied). The relay also tracks the active execution context so the cleanup
+hook can be attributed to the right session and turn. Malformed metadata is
+rejected with `-32602` without closing the session.
 
-`codex_finalize` detaches cached CDP sessions and sends the official `turnEnded`
-request. The extension decides tab cleanup and preserves tabs marked for
-handoff or delivery. Closing a pipe alone is not successful turn cleanup.
-Rebinding with owned tabs requires explicit `end_previous_turn=true` or prior
-finalization; failed cleanup prevents switching browsers.
+### Launch environment policy
 
-`codex_locator` provides strict selector/role/text/label/test-id operations,
-while iframe and chained-locator behavior remains partial. Accessibility actions
-use backend DOM IDs; AX-only nodes are reported as non-actionable. Method coverage
-and app-private dependencies are maintained in [docs/official-parity.md](docs/official-parity.md).
+The child is launched with `env_clear()` plus, in order: the platform core
+environment variables, literal `env` overrides, explicitly listed `env_vars`
+(`local` or default), and custom CA certificate variables resolved to absolute
+paths. Everything else is stripped, including Codex's non-inheritable internal
+auth tokens (`NODE_REPL_AUTH_TOKEN`, `CODEX_GUARDIAN_DECISIONS_API_KEY`, and
+related variables).
 
-Pointer clicks, CUA movement, scrolling, dragging and CSS convenience actions
-share `pointer.rs`. A pressed button is released after a partial failure, and
-state-changing CDP is not replayed. Current extension builds do not acknowledge
-`mouseMoved`, so movement uses a bounded no-ack window; drag elapsed time follows
-the number of supplied path points.
+On Windows, bare commands such as `python` or `npx` are resolved against the
+constructed child `PATH` using the process's `PATHEXT`, matching Codex CLI's
+program resolver, and `PATHEXT` is forwarded. On Unix, the launch row must
+carry desktop session variables (`DISPLAY`, `XAUTHORITY`, Wayland session
+variables) in `env` or `env_vars`; the bridge does not add them.
 
-Shell `tools`, `call`, and `batch` reuse the same MCP registry and handlers.
-A turn belongs to the process that opened it, so a one-shot `call` ends its turn
-on exit and `batch` ends its turn at EOF, both including the failure path.
-Cleanup preserves `deliverable`/`handoff` marks. Ctrl-C and SIGTERM follow the
-same finalize policy; `--keep-turn` and an unfinalized session file deliberately
-leave the turn open. `--session-file` persists only the session and turn
-identifiers so separate `call`/`batch` processes can continue one turn; it is
-not browser state. `--keep-turn` is the explicit opt-out and can leave a tab
-owned by a closed session, so multi-step work should use `batch` or a persistent
-MCP session. CLI output has a separate byte budget and summarizes images instead
-of emitting base64. This entrypoint does not change the parity boundary.
+Discovery never modifies user configuration or plugin caches, and
+`discover`/`doctor` report boolean `browser_access_env` presence flags for the
+Browser entry without printing values.
 
-### CDP event subscription
-Frames carrying a `method` and no `id` are server-pushed events. `read_loop`
-routes the whole frame to subscribers matched by method prefix
-(`network_monitor`, `console_logs`). Subscribers get the entire frame so they
-can dispatch on the exact method themselves.
+### Bounded relay
 
-The extension does not send bare CDP frames: it wraps them as
-`{method: "onCDPEvent", params: {method, params, source: {tabId}}}`. The read
-loop unwraps that envelope once, so subscribers see the same shape for both
-transports. Capture tools subscribe with `subscribe_events_with_budget_for_tab`,
-which drops events tagged with a different `source.tabId` *before* any
-bookkeeping — otherwise a busy neighbour tab could exhaust the byte budget and
-turn a real capture into a silently empty result. Untagged events stay
-deliverable so transports that don't annotate them keep working.
+Frame and buffer limits are fixed rather than configurable:
 
-### Tool profiles
-66 tools, filtered by profile — `basic` (46) / `network` (65) / `full` (66) —
-via `CODEX_BRIDGE_PROFILE` env, `--profile` flag, or config file. Keeps the
-tool list small for agents that don't need the network/debugging surface.
+- 64 MiB per native JSON-RPC frame
+- 8 MiB and 256 frames of outbound relay backlog per side
+- 1 MiB per `batch` input line
+- 100 catalog pages, 2,048 catalog items, and 64 KiB cursors in CLI/doctor
+  traversal, with at most 1,024 tracked catalog requests
 
-### Claude plugin distribution and progressive loading
+Relay writes are wrapped in a 10-second timeout. Startup and tool timeouts
+default to 30 and 300 seconds and follow `startup_timeout_sec`/
+`startup_timeout_ms` and `tool_timeout_sec` from the launch row.
+
+### Deterministic worker ownership
+
+Each MCP connection or CLI invocation owns one worker process tree. On EOF or
+interrupt, the bridge cancels in-flight work, invokes `turn_ended` (`Stop` or
+`Interrupt`) for the active execution context with a fresh `callId` and no
+`progressToken`, closes child stdin, and terminates the tree. The cleanup
+budget is 8 seconds for `turn_ended` and transport close, followed by up to 8
+seconds for process-tree termination. Timed-out or interrupted calls exit
+nonzero and are never replayed.
+
+`js_reset` clears JavaScript bindings in the worker without closing user
+applications.
+
+### Claude plugin distribution
 
 The Claude plugin surface is intentionally small:
 
@@ -179,78 +160,33 @@ Codex / ChatGPT desktop already controls its browser extension natively; the
 bridge exists for Claude and other non-Codex MCP clients that need to reuse the
 same logged-in browser session.
 
-The plugin registers `codex-browser` and `codex-computer` with the shared
-relay. Each owns a native worker, forwards its installed catalog and approval
-requests, and keeps the objects created by that worker. The skill routes to
-the original tool instructions. Extension profiles only apply to the separate
-compatibility adapter.
-
-### Config precedence
-CLI flags > env > config file (`.codex-browser-bridge.toml`) > built-in
-default. A missing default config file is silent; a malformed file fails before
-browser work. If `CODEX_BRIDGE_CONFIG` is set, that path is authoritative and
-the bridge does not fall back to a working-directory config.
-
-### MCP resources + prompts
-- **resources**: `codex://tabs` — an on-demand snapshot of open tabs
-- **prompts**: `login`, `extract-table` — workflow templates that cite the
-  concrete tools to call, so the agent picks the right path first time
-
-Subscribe / list-changes is intentionally omitted: these are on-demand
-snapshots, not a live feed.
-
-### Dual-era MCP lifecycle (`mcp/lifecycle.rs`)
-The 2026-07-28 revision removed the `initialize` handshake and protocol
-sessions; every request is stateless and carries its protocol version in
-`_meta`. The bridge serves **both eras from one binary**:
-
-- **Era detection is per request**: the presence of
-  `_meta["io.modelcontextprotocol/protocolVersion"]` selects modern handling;
-  anything else follows the legacy lifecycle. Legacy `_meta` (e.g.
-  `progressToken`) without the version key stays legacy.
-- **Legacy byte-compatibility is a hard requirement**: legacy envelopes pass
-  through untouched; modern framing (`resultType`, `_meta` serverInfo,
-  `ttlMs`/`cacheScope`) is applied only to requests that opted in. Tests pin
-  this (`legacy_tools_list_stays_byte_compatible`).
-- **Version negotiation**: `initialize` echoes a supported legacy revision or
-  offers the newest one; a modern request asking for an unsupported revision
-  gets `UnsupportedProtocolVersionError` (-32022) with the supported list.
-  A modern version requested through `initialize` negotiates down to legacy
-  semantics.
-- **`server/discover`** is always answered, even without version metadata —
-  that is the stdio compatibility probe.
-- **`ping` is legacy-only**: the 2026-07-28 revision removed it, so modern
-  requests get `-32601`.
-- **Lenient `clientCapabilities`**: the schema requires the field on modern
-  requests, but the bridge needs no client capabilities (no sampling /
-  elicitation / roots), so a missing value is treated as empty instead of
-  returning `MissingRequiredClientCapabilityError` (-32021).
+`codex-browser` and `codex-computer` share the relay implementation but own
+separate workers; handles cannot move between them.
 
 ## Data flow — a tool call
 
-1. MCP client sends `tools/call` (e.g. `codex_navigate`) over stdio
-2. `mcp/handlers.rs` dispatches to `handle_navigate`
-3. `browser.rs::navigate` calls `client.execute_cdp(tab, "Page.navigate", …)`
-4. `Client` attaches a CDP session (if not cached) and writes an `executeCdp`
-   frame to the pipe
-5. The ChatGPT browser extension runs the CDP command in the browser and returns a result frame
-6. `read_loop` routes the response to the pending request's oneshot channel
-7. `browser.rs` parses the result and returns `Content` to the MCP client
+1. MCP client sends `tools/call` (for example `js`) over stdio.
+2. `native.rs::relay` checks the tool policy and fills missing correlation
+   metadata.
+3. The frame is written to the owned worker's stdin.
+4. The installed runtime executes it and returns a result or an
+   `elicitation/create` request.
+5. The relay forwards the frame back to the client, or routes the elicitation
+   response to the worker.
+6. On exit, `turn_ended` runs and the process tree is closed.
 
 ## Testing
 
-- **Windows** (CI `rust` job): lib unit tests, integration tests, clippy
-  `--all-targets`, coverage, x64 + arm64 release build
-- **Linux GNU x64 / arm64** (source CI `test-lib` matrix): native full tests,
-  clippy, release builds, Unix socket validation, plus reconnect/resource/prompt
-  tests using `tokio::io::duplex()` injected mocks. CI configuration is not a
-  completed CI run or live extension verification.
-- **benches/protocol.rs**: criterion baseline for frame encode/decode
+- **Windows** (CI `rust` job): unit tests, integration tests, clippy
+  `--all-targets`, coverage, x64 + arm64 release build.
+- **Linux GNU x64 / arm64** (source CI): native full tests, clippy, and
+  release builds. Linux transports are not implied by a Windows pass.
+- Source and integration tests use fixture launch rows and mock workers; no
+  live desktop app is required.
+- `tests/native_process.rs` covers owned-process teardown behavior.
 
-Pure logic (`pair_network_events`, `runtime_value_string`, `check_cdp_error`)
-is extracted into standalone functions and unit-tested directly — never via
-`#[path]` source-tree embedding (that anti-pattern broke the v1.8/v1.9
-releases).
+Pure helpers are unit-tested directly — never via `#[path]` source-tree
+embedding (that anti-pattern broke the v1.8/v1.9 releases).
 
 ## Supply chain
 

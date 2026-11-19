@@ -7,8 +7,8 @@ Thanks for taking the time to contribute.
 Please open an issue using the bug report template. Include:
 
 - The output of `codex-browser-bridge --version`
-- The output of `codex-browser-bridge --mode discover`, with local identifiers redacted
-- ChatGPT desktop app/service version, browser and extension versions, OS and architecture
+- The output of `codex-browser-bridge --mode discover` for the affected surface, with local identifiers redacted
+- Installed runtime and Codex desktop app versions, OS and architecture
 - A minimal reproduction (which tool you called, what arguments, what response)
 
 Public issues must not include screenshots, DOM snapshots, tab titles, full private URLs, logged-in page content, tokens, account IDs, or production admin pages. Use GitHub private vulnerability reporting for sensitive repros.
@@ -21,8 +21,8 @@ See [SECURITY.md](SECURITY.md) and use the private reporting path there.
 
 Requirements:
 - Rust 1.88+
-- Windows, or Linux for the Unix transport (release GNU binaries require glibc >= 2.39)
-- Installed native Codex runtimes (`node_repl` / `cua_repl`) for live native relay testing, and/or a connected ChatGPT browser extension for `--surface browser` compatibility testing
+- Windows, or Linux (release GNU binaries require glibc >= 2.39)
+- Installed native Codex runtimes (`node_repl` / `cua_repl`) for live relay testing
 
 Build and test:
 
@@ -35,44 +35,37 @@ cargo clippy --locked -- -D warnings  # lint
 cargo build --locked --release  # release build
 ```
 
-The default test suite is hermetic. It uses mock streams and temporary local
-sockets, so `cargo test --locked` runs without a live desktop app. Linux native
-x64/arm64 jobs are configured for full tests, clippy and release builds. They
-test transport behavior, not a live browser extension. macOS compilation alone
-does not establish runtime support. Optional Windows live E2E against the
-ChatGPT desktop app and a connected Chromium browser is available with:
-
-```powershell
-.\scripts\live-e2e.ps1 -Url https://example.com
-```
+The default test suite is hermetic. It uses fixture launch rows and mock
+workers, so `cargo test --locked` runs without a live desktop app. Linux native
+x64/arm64 jobs are configured for full tests, clippy and release builds. macOS
+compilation alone does not establish runtime support.
 
 The root directory is an installable Claude Code plugin. Its MCP entry uses
 `npx` with the npm package version pinned to the plugin version; keep the pin,
 `plugin.json`, and `npm/package.json` aligned. Validate the plugin contract
-after changing a manifest, MCP launch config, marketplace, skill, or tool
-profile:
+after changing a manifest, MCP launch config, marketplace, or skill:
 
 ```bash
 node scripts/check-plugin-surface.js
-node scripts/check-agent-surface.js
 claude plugin validate --strict .
 ```
 
 `.claude-plugin/` and `mcp.json` are the Claude Code plugin surface.
 Codex / ChatGPT desktop use native browser integration and do not install this
 bridge as a plugin. The Claude plugin and manual JSON examples register the
-installed Browser Use and Computer Use services separately. The extension
-profiles only apply to the explicit compatibility adapter.
+installed Browser Use and Computer Use services separately.
 
-Keep method-level coverage in `docs/official-parity.md` accurate. Added tools or
-CLI entrypoints do not establish parity with official locator, session, or
-app-private semantics. Smoke-test each supported transport against its local
-service separately; WSL does not make Linux sockets and Windows pipes interchangeable.
+The bridge is a relay: tools, schemas, help text, and permissions come from the
+installed runtime. Do not add a bridge-side catalog, profile system, CDP
+wrapper, DOM/observation layer, or permission allowlist; changes there would
+duplicate the runtime and drift. Smoke-test each supported surface against its
+local service separately; WSL does not make Linux workers and Windows workers
+interchangeable.
 
 ## Code style
 
 - Run `cargo fmt` before committing. CI enforces clippy with zero warnings.
-- `cargo test --locked` runs all unit, integration, and e2e tests.
+- `cargo test --locked` runs all unit and integration tests.
 - `cargo clippy --locked -- -D warnings` is wired into CI; run it locally before pushing.
 
 ## Commits
@@ -87,18 +80,19 @@ service separately; WSL does not make Linux sockets and Windows pipes interchang
 - Reference the related issue in the PR description, if any.
 - Add or update tests for behavior changes.
 - Update `CHANGELOG.md` with a release-ready section when preparing a release.
-- Update both `README.md` and `README.zh-CN.md` if you add or remove tools.
+- Update both `README.md` and `README.zh-CN.md` when user-facing behavior changes.
 
-## Adding a new MCP tool
+## Changing the relay
 
-Four places to touch:
+Relay work touches a small surface:
 
-1. `src/browser.rs`: add the browser helper (CDP wrapper, parsing logic)
-2. `src/mcp/types.rs`, `src/mcp/handlers.rs`, `src/mcp/schema.rs`, and `src/mcp/profiles.rs`: add the handler variant, dispatch, schema, and profile membership
-3. `tests/` or module tests: add coverage for parameter validation, CDP response parsing, and mock transport behavior where practical
-4. `src/browser.rs` test module: add unit tests for CDP response parsing
+1. `src/native.rs`: discovery, environment policy, relay framing, tool policy, or cleanup.
+2. `src/cli.rs` / `src/main.rs`: CLI subcommands and flag validation.
+3. `tests/` or module tests: add coverage for the new behavior, including the failure path.
+4. Both READMEs and `docs/native-computer-use.md` when user-facing behavior changes.
 
-Then document the tool in both READMEs and update `CHANGELOG.md`.
+Keep new assertions about real relay behavior — forwarded frames, process
+teardown, or policy rejection — rather than matching documentation wording.
 
 ## Releasing
 

@@ -1,13 +1,16 @@
 # Upgrading from 2.x to 3.0
 
-`3.0.0` switches the Claude Code plugin, client templates in `examples/`, and npm setup hint to **native-first**: the bridge relays the installed Codex `node_repl` (Browser Use) and `cua_repl` (Computer Use) runtimes directly instead of registering the 66 structured `codex_*` tools by default.
+`3.0.0` makes the bridge **native-only**: it relays the installed Codex
+`node_repl` (Browser Use) and `cua_repl` (Computer Use) runtimes directly. The
+separate Chromium extension adapter and its structured `codex_*` tools were
+removed rather than kept as a second surface.
 
 ## What changed
 
 1. **Claude Code plugin (`mcp.json`) and client examples (`examples/*.json`)**
-   - `codex-browser` now runs `--surface native-browser --mode mcp` (relays installed `node_repl`).
+   - `codex-browser` runs `--surface native-browser --mode mcp` (relays installed `node_repl`).
    - `codex-computer` runs `--surface computer --mode mcp` (relays installed `cua_repl`).
-   - `CODEX_BRIDGE_PROFILE` is no longer used by the plugin or native examples; each installed runtime advertises its own native tool catalog (`js`, `js_reset`, etc.).
+   - Each installed runtime advertises its own native tool catalog (`js`, `js_reset`, etc.). There is no bridge-side profile.
    - If only one native runtime is installed on your machine, the other plugin server failing at startup is expected; in manual MCP configs, register only the entry you use (`examples/native-browser.json` or `examples/native-computer-use.json`).
 
 2. **Prerequisites for native entries**
@@ -19,22 +22,18 @@
      ```
    - See [docs/native-computer-use.md](native-computer-use.md) for discovery, environment policy, and elicitation approvals.
 
-3. **Keeping existing 2.x `codex_*` workflows (`--surface browser`)**
-   - The structured Chromium extension adapter (`codex_*`, 66 tools, `basic`/`network`/`full` profiles) remains available for compatibility.
-   - Pass `--surface browser --mode mcp` explicitly in manual MCP configs or scripts:
-     ```json
-     {
-       "mcpServers": {
-         "codex-browser-legacy": {
-           "command": "codex-browser-bridge",
-           "args": ["--surface", "browser", "--mode", "mcp"],
-           "env": { "CODEX_BRIDGE_PROFILE": "basic" }
-         }
-       }
-     }
-     ```
-   - Bare CLI invocations without `--surface` continue to default to `--surface browser` so existing shell scripts do not silently switch surfaces.
+3. **Removed 2.x surface**
+   - `--surface browser`, `--mode cli`, `--pipe`, `--browser-family`, `--browser-instance`, `--profile`, `--upload-base`, `--max-text-bytes`, `--max-image-bytes`, `--max-output-bytes`, `--network-policy`, `--finalize`, `--session-file`, and `--keep-turn` no longer exist.
+   - The structured `codex_*` tools, their `basic`/`network`/`full` profiles, the `codex://tabs` resource, the `login`/`extract-table` prompts, extension pipe discovery, and the extension-backed upload/download helpers are gone.
+   - Bare CLI invocations without `--surface` now default to `--surface native-browser`.
 
-4. **Rust library removals**
-   - Removed four unused wrapper functions from `codex_browser_bridge::browser` (`dom_cua_type`, `get_resource_content`, `nav_and_wait`, `click_and_wait`); use `cua_type`, `get_resource_content_with_timeout`, and `navigation_action_and_wait`.
-   - Removed the orphaned 2.x skill reference files from `skills/codex-browser/references/`; the bundled skill now routes to `native-computer-use.md` and `official-parity.md`.
+4. **Rust library**
+   - `src/` now contains only `main.rs`, `lib.rs`, `native.rs`, `cli.rs`, and `logging.rs`.
+   - Library imports of the old browser/client/registry/discovery/locator/observation modules fail; migrate to the installed runtime's JavaScript API instead of re-adding a bridge-side implementation.
+
+5. **Retired tooling and docs**
+   - `docs/official-parity.md`, the drift baseline, `scripts/check-agent-surface.js`, `scripts/live-e2e.ps1`, the protocol benchmark, and the extension adapter tests were removed with the adapter.
+   - The bundled skill routes to `native-computer-use.md`.
+
+If you depend on the 2.x `codex_*` tools, stay on a 2.x release; 3.0 does not
+provide a compatibility path.

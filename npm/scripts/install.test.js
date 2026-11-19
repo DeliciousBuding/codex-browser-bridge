@@ -238,6 +238,9 @@ async function run() {
     assert.match(hintText, /claude plugin install codex-browser/);
     assert.match(hintText, /npx/);
     assert.match(hintText, /native browser integration/);
+    assert.match(hintText, /--mode doctor/);
+    assert.match(hintText, /--surface computer --mode doctor/);
+    assert.match(hintText, /Antigravity/);
     assert.doesNotMatch(hintText, /codex plugin marketplace add/);
     assert.match(hintText, /Skill bundle fallback/);
     assert.match(hintText, /Other skill-aware agents/);

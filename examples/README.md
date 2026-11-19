@@ -26,6 +26,6 @@ in one client. Use the runtime's own instructions and verify connectivity
 before acting; a client that cannot present MCP elicitation cannot grant
 native approvals.
 
-For an existing `codex_*` workflow, explicitly use
-`["--surface", "browser", "--mode", "mcp"]` instead. Extension profiles apply
-only to that compatibility entry.
+`native-browser` is the default surface, so `--surface` may be omitted; the
+examples pass it explicitly for clarity. The exposed tool list is the
+installed runtime's own catalog.

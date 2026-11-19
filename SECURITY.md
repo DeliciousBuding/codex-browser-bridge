@@ -14,49 +14,33 @@ Please include:
 - A description of the issue and its impact
 - Steps to reproduce, or a proof-of-concept
 - The affected version (output of `codex-browser-bridge --version`)
-- Your environment (OS/architecture, browser version, ChatGPT desktop app/service version)
+- Your environment (OS/architecture, Codex app/CLI version, MCP host)
 
 You can expect an initial response within a few days. Once the issue is confirmed, we will work on a fix and coordinate disclosure with you.
 
 ## Scope
 
-This project bridges an existing Chromium browser-extension session to
-MCP-compatible agents. Reports about the following are in scope:
+`codex-browser-bridge` is a local stdin/stdout MCP and CLI relay to the
+installed Codex native runtimes (`node_repl` and `cua_repl`). It opens no
+network listening sockets and implements no custom browser CDP/DOM adapter.
 
-- Issues that allow an MCP client to take actions outside the documented tool surface
-- Issues in local named-pipe/Unix-socket transport or JSON-RPC framing that could be exploited by a hostile process on the same machine
-- Issues with the npm install pipeline (checksum verification, post-install script)
-- Issues that leak sensitive data (cookies, tokens, page contents) beyond the MCP transport
+Reports about the following are in scope:
+
+- Issues that allow an MCP client to bypass configured `enabled_tools` / `disabled_tools` policies or execute commands outside the discovered launch row
+- Issues in stdio JSON-RPC framing, backpressure bounds, or process-tree cleanup that cause resource exhaustion or orphaned privileged child processes
+- Issues in `~/.codex/config.toml` parsing or error diagnostics that leak host secrets, tokens, or raw config lines
+- Issues with the npm install pipeline (SHA-256 checksum verification, post-install script, release provenance)
 
 ### Built-in protections
 
-The bridge applies these safeguards at runtime:
+- **Launch-row environment policy**: only variables declared in the discovered Codex launch row and OS core allowlist are forwarded; `NON_INHERITABLE_ENV_VARS` are stripped, and malformed `~/.codex/config.toml` parse errors are redacted to line numbers only.
+- **Process lifecycle isolation**: child runtimes are wrapped in a Windows Job Object / Unix process group with `KillOnDrop` and bounded `turn_ended` shutdown cleanup.
+- **Bounded framing and backpressure**: native frames are capped at 64 MiB, CLI input lines at 1 MiB, and outbound relay queues at 256 frames / 8 MiB.
+- **Interactive approval preservation**: native `elicitation/create` requests are forwarded verbatim to interactive MCP hosts; non-interactive CLI workers respond with `{"action": "cancel"}` and never auto-approve.
 
-- **URL scheme filtering**: `codex_navigate` blocks `file:`, `javascript:`, `data:`, `vbscript:`, `about:`, `chrome:`, and `edge:` URLs (see `src/browser.rs:validate_url`)
-- **Browser identity checks**: only responses identifying themselves as an
-  `extension` backend with a family and extension instance ID become browser
-  choices. Instances are never selected or reconnected by pipe name alone.
-- **Log sanitization**: error messages are stripped of newline characters before writing to the debug log, preventing log injection via crafted error responses
-- **JSON safety**: the `jsonEscaped` helper always produces valid JSON strings for JavaScript embedding, with a safe `""` fallback on error instead of propagating corrupted values
+Debug logs (`RUST_LOG=debug`) may contain tool names, paths, or error messages. Redact logs before sharing them.
 
-Debug logs may still contain local pipe IDs, method names, extension responses, URLs, or page text. Redact logs before sharing them.
+### Out of scope
 
-The bridge is designed for local use with trusted MCP or CLI clients on the same machine.
-Current Linux source discovers `/tmp/codex-browser-use/*.sock`. It rejects
-symlinked or unsafe directory components and requires a real socket owned by
-the current effective UID with no group/other permissions (the official socket
-mode is `0600`). The official shared directory's sticky `1777` mode is accepted.
-Dialing checks the endpoint before and after connection and verifies the peer UID.
-These checks do not protect against another hostile process running as the same
-user. Socket access does not grant the bridge app-private approval services.
-
-The bridge does not inherit all Codex Browser app-side controls. Codex site
-approvals, Guardian review, enterprise policy, secure credential handoff, and
-artifact-library export live above the extension pipe. Other MCP clients must
-apply their own confirmation policy. Do not use the bridge to bypass a Codex
-approval or policy decision.
-
-Out of scope:
-
-- MCP client access to your active browser session. This is the project's stated purpose. See the README's "Security" section for the threat model.
-- Issues in the ChatGPT desktop app, ChatGPT browser extension, or the browser itself. Please report those upstream.
+- Authorized MCP client access to your local Codex Browser Use or Computer Use runtime (that is the project's stated purpose).
+- Issues in the Codex desktop app, Codex CLI, `node_repl`, `cua_repl`, or the Chromium browser itself. Please report those upstream.

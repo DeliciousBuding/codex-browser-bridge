@@ -292,6 +292,9 @@ function logInstallHints(root, log, target, platform = process.platform) {
       "  claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-bridge",
       "  -> the plugin starts this bridge via npx and connects to both installed native services",
       "  -> this global install is optional and keeps startup warm",
+      "Verify the installed Codex runtimes before use:",
+      "  codex-browser-bridge --mode doctor                            (native-browser, the default surface)",
+      "  codex-browser-bridge --surface computer --mode doctor",
       "Codex / ChatGPT desktop already have native browser integration; do not install this bridge as a Codex plugin.",
     ].join("\n")
   );
@@ -306,7 +309,7 @@ function logInstallHints(root, log, target, platform = process.platform) {
     );
   }
   if (fs.existsSync(examplesDir)) {
-    const lines = [`MCP config examples: ${examplesDir} (Claude Code, Cursor, OpenClaw, Hermes Agent)`];
+    const lines = [`MCP config examples: ${examplesDir} (Claude Code, Antigravity, Cursor, OpenClaw, Hermes Agent)`];
     if (target) {
       lines.push("Ready-to-paste MCP config with the absolute installed binary path:");
       lines.push(mcpConfigForTarget(target));

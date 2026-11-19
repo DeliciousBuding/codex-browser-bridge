@@ -458,9 +458,61 @@ impl Launch {
                     "verifying_identity": has("BROWSER_USE_ACCESS_VERIFYING_IDENTITY")
                 });
             }
+            let (client_path, plugins) = discover_browser_client();
+            out["browser_client"] = json!(client_path);
+            if !plugins.is_empty() {
+                out["browser_plugins"] = json!(plugins);
+            }
         }
         out
     }
+}
+
+/// Discover the installed Codex `browser` / `chrome` plugin `browser-client.mjs`
+/// entry point under `<CODEX_HOME>/plugins/cache/openai-bundled/` so non-Codex
+/// MCP hosts can bootstrap `setupBrowserRuntime()` without guessing paths.
+fn discover_browser_client() -> (Option<PathBuf>, BTreeMap<String, String>) {
+    let mut plugins = BTreeMap::new();
+    let mut selected: Option<PathBuf> = None;
+    let home = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(
+                std::env::var_os("USERPROFILE")
+                    .or_else(|| std::env::var_os("HOME"))
+                    .unwrap_or_default(),
+            )
+            .join(".codex")
+        });
+    let base = home.join("plugins").join("cache").join("openai-bundled");
+    for plugin in ["browser", "chrome"] {
+        let dir = base.join(plugin);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut versions: Vec<(std::time::SystemTime, String, PathBuf)> = entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let version = e.file_name().to_str()?.to_string();
+                let candidate = e.path().join("scripts").join("browser-client.mjs");
+                if !candidate.is_file() {
+                    return None;
+                }
+                let mtime = std::fs::metadata(&candidate)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                Some((mtime, version, candidate))
+            })
+            .collect();
+        versions.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+        if let Some((_, version, candidate)) = versions.into_iter().next() {
+            plugins.insert(plugin.to_string(), version);
+            if selected.is_none() {
+                selected = Some(candidate);
+            }
+        }
+    }
+    (selected, plugins)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -734,7 +786,7 @@ fn prepare_call_meta(
     executing: &mut Option<Value>,
     default_session: &str,
     default_turn: &str,
-    is_js: bool,
+    tool_name: &str,
 ) -> Result<()> {
     let params = params
         .as_object_mut()
@@ -763,8 +815,20 @@ fn prepare_call_meta(
             .cloned()
             .unwrap_or_else(|| context["session_id"].clone())
     });
-    if is_js {
+    if tool_name == "js" {
         *executing = Some(Value::Object(meta.clone()));
+    } else if tool_name == "turn_ended" {
+        let args = params
+            .entry("arguments")
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .context("turn_ended arguments must be an object")?;
+        args.entry("hook_event_name")
+            .or_insert_with(|| json!("Stop"));
+        args.entry("session_id")
+            .or_insert_with(|| context["session_id"].clone());
+        args.entry("turn_id")
+            .or_insert_with(|| context["turn_id"].clone());
     }
     Ok(())
 }
@@ -859,6 +923,14 @@ where
                         native
                             .send(json!({"jsonrpc":"2.0","id":row["id"],"result":{}}))
                             .await?;
+                    } else if row["method"] == "elicitation/create" && row.get("id").is_some() {
+                        native
+                            .send(json!({
+                                "jsonrpc": "2.0",
+                                "id": row["id"],
+                                "result": {"action": "cancel"}
+                            }))
+                            .await?;
                     } else if row.get("method").is_some() && row.get("id").is_some() {
                         native
                             .send(json!({
@@ -927,17 +999,16 @@ fn clear_executing_if_ended(executing: &mut Option<Value>, arguments: Option<&Va
         return;
     };
     let Some(args) = arguments.and_then(Value::as_object) else {
-        *executing = None;
         return;
     };
     let same_session = args
         .get("session_id")
         .and_then(Value::as_str)
-        .is_none_or(|id| id == active_ctx["session_id"].as_str().unwrap_or_default());
+        .is_some_and(|id| id == active_ctx["session_id"].as_str().unwrap_or_default());
     let same_turn = args
         .get("turn_id")
         .and_then(Value::as_str)
-        .is_none_or(|id| id == active_ctx["turn_id"].as_str().unwrap_or_default());
+        .is_some_and(|id| id == active_ctx["turn_id"].as_str().unwrap_or_default());
     if same_session && same_turn {
         *executing = None;
     }
@@ -1016,15 +1087,15 @@ where
                             host_writer.enqueue(reply, None)?;
                             continue;
                         }
-                        let executes_js = tool_name == "js";
+                        let tool_name = tool_name.to_string();
                         let ends_turn = tool_name == "turn_ended";
                         if let Err(error) = prepare_call_meta(
-                                &mut row["params"],
-                                &mut executing,
-                                &default_session,
-                                &default_turn,
-                                executes_js,
-                            ) {
+                            &mut row["params"],
+                            &mut executing,
+                            &default_session,
+                            &default_turn,
+                            &tool_name,
+                        ) {
                                 let reply = json!({
                                     "jsonrpc": "2.0",
                                     "id": id,
@@ -1056,10 +1127,18 @@ where
                     native_writer.enqueue(row, cancelled_id)?;
                 }
                 row = native_reader.receive(), if host_writer.can_accept_outbound() => {
-                    let Some(mut row) = row? else {
-                        write_failed = true;
-                        bail!("native service closed connection");
+                    let row = match row {
+                        Ok(Some(row)) => row,
+                        Ok(None) => {
+                            write_failed = true;
+                            bail!("native service closed connection");
+                        }
+                        Err(err) => {
+                            write_failed = true;
+                            return Err(err);
+                        }
                     };
+                    let mut row = row;
                     if row.get("method").is_none() {
                         if let Some(id) = row.get("id").map(ToString::to_string) {
                             active.remove(&id);
@@ -1249,6 +1328,8 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Worker<R, W> {
                 if let Some(req_id) = row.get("id").cloned() {
                     let reply = if req_method == "ping" {
                         json!({"jsonrpc": "2.0", "id": req_id, "result": {}})
+                    } else if req_method == "elicitation/create" {
+                        json!({"jsonrpc": "2.0", "id": req_id, "result": {"action": "cancel"}})
                     } else {
                         json!({
                             "jsonrpc": "2.0",
@@ -1288,7 +1369,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Worker<R, W> {
             &mut self.last_context,
             &self.session,
             &self.turn,
-            name == "js",
+            name,
         )?;
         tokio::time::timeout(self.tool_timeout, self.request("tools/call", params))
             .await
@@ -2480,11 +2561,7 @@ mod tests {
             .await;
             let decision = receive(&mut transport).await;
             assert_eq!(decision["id"], "approval-1");
-            assert_eq!(decision["error"]["code"], -32603);
-            assert!(decision["error"]["message"]
-                .as_str()
-                .unwrap()
-                .contains("CLI did not approve"));
+            assert_eq!(decision["result"]["action"], "cancel");
 
             send(
                 &mut transport,
@@ -2493,7 +2570,7 @@ mod tests {
                     "id": call["id"],
                     "error": {
                         "code": -32603,
-                        "message": decision["error"]["message"]
+                        "message": "elicitation cancelled by non-interactive client"
                     }
                 }),
             )
@@ -2513,7 +2590,7 @@ mod tests {
             .tool("js", json!({"code": "await cua.listWindows();"}))
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("CLI did not approve"));
+        assert!(err.to_string().contains("elicitation cancelled"));
         assert_eq!(count.load(Ordering::SeqCst), 1);
         fixture.await.unwrap();
     }

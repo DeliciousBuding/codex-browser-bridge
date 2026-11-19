@@ -2,7 +2,7 @@
   "name": "codex-browser",
   "displayName": "Codex Browser",
   "version": "3.0.0",
-  "description": "Use the installed Codex Browser Use and Computer Use runtimes through MCP.",
+  "description": "Drive the installed Codex Browser Use (node_repl) and Computer Use (cua_repl) runtimes from Claude Code as two MCP servers.",
   "author": {
     "name": "DeliciousBuding",
     "url": "https://github.com/DeliciousBuding"

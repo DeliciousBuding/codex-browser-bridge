@@ -2,7 +2,7 @@
   "name": "@delicious233/codex-browser-bridge",
   "version": "3.0.0",
   "private": false,
-  "description": "MCP access to installed Codex Browser and Computer Use runtimes, with a Chromium extension adapter.",
+  "description": "MCP server and CLI that reuse the installed Codex Browser Use and Computer Use runtimes from Claude Code and other MCP clients.",
   "bin": {
     "codex-browser-bridge": "bin/codex-browser-bridge.js"
   },
@@ -37,7 +37,10 @@
     "mcp-server",
     "browser",
     "browser-automation",
+    "browser-use",
+    "node-repl",
     "computer-use",
+    "cua-repl",
     "claude-code",
     "claude-code-plugin",
     "chatgpt",
@@ -45,11 +48,7 @@
     "plugins",
     "agent",
     "automation",
-    "cdp",
-    "devtools",
-    "devtools-protocol",
     "json-rpc",
-    "named-pipe",
     "rust"
   ],
   "author": "DeliciousBuding",

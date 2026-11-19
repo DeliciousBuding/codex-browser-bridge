@@ -6,9 +6,8 @@ objects, permissions, images, and errors.
 
 | Entry | Runtime | When to use it |
 | --- | --- | --- |
-| `--surface native-browser` | Codex `node_repl` | Use the installed Codex Browser/Chrome plugin's JavaScript API and instructions, including its browser backend selection and permissions. |
+| `--surface native-browser` (default) | Codex `node_repl` | Use the installed Codex Browser/Chrome plugin's JavaScript API and instructions, including its browser backend selection and permissions. |
 | `--surface computer` | Codex `cua_repl` | Use the installed Computer Use `cua` API and its configured surfaces. |
-| `--surface browser` (default) | Bridge extension adapter | Use the existing `codex_*` tools over the browser extension transport. |
 
 Codex itself uses the native services directly. The bridge's plugin and
 client templates register both services. If only one is installed or needed,
@@ -33,8 +32,8 @@ The bridge preserves the launch row's command, arguments, working directory,
 literal `env`, `env_vars`, `enabled` flag, timeout settings, and
 `enabled_tools`/`disabled_tools` lists, including `CUA_REPL_ENABLED_SURFACES` and
 `NODE_REPL_TRUSTED_SERVICES`. Native `js` can therefore access every surface
-enabled by the host configuration, without the bridge's browser-specific tab,
-network, or output-size wrappers.
+enabled by the host configuration, exactly as it does inside Codex; the bridge
+adds no tab, network, or output-size wrapper of its own.
 
 Local stdio launch follows Codex CLI's environment policy:
 
@@ -191,10 +190,9 @@ codex-browser-bridge --surface computer --image-dir ./captures batch
 - `--image-dir` (valid with `call` or `batch`) writes returned image blocks to
   files and attaches `bridge_artifacts` metadata while keeping the original
   base64 image blocks in stdout JSON.
-- Browser-only flags (`--pipe`, `--browser-family`, `--browser-instance`,
-  `--profile`, `--upload-base`, `--max-text-bytes`, `--max-image-bytes`,
-  `--max-output-bytes`, `--network-policy`, `--finalize`, `--session-file`,
-  `--keep-turn`) are rejected before startup.
+- The only top-level options are `--mode`, `--surface`, `--native-config`, and
+  `--image-dir`; the removed 2.x browser flags are rejected by the argument
+  parser before startup.
 - The CLI is non-interactive and rejects `elicitation/create` requests with a
   JSON-RPC error; approve applications through an interactive MCP host.
 

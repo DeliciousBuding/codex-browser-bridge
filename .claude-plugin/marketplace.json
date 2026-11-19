@@ -1,6 +1,6 @@
 {
   "name": "codex-browser-bridge",
-  "description": "Use installed Codex Browser and Computer Use runtimes from Claude Code.",
+  "description": "Drive the installed Codex Browser Use and Computer Use runtimes from Claude Code.",
   "owner": {
     "name": "DeliciousBuding",
     "url": "https://github.com/DeliciousBuding"
@@ -9,7 +9,7 @@
     {
       "name": "codex-browser",
       "source": "./",
-      "description": "Connect Claude Code to the installed Browser Use and Computer Use services."
+      "description": "Register the installed Codex Browser Use and Computer Use runtimes as separate MCP servers."
     }
   ]
 }
