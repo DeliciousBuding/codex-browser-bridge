@@ -75,6 +75,7 @@ async fn page_read(client: &Client, tab_id: &str, expression: &str) -> Result<Va
             "Runtime.evaluate",
             Some(json!({"expression":expression,"returnByValue":true,"awaitPromise":true})),
             Duration::from_secs(15),
+            crate::client::FocusSetup::Required,
         ),
     )
     .await

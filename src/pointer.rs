@@ -91,7 +91,13 @@ async fn dispatch_method_until(
     }
     timeout_at(
         deadline,
-        client.execute_cdp_once_with_timeout(tab, method, Some(params), remaining),
+        client.execute_cdp_once_with_timeout(
+            tab,
+            method,
+            Some(params),
+            remaining,
+            crate::client::FocusSetup::Required,
+        ),
     )
     .await
     .map_err(|_| BridgeError::Timeout("pointer operation deadline".into()))?

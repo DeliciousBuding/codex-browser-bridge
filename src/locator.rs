@@ -244,7 +244,7 @@ fn duration_field(spec: &Value, field: &str, default: u64, min: u64, max: u64) -
 async fn evaluate(client: &Client, tab: i64, spec: &Value, deadline: Instant) -> Result<Value> {
     let raw = client.execute_cdp_once_with_timeout(tab, "Runtime.evaluate", Some(json!({
         "expression": SCRIPT.replace("__CODEX_LOCATOR_SPEC__", &spec.to_string()), "returnByValue": true
-    })), deadline.saturating_duration_since(Instant::now())).await?;
+    })), deadline.saturating_duration_since(Instant::now()), crate::client::FocusSetup::Required).await?;
     if let Some(message) = evaluate_exception_message(&raw) {
         return Err(invalid(format!("locator evaluation failed: {message}")));
     }
@@ -488,6 +488,7 @@ async fn run_until(
                         "Input.insertText",
                         Some(json!({"text":ch.to_string()})),
                         deadline.saturating_duration_since(Instant::now()),
+                        crate::client::FocusSetup::Required,
                     )
                     .await?;
             }

@@ -391,6 +391,7 @@ async fn send(
             "Input.dispatchKeyEvent",
             Some(event(spec, kind, modifiers, shifted)),
             timeout,
+            crate::client::FocusSetup::Required,
         )
         .await
         .map(|_| ())

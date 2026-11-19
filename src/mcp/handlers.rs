@@ -251,6 +251,7 @@ impl super::Server {
                         "DOM.resolveNode",
                         Some(json!({"backendNodeId":chooser.backend_node_id})),
                         deadline.saturating_duration_since(Instant::now()),
+                        crate::client::FocusSetup::Required,
                     )
                     .await?;
                 let node: Value = serde_json::from_str(raw.get())?;
@@ -259,13 +260,14 @@ impl super::Server {
                     .and_then(Value::as_str)
                     .ok_or_else(|| anyhow::anyhow!("chooser node could not be resolved"))?;
                 let probe = client.execute_cdp_once_with_timeout(tab_id,"Runtime.callFunctionOn",Some(json!({"objectId":object_id,
-                    "functionDeclaration":"function(){return {valid:this.isConnected && this.tagName==='INPUT' && this.type==='file' && !this.disabled,multiple:this.multiple};}","returnByValue":true})), deadline.saturating_duration_since(Instant::now())).await;
+                    "functionDeclaration":"function(){return {valid:this.isConnected && this.tagName==='INPUT' && this.type==='file' && !this.disabled,multiple:this.multiple};}","returnByValue":true})), deadline.saturating_duration_since(Instant::now()), crate::client::FocusSetup::Required).await;
                 let _ = client
                     .execute_cdp_once_with_timeout(
                         tab_id,
                         "Runtime.releaseObject",
                         Some(json!({"objectId":object_id})),
                         Duration::from_millis(250),
+                        crate::client::FocusSetup::Required,
                     )
                     .await;
                 let probe = probe?;
@@ -296,6 +298,7 @@ impl super::Server {
                         "DOM.setFileInputFiles",
                         Some(json!({"backendNodeId":chooser.backend_node_id,"files":files})),
                         deadline.saturating_duration_since(Instant::now()),
+                        crate::client::FocusSetup::Required,
                     )
                     .await;
                 client.close_observed_file_chooser(tab_id, chooser_id);

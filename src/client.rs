@@ -40,6 +40,17 @@ const RECONNECT_BACKOFFS: [Duration; 3] = [
 const RECONNECT_COOLDOWN: Duration = Duration::from_secs(5);
 const RECONNECT_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Whether attaching a tab must enable background focus emulation.
+///
+/// Focus emulation is required for background rendering and input, but blocks
+/// indefinitely when a modal JavaScript dialog is open. Commands that unlock or
+/// tear down a blocked page (`handle_dialog`, `reload`, `close_tab`) pass `Skip`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusSetup {
+    Required,
+    Skip,
+}
+
 type PendingMap = HashMap<u64, oneshot::Sender<Response>>;
 
 #[derive(Clone)]
@@ -1196,11 +1207,14 @@ impl Client {
                             retried = true;
                             self.inner.attached_tabs.lock().await.remove(&tab_id);
                             self.detach_tab_until(tab_id, deadline).await.ok();
-                            epoch = self.attach_tab_until(tab_id, deadline).await.map_err(|attach_err| {
-                                BridgeError::Protocol(format!(
-                                    "retry attach failed for tab {tab_id}: {attach_err}"
-                                ))
-                            })?;
+                            epoch = self
+                                .attach_tab_until(tab_id, deadline, FocusSetup::Required)
+                                .await
+                                .map_err(|attach_err| {
+                                    BridgeError::Protocol(format!(
+                                        "retry attach failed for tab {tab_id}: {attach_err}"
+                                    ))
+                                })?;
                             self.inner.attached_tabs.lock().await.insert(tab_id, epoch);
                             continue 'enable;
                         }
@@ -1349,6 +1363,7 @@ impl Client {
                 "Page.setInterceptFileChooserDialog",
                 Some(json!({"enabled":true})),
                 remaining,
+                FocusSetup::Required,
             ),
         )
         .await
@@ -1380,6 +1395,7 @@ impl Client {
                 "Page.setInterceptFileChooserDialog",
                 Some(json!({"enabled":false})),
                 request_timeout,
+                FocusSetup::Required,
             ),
         )
         .await
@@ -1518,7 +1534,10 @@ impl Client {
         // budget even if the sticky fast-path just consumed STICKY_FAST_TIMEOUT.
         let deadline = Instant::now() + request_timeout;
         self.detach_tab_until(tab_id, deadline).await.ok();
-        let epoch = match self.attach_tab_until(tab_id, deadline).await {
+        let epoch = match self
+            .attach_tab_until(tab_id, deadline, FocusSetup::Required)
+            .await
+        {
             Ok(epoch) => epoch,
             Err(err) => {
                 self.retire_current_tab_state(tab_id).await;
@@ -1538,7 +1557,10 @@ impl Client {
                 self.inner.attached_tabs.lock().await.remove(&tab_id);
                 self.inner.observations.lock().unwrap().remove(tab_id);
                 self.detach_tab_until(tab_id, deadline).await.ok();
-                let epoch = match self.attach_tab_until(tab_id, deadline).await {
+                let epoch = match self
+                    .attach_tab_until(tab_id, deadline, FocusSetup::Required)
+                    .await
+                {
                     Ok(epoch) => epoch,
                     Err(err) => {
                         self.retire_current_tab_state(tab_id).await;
@@ -1555,20 +1577,15 @@ impl Client {
         }
     }
 
-    /// Execute one state-changing CDP command at most once.
-    ///
-    /// `execute_cdp_with_timeout` may recover an invalid debugger session and
-    /// retry the command. That is useful for observations, but unsafe for
-    /// pointer input: a retried click or drop can execute twice. This variant
-    /// still establishes the attachment when needed, then deliberately does
-    /// not retry the mutation. An invalidated session is reported as an
-    /// ambiguous outcome so callers cannot silently replay it.
+    /// Execute one state-changing CDP command at most once (with one replay when
+    /// the error proves the command never reached the renderer).
     pub async fn execute_cdp_once_with_timeout(
         &self,
         tab_id: i64,
         method: &str,
         params: Option<Value>,
         request_timeout: Duration,
+        focus: FocusSetup,
     ) -> Result<Box<RawValue>> {
         self.ensure_alive().await?;
         let tab_lock = self.tab_lock(tab_id).await;
@@ -1580,7 +1597,7 @@ impl Client {
             self.inner.attached_tabs.lock().await.get(&tab_id).copied() == Some(epoch);
         if !already_attached {
             self.detach_tab_until(tab_id, deadline).await.ok();
-            epoch = match self.attach_tab_until(tab_id, deadline).await {
+            epoch = match self.attach_tab_until(tab_id, deadline, focus).await {
                 Ok(epoch) => epoch,
                 Err(err) => {
                     self.retire_current_tab_state(tab_id).await;
@@ -1589,7 +1606,9 @@ impl Client {
                     )));
                 }
             };
-            self.inner.attached_tabs.lock().await.insert(tab_id, epoch);
+            if focus == FocusSetup::Required {
+                self.inner.attached_tabs.lock().await.insert(tab_id, epoch);
+            }
         }
 
         match self
@@ -1602,7 +1621,7 @@ impl Client {
                 // (preserving observations), re-attach, and replay once.
                 self.inner.attached_tabs.lock().await.remove(&tab_id);
                 self.detach_tab_until(tab_id, deadline).await.ok();
-                let retry_epoch = match self.attach_tab_until(tab_id, deadline).await {
+                let retry_epoch = match self.attach_tab_until(tab_id, deadline, focus).await {
                     Ok(epoch) => epoch,
                     Err(err) => {
                         self.retire_current_tab_state(tab_id).await;
@@ -1611,11 +1630,13 @@ impl Client {
                         )));
                     }
                 };
-                self.inner
-                    .attached_tabs
-                    .lock()
-                    .await
-                    .insert(tab_id, retry_epoch);
+                if focus == FocusSetup::Required {
+                    self.inner
+                        .attached_tabs
+                        .lock()
+                        .await
+                        .insert(tab_id, retry_epoch);
+                }
                 self.execute_cdp_raw_until(tab_id, method, params, deadline, retry_epoch)
                     .await
             }
@@ -1711,7 +1732,10 @@ impl Client {
             return Ok(());
         }
         let _ = self.detach_tab_until(tab_id, deadline).await;
-        let epoch = match self.attach_tab_until(tab_id, deadline).await {
+        let epoch = match self
+            .attach_tab_until(tab_id, deadline, FocusSetup::Required)
+            .await
+        {
             Ok(epoch) => epoch,
             Err(error) => {
                 self.retire_current_tab_state(tab_id).await;
@@ -1723,7 +1747,12 @@ impl Client {
         Ok(())
     }
 
-    async fn attach_tab_until(&self, tab_id: i64, deadline: Instant) -> Result<u64> {
+    async fn attach_tab_until(
+        &self,
+        tab_id: i64,
+        deadline: Instant,
+        focus: FocusSetup,
+    ) -> Result<u64> {
         let epoch = self.inner.connection_epoch.load(Ordering::Acquire);
         self.send_request_once(
             "attach",
@@ -1736,6 +1765,9 @@ impl Client {
             return Err(BridgeError::Connection(
                 "connection changed after attach; setup not verified".into(),
             ));
+        }
+        if focus == FocusSetup::Skip {
+            return Ok(epoch);
         }
         // Match the native Browser client: make the attached page focused for
         // CDP input without selecting its tab or focusing the browser window.
@@ -1757,14 +1789,34 @@ impl Client {
                     "connection changed during attachment setup; setup not verified: {error}"
                 )));
             }
+            let timed_out = matches!(error, BridgeError::Timeout(_))
+                || error.to_string().to_ascii_lowercase().contains("timed out");
+            let pending_dialog = if timed_out {
+                self.inner
+                    .observations
+                    .lock()
+                    .unwrap()
+                    .snapshot(tab_id)
+                    .ok()
+                    .and_then(|s| s.dialog)
+            } else {
+                None
+            };
             let cleanup_deadline = Instant::now() + Duration::from_millis(500);
             let _ = timeout_at(
                 cleanup_deadline,
                 self.detach_tab_until(tab_id, cleanup_deadline),
             )
             .await;
+            let dialog_hint = match pending_dialog {
+                Some(d) => format!(
+                    "; page has a pending JS dialog ({}); handle it with dialog accept/dismiss first",
+                    d.dialog_type
+                ),
+                None => String::new(),
+            };
             return Err(BridgeError::Protocol(format!(
-                "background focus emulation failed: {error}; no foreground activation or input was sent; detach was attempted"
+                "background focus emulation failed: {error}{dialog_hint}; no foreground activation or input was sent; detach was attempted"
             )));
         }
         Ok(epoch)
@@ -1775,7 +1827,11 @@ impl Client {
         let lock = self.tab_lock(tab_id).await;
         let _guard = lock.lock().await;
         let epoch = match self
-            .attach_tab_until(tab_id, Instant::now() + DEFAULT_REQUEST_TIMEOUT)
+            .attach_tab_until(
+                tab_id,
+                Instant::now() + DEFAULT_REQUEST_TIMEOUT,
+                FocusSetup::Required,
+            )
             .await
         {
             Ok(epoch) => epoch,
@@ -2795,6 +2851,7 @@ mod reconnect_tests {
                         "Input.dispatchMouseEvent",
                         Some(json!({"type":"mouseMoved","x":8,"y":9})),
                         Duration::from_secs(5),
+                        FocusSetup::Required,
                     ),
                 )
                 .await
@@ -2818,7 +2875,11 @@ mod reconnect_tests {
             let client = client.clone();
             async move {
                 client
-                    .attach_tab_until(7, Instant::now() + Duration::from_secs(2))
+                    .attach_tab_until(
+                        7,
+                        Instant::now() + Duration::from_secs(2),
+                        FocusSetup::Required,
+                    )
                     .await
             }
         });
@@ -2897,6 +2958,7 @@ mod reconnect_tests {
                         "Input.dispatchMouseEvent",
                         Some(json!({"type":"mousePressed","x":10,"y":20})),
                         Duration::from_secs(5),
+                        FocusSetup::Required,
                     )
                     .await
             }
@@ -2960,6 +3022,7 @@ mod reconnect_tests {
                         "Input.dispatchMouseEvent",
                         Some(json!({"type":"mousePressed","x":10,"y":20})),
                         Duration::from_secs(5),
+                        FocusSetup::Required,
                     )
                     .await
             }
@@ -2980,6 +3043,113 @@ mod reconnect_tests {
             "unexpected error: {err}"
         );
         no_request(&mut server, "target closed must not trigger a retry").await;
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn skip_focus_attaches_without_focus_emulation_and_preserves_required_focus_next() {
+        let (client, mut server) = test_client(4096).await;
+
+        let handle_call = tokio::spawn({
+            let client = client.clone();
+            async move {
+                client
+                    .execute_cdp_once_with_timeout(
+                        7,
+                        "Page.handleJavaScriptDialog",
+                        Some(json!({"accept": true, "promptText": "ok"})),
+                        Duration::from_secs(5),
+                        FocusSetup::Skip,
+                    )
+                    .await
+            }
+        });
+
+        let detach = next_request(&mut server).await;
+        assert_eq!(detach["method"], "detach");
+        encode_frame(&mut server, &json!({"id": detach["id"], "result": {}}))
+            .await
+            .unwrap();
+
+        let attach = next_request(&mut server).await;
+        assert_eq!(attach["method"], "attach");
+        encode_frame(&mut server, &json!({"id": attach["id"], "result": {}}))
+            .await
+            .unwrap();
+
+        // Must go straight to Page.handleJavaScriptDialog without Emulation.setFocusEmulationEnabled.
+        let dialog_cmd = next_request(&mut server).await;
+        assert_eq!(dialog_cmd["method"], "executeCdp");
+        assert_eq!(dialog_cmd["params"]["method"], "Page.handleJavaScriptDialog");
+        encode_frame(&mut server, &json!({"id": dialog_cmd["id"], "result": {}}))
+            .await
+            .unwrap();
+
+        handle_call.await.unwrap().unwrap();
+        // Skip attach must NOT mark the tab as having completed Required focus setup.
+        assert!(!client.inner.attached_tabs.lock().await.contains_key(&7));
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn focus_emulation_timeout_with_pending_dialog_reports_pending_dialog_hint() {
+        let (client, mut server) = test_client(4096).await;
+        {
+            let mut obs = client.inner.observations.lock().unwrap();
+            let _ = obs.register(7).unwrap();
+            let ev = json!({
+                "source": { "tabId": 7 },
+                "method": "Page.javascriptDialogOpening",
+                "params": {
+                    "url": "http://127.0.0.1/",
+                    "message": "enter:",
+                    "type": "prompt",
+                    "defaultPrompt": ""
+                }
+            });
+            obs.record(&ev);
+        }
+
+        let attach_call = tokio::spawn({
+            let client = client.clone();
+            async move {
+                client
+                    .attach_tab_until(
+                        7,
+                        Instant::now() + Duration::from_secs(5),
+                        FocusSetup::Required,
+                    )
+                    .await
+            }
+        });
+
+        let attach = next_request(&mut server).await;
+        assert_eq!(attach["method"], "attach");
+        encode_frame(&mut server, &json!({"id": attach["id"], "result": {}}))
+            .await
+            .unwrap();
+
+        let focus = next_request(&mut server).await;
+        assert_eq!(focus["params"]["method"], "Emulation.setFocusEmulationEnabled");
+        encode_frame(
+            &mut server,
+            &json!({"id": focus["id"], "error": {"code": -32000, "message": "Timed out after 10000ms waiting for CDP command Emulation.setFocusEmulationEnabled."}}),
+        )
+        .await
+        .unwrap();
+
+        let detach = next_request(&mut server).await;
+        assert_eq!(detach["method"], "detach");
+        encode_frame(&mut server, &json!({"id": detach["id"], "result": {}}))
+            .await
+            .unwrap();
+
+        let err = attach_call.await.unwrap().unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("pending JS dialog (prompt)"),
+            "expected pending JS dialog hint, got: {msg}"
+        );
         client.shutdown().await;
     }
 

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, value::RawValue, Value};
 use tokio::time::{sleep, Duration, Instant};
 
-use crate::client::Client;
+use crate::client::{Client, FocusSetup};
 use crate::error::{BridgeError, Result};
 
 const MAX_WAIT_MS: u64 = 60_000;
@@ -397,7 +397,16 @@ fn parse_native_result(raw: &RawValue, command: &str) -> Result<Value> {
 
 pub async fn close_tab(client: &Client, tab_id: &str) -> Result<()> {
     let id = parse_tab_id("close_tab", tab_id)?;
-    match client.execute_cdp(id, "Page.close", None).await {
+    match client
+        .execute_cdp_once_with_timeout(
+            id,
+            "Page.close",
+            None,
+            Duration::from_secs(20),
+            FocusSetup::Skip,
+        )
+        .await
+    {
         Ok(_) => {
             client.retire_tab_state(id).await;
             Ok(())
@@ -419,6 +428,7 @@ pub async fn navigate(client: &Client, tab_id: &str, url: &str) -> Result<()> {
             "Page.navigate",
             Some(json!({ "url": url })),
             Duration::from_secs(20),
+            FocusSetup::Required,
         )
         .await?;
     ensure_navigation_accepted(&raw, &url)
@@ -456,6 +466,7 @@ pub async fn navigate_back(client: &Client, tab_id: &str) -> Result<()> {
             "Page.navigateToHistoryEntry",
             Some(json!({ "entryId": entry_id })),
             Duration::from_secs(20),
+            FocusSetup::Required,
         )
         .await
         .map(|_| ())
@@ -473,6 +484,7 @@ pub async fn navigate_forward(client: &Client, tab_id: &str) -> Result<()> {
             "Page.navigateToHistoryEntry",
             Some(json!({ "entryId": entry_id })),
             Duration::from_secs(20),
+            FocusSetup::Required,
         )
         .await
         .map(|_| ())
@@ -481,7 +493,13 @@ pub async fn navigate_forward(client: &Client, tab_id: &str) -> Result<()> {
 pub async fn reload(client: &Client, tab_id: &str) -> Result<()> {
     let id = parse_tab_id("reload", tab_id)?;
     client
-        .execute_cdp_once_with_timeout(id, "Page.reload", None, Duration::from_secs(20))
+        .execute_cdp_once_with_timeout(
+            id,
+            "Page.reload",
+            None,
+            Duration::from_secs(20),
+            FocusSetup::Skip,
+        )
         .await
         .map(|_| ())
 }
@@ -1997,6 +2015,7 @@ pub async fn cua_type(client: &Client, tab_id: &str, text: &str) -> Result<()> {
             "Input.insertText",
             Some(json!({ "text": text })),
             Duration::from_secs(10),
+            FocusSetup::Required,
         )
         .await
         .map(|_| ())
@@ -2499,6 +2518,7 @@ pub async fn file_input(
                 "files": paths,
             })),
             Duration::from_secs(20),
+            FocusSetup::Required,
         )
         .await
         .map(|_| ())
@@ -2525,6 +2545,7 @@ pub async fn handle_dialog(
             "Page.handleJavaScriptDialog",
             Some(serde_json::Value::Object(params)),
             Duration::from_secs(10),
+            FocusSetup::Skip,
         )
         .await
         .map(|_| ())
