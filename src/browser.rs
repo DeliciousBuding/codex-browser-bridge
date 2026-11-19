@@ -2010,7 +2010,31 @@ pub async fn cua_click_with_count(
     keypress: &[String],
 ) -> Result<()> {
     let id = parse_tab_id("cua_click", tab_id)?;
+    let metrics = client
+        .execute_cdp(id, "Page.getLayoutMetrics", None)
+        .await?;
+    if let Some((vw, vh)) = layout_viewport_size(&metrics) {
+        if x < 0.0 || y < 0.0 || x > vw || y > vh {
+            return Err(BridgeError::User(format!(
+                "coordinates ({x}, {y}) are outside viewport ({vw}x{vh})"
+            )));
+        }
+    }
     crate::pointer::click(client, id, x, y, button, click_count, keypress).await
+}
+
+fn layout_viewport_size(raw: &RawValue) -> Option<(f64, f64)> {
+    let value: Value = serde_json::from_str(raw.get()).ok()?;
+    let vp = value
+        .get("cssLayoutViewport")
+        .or_else(|| value.get("layoutViewport"))?;
+    let w = vp.get("clientWidth").and_then(Value::as_f64)?;
+    let h = vp.get("clientHeight").and_then(Value::as_f64)?;
+    if w > 0.0 && h > 0.0 {
+        Some((w, h))
+    } else {
+        None
+    }
 }
 
 pub async fn cua_move(
@@ -2442,7 +2466,7 @@ pub async fn navigation_action_and_wait(
     } else {
         return Err(BridgeError::User("a navigation action is required".into()));
     }
-    client
+    let wait_res = client
         .wait_for_observed_navigation(
             id,
             &armed.cursor,
@@ -2450,8 +2474,14 @@ pub async fn navigation_action_and_wait(
             wait_until,
             deadline.saturating_duration_since(Instant::now()),
         )
-        .await?;
-    Ok(())
+        .await;
+    match (wait_res, selector) {
+        (Ok(_), _) => Ok(()),
+        (Err(err), Some(sel)) => Err(BridgeError::Timeout(format!(
+            "click was dispatched on {sel}, but no navigation occurred before deadline: {err}"
+        ))),
+        (Err(err), None) => Err(err),
+    }
 }
 
 /// Fill multiple form fields at once, optionally submitting.

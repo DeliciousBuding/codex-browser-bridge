@@ -145,6 +145,15 @@ impl Tool {
         self.meta = Some(meta);
         self
     }
+
+    pub(super) fn is_mutation(&self) -> bool {
+        !self
+            .annotations
+            .as_ref()
+            .and_then(|a| a.get("readOnlyHint"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
 }
 
 /// Behavior hints surfaced as MCP tool annotations.

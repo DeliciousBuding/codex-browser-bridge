@@ -420,15 +420,36 @@ impl super::Server {
             ToolHandler::FileChooser => self.handle_file_chooser(args).await,
         };
 
+        let is_mutation = tool.is_mutation();
         match result {
-            Ok(content) => result_response(id, json!({ "content": content })),
-            Err(err) => result_response(
-                id,
-                json!({
+            Ok(content) => {
+                if is_mutation {
+                    result_response(
+                        id,
+                        json!({
+                            "content": content,
+                            "structuredContent": { "execution": "executed" }
+                        }),
+                    )
+                } else {
+                    result_response(id, json!({ "content": content }))
+                }
+            }
+            Err(err) => {
+                let mut payload = json!({
                     "content": [Content::text(format!("Error: {err}"))],
                     "isError": true
-                }),
-            ),
+                });
+                if is_mutation {
+                    let (execution, verify_with) = classify_mutation_error(&err);
+                    let mut structured = json!({ "execution": execution });
+                    if let Some(hint) = verify_with {
+                        structured["verify_with"] = json!(hint);
+                    }
+                    payload["structuredContent"] = structured;
+                }
+                result_response(id, payload)
+            }
         }
     }
 
@@ -962,8 +983,21 @@ impl super::Server {
         let tab_id = required_str(&args, "tab_id")?;
         let x = required_f64(&args, "x")?;
         let y = required_f64(&args, "y")?;
-        let scroll_x = required_alias_f64(&args, "scroll_x", "scrollX")?;
-        let scroll_y = required_alias_f64(&args, "scroll_y", "scrollY")?;
+        let has_x = args.get("scroll_x").is_some() || args.get("scrollX").is_some();
+        let has_y = args.get("scroll_y").is_some() || args.get("scrollY").is_some();
+        if !has_x && !has_y {
+            anyhow::bail!("at least one of scroll_x/scrollX or scroll_y/scrollY is required");
+        }
+        let scroll_x = if has_x {
+            required_alias_f64(&args, "scroll_x", "scrollX")?
+        } else {
+            0.0
+        };
+        let scroll_y = if has_y {
+            required_alias_f64(&args, "scroll_y", "scrollY")?
+        } else {
+            0.0
+        };
         let keypress = optional_str_array(&args, "keypress")?.unwrap_or_default();
         browser::cua_scroll(
             &self.client_snapshot(),
@@ -1896,6 +1930,51 @@ impl super::Server {
     }
 }
 
+fn classify_mutation_error(err: &anyhow::Error) -> (&'static str, Option<&'static str>) {
+    let msg = err.to_string().to_ascii_lowercase();
+    if msg.contains("click was dispatched") {
+        return ("executed", None);
+    }
+    if let Some(bridge) = err.downcast_ref::<crate::error::BridgeError>() {
+        match bridge {
+            crate::error::BridgeError::User(_) => return ("not_executed", None),
+            crate::error::BridgeError::Timeout(_) | crate::error::BridgeError::Connection(_) => {
+                return (
+                    "unknown",
+                    Some("Inspect tab state via codex_evaluate, codex_get_url, or codex_observe(state) before retrying."),
+                );
+            }
+            _ => {}
+        }
+    }
+    if [
+        "missing required",
+        "must be",
+        "outside viewport",
+        "invalid action",
+        "attach failed",
+        "retry attach failed",
+        "not attached",
+        "unattached",
+        "debugger detached",
+        "no session",
+        "session not found",
+        "no target",
+        "target does not exist",
+        "cannot find target",
+        "at least one of scroll_x",
+    ]
+    .iter()
+    .any(|needle| msg.contains(needle))
+    {
+        return ("not_executed", None);
+    }
+    (
+        "unknown",
+        Some("Inspect tab state via codex_evaluate, codex_get_url, or codex_observe(state) before retrying."),
+    )
+}
+
 #[cfg(test)]
 mod rebind_tests {
     use super::*;
@@ -2201,5 +2280,25 @@ mod rebind_tests {
             .unwrap_err();
         assert!(error.to_string().contains("still owns"));
         assert_eq!(server.client_snapshot().session_ids().await, first_ids);
+    }
+
+    #[test]
+    fn mutation_error_classifier_returns_three_states() {
+        let user_err: anyhow::Error =
+            crate::error::BridgeError::User("coordinates (5000, 5000) are outside viewport".into())
+                .into();
+        assert_eq!(classify_mutation_error(&user_err), ("not_executed", None));
+
+        let dispatched_err: anyhow::Error = crate::error::BridgeError::Timeout(
+            "click was dispatched on #btn, but no navigation occurred before deadline".into(),
+        )
+        .into();
+        assert_eq!(classify_mutation_error(&dispatched_err), ("executed", None));
+
+        let timeout_err: anyhow::Error =
+            crate::error::BridgeError::Timeout("Input.dispatchMouseEvent".into()).into();
+        let (state, hint) = classify_mutation_error(&timeout_err);
+        assert_eq!(state, "unknown");
+        assert!(hint.is_some());
     }
 }
