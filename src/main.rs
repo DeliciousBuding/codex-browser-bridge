@@ -15,21 +15,22 @@ enum Mode {
 enum Surface {
     Browser,
     Computer,
+    NativeBrowser,
 }
 
 #[derive(Debug, Parser)]
 #[command(name = "codex-browser-bridge")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
-#[command(about = "Bridge MCP clients to the ChatGPT desktop app's browser-extension pipe")]
+#[command(about = "Connect MCP clients to installed Codex runtimes or the Chromium extension")]
 struct Args {
     #[arg(long, value_enum, default_value_t = Mode::Mcp)]
     mode: Mode,
 
-    /// Use the installed native cua_repl MCP service for Computer Use.
+    /// Select the extension adapter or an installed native Codex MCP service.
     #[arg(long, value_enum, default_value_t = Surface::Browser)]
     surface: Surface,
 
-    /// Read-only native host MCP JSON containing mcpServers.cua_repl.
+    /// Read-only MCP JSON containing the selected native service's launch row.
     #[arg(long)]
     native_config: Option<std::path::PathBuf>,
 
@@ -116,9 +117,16 @@ async fn main() -> anyhow::Result<()> {
     if args.command.is_some() && !matches!(args.mode, Mode::Mcp) {
         anyhow::bail!("commands cannot be combined with --mode; omit --mode for tools/call/batch");
     }
-    if args.surface == Surface::Computer {
+    let native_server = match args.surface {
+        Surface::Browser => None,
+        Surface::Computer => Some(native::NativeServer::Computer),
+        Surface::NativeBrowser => Some(native::NativeServer::Browser),
+    };
+    if let Some(server) = native_server {
         if args.session_file.is_some() || args.keep_turn {
-            anyhow::bail!("Computer Use objects live in one native worker; use batch, not --session-file or --keep-turn");
+            anyhow::bail!(
+                "native objects live in one worker; use batch, not --session-file or --keep-turn"
+            );
         }
         if args.image_dir.is_some()
             && !matches!(
@@ -126,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
                 Some(cli::Command::Call { .. } | cli::Command::Batch)
             )
         {
-            anyhow::bail!("--image-dir requires a Computer Use call or batch command");
+            anyhow::bail!("--image-dir requires a native call or batch command");
         }
         if args.pipe.is_some()
             || args.browser_family.is_some()
@@ -141,13 +149,13 @@ async fn main() -> anyhow::Result<()> {
         {
             anyhow::bail!("browser selection, profiles, output limits, network policy and --finalize require --surface browser; native results are preserved without browser output limits");
         }
-        let launch = native::Launch::discover(args.native_config.as_deref())?;
+        let launch = native::Launch::discover(server, args.native_config.as_deref())?;
         if let Some(command) = args.command {
             return native::run_cli(launch, command, args.image_dir.as_deref()).await;
         }
         return match args.mode {
             Mode::Mcp => native::run_mcp(launch).await,
-            Mode::Cli => anyhow::bail!("Computer Use CLI requires tools, call, or batch"),
+            Mode::Cli => anyhow::bail!("native CLI requires tools, call, or batch"),
             Mode::Doctor => native::run_doctor(launch).await,
             Mode::Discover => {
                 println!("{}", serde_json::to_string_pretty(&launch.summary())?);
@@ -156,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
         };
     }
     if args.native_config.is_some() || args.image_dir.is_some() {
-        anyhow::bail!("--native-config and --image-dir require --surface computer");
+        anyhow::bail!("--native-config and --image-dir require --surface computer or --surface native-browser");
     }
     let owns_turn = matches!(
         args.command.as_ref(),

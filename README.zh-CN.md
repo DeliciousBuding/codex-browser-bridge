@@ -6,7 +6,7 @@
 
 <p align="center">
   为 Claude Code、Antigravity、Cursor、OpenClaw、Hermes Agent 和 shell 脚本同时解锁 <b>Codex Browser Use</b> 与 <b>Codex Native Computer Use</b>。
-  <br>一个 Rust 二进制：66 个 <code>codex_*</code> 工具直连你已登录的 Chromium 会话，另接本机已安装的 <code>cua_repl</code> 桌面运行时。
+  <br>通过 MCP 复用已安装的 Codex 运行时，也保留现有客户端使用的结构化浏览器工具。
 </p>
 
 <p align="center">
@@ -20,17 +20,15 @@
 
 ---
 
-## 两个入口，一个二进制
+## 选择入口
 
-`codex-browser-bridge` 是一个薄 MCP 适配层，提供两个入口。浏览器入口复用你已登录的 Chromium 会话；桌面入口复用本机已安装的 Codex 桌面运行时。不需要 WebDriver，不复制浏览器配置，也不安装第二套扩展。
+| 入口 | 用途 |
+|---|---|
+| `--surface computer` | 使用已安装的 `cua_repl` 和 `cua` API。启用统一运行时后，一个 worker 可处理桌面和浏览器。 |
+| `--surface native-browser` | 需要已安装的 Browser/Chrome 插件提供的 `node_repl` JavaScript API 时使用。 |
+| `--surface browser`（默认） | 通过 Chromium 扩展使用现有的 66 个结构化 `codex_*` 工具。 |
 
-| | `--surface browser`（默认） | `--surface computer`（按需） |
-|---|---|---|
-| 传输 | 直连 Chromium 扩展的原生消息 pipe/socket（`codex-browser-use`）。不需要 Codex 桌面应用进程。 | 启动并转发本机已安装的 Codex `cua_repl` 服务（`[mcp_servers.cua_repl]` 或 `unified-computer-use`）。 |
-| 接口 | 66 个声明式 MCP 工具（`basic` 46 / `network` 65 / `full` 66），以及 CLI（`call`、`batch`、`--session-file`）。 | 有状态的 `js` REPL：`cua.listApps()`、`cua.listWindows()`、`cua.getApp({windowId})`、`cua.listBrowsers()`、`cua.getTab()`、`getAXStateAndScreenshot()`、`click()`、`typeText()`、`pressKey()`、`scroll()`、`drag()`。 |
-| 行为 | 后台焦点模拟（`Emulation.setFocusEmulationEnabled`）；输入和截图不抢窗口焦点。 | 透传原生 `elicitation/create` 应用授权弹窗；`turn_ended` 与受管进程树清理（Windows Job Object / Unix process group）。 |
-
-网页任务走浏览器入口：标签页、导航、DOM/无障碍树、可信点击与输入、截图、上传、弹窗、Cookie、网络捕获，以及 allowlist 内的 CDP 诊断，全部作用于需要真实登录态的页面。桌面应用和跨应用流程走桌面入口。两个入口作为独立 MCP server 运行，不共享 turn。
+[原生接入指南](docs/native-computer-use.md)说明如何选择、注册和授权。大多数客户端注册一个入口即可。
 
 ## 快速开始
 
@@ -42,7 +40,7 @@ claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-
 
 一条命令同时安装 Skill 和 MCP server，不用手写 JSON。插件默认使用 66 工具的 full profile，因为 Claude Code 通过 tool search 按需加载 schema，且只有 `codex_doctor` 标记为始终加载。首次启动时 `npx` 拉取固定版本的 npm 包，之后复用缓存或 PATH 上的全局二进制。
 
-插件只注册浏览器入口。需要 Computer Use 时加上下面配置里的 `codex-computer`。
+插件注册结构化扩展工具。使用原版工具请参考[原生配置示例](examples/README.md)。
 
 ### 手工 MCP 配置
 
@@ -263,18 +261,7 @@ codex-browser-bridge --mode doctor                   # 诊断
 
 ## 架构
 
-```
-MCP client (Claude Code / Cursor / OpenClaw)
-        │ stdio JSON-RPC
-        ▼
-codex-browser-bridge (Rust binary)
-        │ length-prefixed JSON-RPC frames
-        ▼
-codex-browser-use pipe/socket  ──▶  ChatGPT extension  ── CDP ──▶  Chromium tabs
-        │ (--surface computer)
-        ▼
-cua_repl worker  ──▶  desktop apps + browser targets
-```
+共享原生中继与独立扩展通道见[架构说明](ARCHITECTURE.md)。
 
 从 1.x 升级时，先读 [docs/upgrade-v2.md](docs/upgrade-v2.md)，尤其是保存过续接文件或只用数字 ID 认领标签页的安装。
 

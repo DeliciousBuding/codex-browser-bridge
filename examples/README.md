@@ -27,11 +27,11 @@ Codex and ChatGPT desktop already control the browser extension natively. Do
 not install this bridge as a Codex plugin; these examples are for non-Codex MCP
 clients that need to reuse the same browser session.
 
-Native application automation is opt-in through
-[native-computer-use.json](native-computer-use.json). It starts
-`--surface computer` and exposes the installed native `cua_repl` catalog,
-separately from browser profiles. The MCP client must support native application
-elicitation. See [native setup and platform status](../docs/native-computer-use.md).
+To use the original Codex tools, register [native-browser.json](native-browser.json)
+for Browser (`node_repl`), [native-computer-use.json](native-computer-use.json)
+for Computer Use (`cua_repl`), or both. Each entry runs the installed service
+with its native tool catalog. The receiving MCP client must support elicitation
+when the runtime requests approval. See [native setup and platform status](../docs/native-computer-use.md).
 
 ## Supported clients
 

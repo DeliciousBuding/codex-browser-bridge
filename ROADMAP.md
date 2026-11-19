@@ -2,18 +2,11 @@
 
 ## Architecture and scope
 
-`codex-browser-bridge` is a thin transport and protocol adapter with two explicit
-surfaces:
-
-- **`--surface browser` (default)**: connects directly to the Codex Browser Use
-  Chromium extension native-messaging endpoint (`\\.\pipe\codex-browser-use\*` or
-  `/tmp/codex-browser-use/*.sock`) and exposes 66 structured `codex_*` MCP tools
-  and CLI commands without requiring the Codex desktop app.
-- **`--surface computer`**: discovers and launches the installed Codex `cua_repl`
-  MCP service (`[mcp_servers.cua_repl]` or bundled `unified-computer-use`),
-  relaying `js`, `js_reset`, `js_add_node_module_dir`, `turn_ended`, and
-  bidirectional `elicitation/create` app approvals while owning worker
-  process-tree cleanup.
+The primary goal is to let external clients use Codex's installed native
+runtimes through standard MCP. Follow the installed service's catalog and
+permissions. Use one registration when the unified runtime covers the task.
+Keep the direct extension adapter for clients that rely on its existing
+structured tools and for installations without the Codex desktop runtime.
 
 Detailed contracts and status matrices:
 [docs/official-parity.md](docs/official-parity.md),
@@ -50,16 +43,11 @@ Detailed contracts and status matrices:
 
 ## Next iterations
 
-### 1. Browser surface — official `26.1111.21308` parity gaps
+### 1. Original Browser and Computer Use
 
-Tracked against [docs/official-parity.md](docs/official-parity.md):
-
-- **Cross-origin / OOPIF routing & transformed frames**: child-target CDP
-  `sessionId` routing for cross-origin iframes, transformed-frame pointer
-  geometry, and fuller ARIA accessible-name computation.
-- **Actionable visible-DOM references**: document-epoch-bound visible-DOM
-  actionable refs and node-targeted scroll (`DomCUAAPI.get_visible_dom` /
-  `DomCUAAPI.scroll`).
+Prioritize native launch, client approvals, session isolation and cleanup across
+platforms. The compatibility matrix describes the existing extension tools;
+behavior gaps there do not require a parallel implementation of native APIs.
 
 ### 2. Native Computer Use surface — runtime & platform coverage
 

@@ -129,6 +129,12 @@ directories into the npm package before `npm pack`, `npm publish`, or
 `npm run check:package`. The package-content check verifies every skill
 reference, not only `SKILL.md`.
 
+For changes to a native entry, verify the candidate binary against the
+installed runtime. Record MCP connectivity separately from actual operations:
+`doctor` and `mcp list` establish startup and catalog availability; a disposable
+fixture establishes input and cleanup. Keep blocked approvals and untested
+client/platform combinations separate from passes. Store raw traces privately.
+
 ## Claude Plugin Distribution
 
 The repository default branch is the Claude plugin source; each release tag

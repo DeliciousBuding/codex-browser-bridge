@@ -20,6 +20,7 @@ const END_TIMEOUT: Duration = Duration::from_secs(8);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_RELAY_OUTBOUND_FRAMES: usize = 256;
 const MAX_RELAY_OUTBOUND_BYTES: usize = 8 * 1024 * 1024;
+const MAX_NATIVE_FRAME_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CLI_LINE_BYTES: usize = 1024 * 1024;
 const MAX_NATIVE_CATALOG_PAGES: usize = 100;
 const MAX_NATIVE_CATALOG_ITEMS: usize = 2048;
@@ -118,8 +119,33 @@ impl NativeEnvVar {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub enum NativeServer {
+    #[default]
+    Computer,
+    Browser,
+}
+
+impl NativeServer {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Computer => "cua_repl",
+            Self::Browser => "node_repl",
+        }
+    }
+
+    fn surface(self) -> &'static str {
+        match self {
+            Self::Computer => "computer",
+            Self::Browser => "native-browser",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Launch {
+    #[serde(skip)]
+    server: NativeServer,
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -145,9 +171,9 @@ pub struct Launch {
 
 impl Launch {
     /// Read the native host's launch configuration; never rewrite generated caches.
-    pub fn discover(explicit: Option<&Path>) -> Result<Self> {
+    pub fn discover(server: NativeServer, explicit: Option<&Path>) -> Result<Self> {
         if let Some(path) = explicit {
-            return Self::read(path);
+            return Self::read(server, path);
         }
         let home = std::env::var_os("CODEX_HOME")
             .map(PathBuf::from)
@@ -164,10 +190,15 @@ impl Launch {
         let native_config = home.join("config.toml");
         if native_config.is_file() {
             let document: toml::Value = toml::from_str(&std::fs::read_to_string(&native_config)?)?;
-            if let Some(row) = document.get("mcp_servers").and_then(|v| v.get("cua_repl")) {
-                let launch: Self = serde_json::from_value(serde_json::to_value(row)?)?;
-                return launch.validated();
+            if let Some(row) = document
+                .get("mcp_servers")
+                .and_then(|v| v.get(server.name()))
+            {
+                return Self::from_row(server, serde_json::to_value(row)?);
             }
+        }
+        if matches!(server, NativeServer::Browser) {
+            bail!("native node_repl launch configuration unavailable; configure [mcp_servers.node_repl] in Codex or pass --native-config <MCP JSON>");
         }
         let cache = home.join("plugins/cache/openai-bundled/unified-computer-use");
         let mut candidates: Vec<_> = std::fs::read_dir(cache)
@@ -180,50 +211,53 @@ impl Launch {
         candidates.sort_by_key(|path| std::fs::metadata(path).and_then(|m| m.modified()).ok());
         candidates.reverse();
         if let Some(path) = candidates.first() {
-            return Self::read(path);
+            return Self::read(server, path);
         }
         bail!("installed native cua_repl launch configuration unavailable; start the native app or pass --native-config <MCP JSON>");
     }
 
-    pub fn read(path: &Path) -> Result<Self> {
+    fn read(server: NativeServer, path: &Path) -> Result<Self> {
         let document: Value = serde_json::from_str(
             &std::fs::read_to_string(path).context("read native MCP configuration")?,
         )?;
         let row = document
-            .pointer("/mcpServers/cua_repl")
-            .context("native configuration must contain mcpServers.cua_repl")?;
-        serde_json::from_value::<Self>(row.clone())?.validated()
+            .get("mcpServers")
+            .and_then(|table| table.get(server.name()))
+            .with_context(|| {
+                format!(
+                    "native configuration must contain mcpServers.{}",
+                    server.name()
+                )
+            })?;
+        Self::from_row(server, row.clone())
+    }
+
+    fn from_row(server: NativeServer, row: Value) -> Result<Self> {
+        let mut launch: Self = serde_json::from_value(row)?;
+        launch.server = server;
+        launch.validated()
     }
 
     fn validated(self) -> Result<Self> {
         if self.enabled == Some(false) {
-            bail!("native cua_repl launch configuration is disabled");
+            bail!(
+                "native {} launch configuration is disabled",
+                self.server.name()
+            );
         }
         let command = Path::new(&self.command);
         if command.is_absolute() && !command.is_file() {
             bail!("native command must identify an installed executable");
         }
-        for env_var in &self.env_vars {
-            match env_var.source() {
-                None | Some("local") => {}
-                Some("remote") => {
-                    bail!(
-                        "env_vars entry '{}' uses source 'remote', which requires remote MCP stdio",
-                        env_var.name()
-                    )
-                }
-                Some(source) => {
-                    bail!("unsupported env_vars source '{source}'; expected 'local' or 'remote'")
-                }
-            }
-        }
         let environment = self.environment()?;
-        let repl = environment
-            .get(OsStr::new("CUA_REPL_NODE_REPL_PATH"))
-            .context("native configuration lacks CUA_REPL_NODE_REPL_PATH")?;
-        let repl = Path::new(repl);
-        if !repl.is_absolute() || !repl.is_file() {
-            bail!("native NodeREPL executable unavailable");
+        if matches!(self.server, NativeServer::Computer) {
+            let repl = environment
+                .get(OsStr::new("CUA_REPL_NODE_REPL_PATH"))
+                .context("native configuration lacks CUA_REPL_NODE_REPL_PATH")?;
+            let repl = Path::new(repl);
+            if !repl.is_absolute() || !repl.is_file() {
+                bail!("native NodeREPL executable unavailable");
+            }
         }
         if let Some(value) = self.startup_timeout_sec {
             if !value.is_finite() || value < 0.0 {
@@ -363,7 +397,7 @@ impl Launch {
 
     pub fn summary(&self) -> Value {
         json!({
-            "surface":"computer","status":"launch_configuration_found",
+            "surface":self.server.surface(),"status":"launch_configuration_found",
             "command":self.command,"args":self.args,"cwd":self.cwd,
             "env_keys":self.env.keys().collect::<Vec<_>>(),
             "env_vars":self.env_vars.iter().map(NativeEnvVar::name).collect::<Vec<_>>(),
@@ -453,7 +487,9 @@ impl OwnedProcess {
             .command_mut()
             .stdin(Stdio::piped())
             .stdout(Stdio::piped());
-        let mut child = command.spawn().context("start native cua_repl")?;
+        let mut child = command
+            .spawn()
+            .with_context(|| format!("start native {}", launch.server.name()))?;
         let input = child.stdin().take().context("native stdin missing")?;
         let output = child.stdout().take().context("native stdout missing")?;
         Ok((
@@ -511,7 +547,13 @@ struct JsonReader<R> {
 
 impl<R: AsyncRead + Unpin> JsonReader<R> {
     async fn receive(&mut self) -> Result<Option<Value>> {
-        let bytes = self.reader.read_until(b'\n', &mut self.buffer).await?;
+        let remaining = MAX_NATIVE_FRAME_BYTES + 1 - self.buffer.len();
+        let bytes = tokio::io::AsyncReadExt::take(&mut self.reader, remaining as u64)
+            .read_until(b'\n', &mut self.buffer)
+            .await?;
+        if self.buffer.len() > MAX_NATIVE_FRAME_BYTES {
+            bail!("native MCP frame exceeds 64 MiB");
+        }
         if bytes == 0 && self.buffer.is_empty() {
             return Ok(None);
         }
@@ -746,6 +788,10 @@ where
                         break;
                     } else if row["id"] == id && row.get("error").is_some() {
                         bail!("native cleanup failed: {}", row["error"]);
+                    } else if row["method"] == "ping" && row.get("id").is_some() {
+                        native
+                            .send(json!({"jsonrpc":"2.0","id":row["id"],"result":{}}))
+                            .await?;
                     } else if row.get("method").is_some() && row.get("id").is_some() {
                         native
                             .send(json!({
@@ -806,7 +852,7 @@ where
     let default_session = Uuid::new_v4().to_string();
     let default_turn = Uuid::new_v4().to_string();
     let mut executing: Option<Value> = None;
-    let mut active = BTreeMap::<String, Value>::new();
+    let mut active = BTreeMap::<String, (Value, bool)>::new();
     let mut tool_lists = BTreeSet::<String>::new();
     let mut write_failed = false;
     let mut host_eof = false;
@@ -819,39 +865,50 @@ where
         let native_writer = &mut native.writer;
         loop {
             if host_eof && !native_writer.has_outbound() && !host_writer.has_outbound() {
-                return Ok::<_, anyhow::Error>("Stop");
+                return Ok::<_, anyhow::Error>(if active.values().any(|(_, is_call)| *is_call) {
+                    "Interrupt"
+                } else {
+                    "Stop"
+                });
             }
             tokio::select! {
                 row = host_reader.receive(), if !host_eof && native_writer.can_accept_outbound() && host_writer.can_accept_outbound() => {
                     let Some(mut row) = row? else {
                         host_eof = true;
-                        if !native_writer.has_outbound() && !host_writer.has_outbound() {
-                            return Ok("Stop");
-                        }
                         continue;
                     };
                     let request_id = row.get("id").cloned();
                     if row["method"] == "tools/call" {
-                        if let Some(id) = request_id {
-                            let tool_name = row["params"]["name"].as_str().unwrap_or_default().to_string();
-                            if !tool_name.is_empty() && !tools.allows(&tool_name) {
-                                let reply = json!({
+                        let Some(id) = request_id.filter(|id| id.is_string() || id.is_i64() || id.is_u64()) else {
+                            continue;
+                        };
+                        let tool_name = row["params"]["name"].as_str().filter(|name| !name.is_empty());
+                        let Some(tool_name) = tool_name else {
+                            host_writer.enqueue(json!({
+                                "jsonrpc":"2.0","id":id,
+                                "error":{"code":-32602,"message":"native tools/call requires a nonempty name"}
+                            }), None)?;
+                            continue;
+                        };
+                        if !tools.allows(tool_name) {
+                            let reply = json!({
                                     "jsonrpc": "2.0",
                                     "id": id,
                                     "error": {
                                         "code": -32602,
-                                        "message": format!("tool '{tool_name}' is disabled for MCP server 'cua_repl'")
+                                        "message": format!("native tool '{tool_name}' is disabled by launch configuration")
                                     }
                                 });
-                                host_writer.enqueue(reply, None)?;
-                                continue;
-                            }
-                            if let Err(error) = prepare_call_meta(
+                            host_writer.enqueue(reply, None)?;
+                            continue;
+                        }
+                        let executes_js = tool_name == "js";
+                        if let Err(error) = prepare_call_meta(
                                 &mut row["params"],
                                 &mut executing,
                                 &default_session,
                                 &default_turn,
-                                tool_name == "js",
+                                executes_js,
                             ) {
                                 let reply = json!({
                                     "jsonrpc": "2.0",
@@ -861,17 +918,16 @@ where
                                 host_writer.enqueue(reply, None)?;
                                 continue;
                             }
-                            active.insert(id.to_string(), id);
-                        }
+                        active.insert(id.to_string(), (id, true));
                     } else if row["method"] == "tools/list" {
                         if let Some(id) = request_id {
                             let key = id.to_string();
                             tool_lists.insert(key.clone());
-                            active.insert(key, id);
+                            active.insert(key, (id, false));
                         }
                     } else if row.get("method").is_some() {
                         if let Some(id) = request_id {
-                            active.insert(id.to_string(), id);
+                            active.insert(id.to_string(), (id, false));
                         }
                     }
                     let cancelled_id = (row["method"] == "notifications/cancelled")
@@ -930,7 +986,7 @@ where
     let cleanup = cleanup_session(
         native,
         write_failed,
-        active.into_values(),
+        active.into_values().map(|(id, _)| id),
         executing,
         tools,
         event,
@@ -1413,7 +1469,7 @@ mod tests {
         }}});
         let path = directory.path().join("native.json");
         std::fs::write(&path, configuration.to_string()).unwrap();
-        let launch = Launch::read(&path).unwrap();
+        let launch = Launch::read(NativeServer::Computer, &path).unwrap();
         assert_eq!(launch.command, executable.to_string_lossy());
         assert_eq!(launch.args, ["native-entry.mjs"]);
         assert_eq!(launch.cwd.as_deref(), Some(directory.path()));
@@ -1444,7 +1500,7 @@ mod tests {
         }}});
         let path = directory.path().join("native.json");
         std::fs::write(&path, configuration.to_string()).unwrap();
-        let launch = Launch::read(&path).unwrap();
+        let launch = Launch::read(NativeServer::Computer, &path).unwrap();
         assert_eq!(launch.startup_timeout().unwrap(), Duration::from_secs(30));
         assert_eq!(launch.tool_timeout().unwrap(), Duration::from_secs(300));
     }
@@ -1483,7 +1539,7 @@ mod tests {
         ] {
             let path = directory.path().join(format!("{name}.json"));
             std::fs::write(&path, json!({"mcpServers":{"cua_repl":row}}).to_string()).unwrap();
-            let error = Launch::read(&path).unwrap_err();
+            let error = Launch::read(NativeServer::Computer, &path).unwrap_err();
             assert!(error.to_string().contains(expected), "{name}: {error:#}");
         }
     }
@@ -1546,7 +1602,7 @@ mod tests {
         }}});
         let path = directory.path().join("native.json");
         std::fs::write(&path, configuration.to_string()).unwrap();
-        let error = Launch::read(&path).unwrap_err();
+        let error = Launch::read(NativeServer::Computer, &path).unwrap_err();
         assert!(error.to_string().contains("requires remote MCP stdio"));
     }
 
@@ -1758,6 +1814,20 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("disabled"));
+
+        send(
+            &mut client,
+            json!({"jsonrpc":"2.0","method":"tools/call","params":{"name":"js_reset"}}),
+        )
+        .await;
+        send(
+            &mut client,
+            json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":false}}),
+        )
+        .await;
+        let malformed = receive(&mut client).await;
+        assert_eq!(malformed["id"], 6);
+        assert_eq!(malformed["error"]["code"], -32602);
 
         send(
             &mut client,
@@ -2056,6 +2126,60 @@ mod tests {
             .unwrap()
             .unwrap()
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn relay_treats_eof_with_pending_tool_as_interrupt() {
+        let (host_io, client_io) = tokio::io::duplex(32768);
+        let (native_io, fixture_io) = tokio::io::duplex(32768);
+        let (hr, hw) = tokio::io::split(host_io);
+        let (nr, nw) = tokio::io::split(native_io);
+        let task = tokio::spawn(async move {
+            relay(
+                &mut JsonTransport::new(hr, hw),
+                &mut JsonTransport::new(nr, nw),
+                std::future::pending(),
+                &ToolPolicy::default(),
+            )
+            .await
+        });
+        let (cr, cw) = tokio::io::split(client_io);
+        let (fr, fw) = tokio::io::split(fixture_io);
+        let mut client = JsonTransport::new(cr, cw);
+        let mut fixture = JsonTransport::new(fr, fw);
+        send(
+            &mut client,
+            json!({"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"js"}}),
+        )
+        .await;
+        assert_eq!(receive(&mut fixture).await["id"], 42);
+        drop(client);
+        let cancel = receive(&mut fixture).await;
+        assert_eq!(cancel["params"]["requestId"], 42);
+        let cleanup = receive(&mut fixture).await;
+        assert_eq!(
+            cleanup["params"]["arguments"]["hook_event_name"],
+            "Interrupt"
+        );
+        send(
+            &mut fixture,
+            json!({"jsonrpc":"2.0","id":"ping","method":"ping"}),
+        )
+        .await;
+        assert_eq!(receive(&mut fixture).await["result"], json!({}));
+        send(
+            &mut fixture,
+            json!({"jsonrpc":"2.0","id":cleanup["id"],"result":{"content":[]}}),
+        )
+        .await;
+        let error = tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("outcome unknown and not replayed"));
     }
 
     #[tokio::test]

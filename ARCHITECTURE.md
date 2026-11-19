@@ -36,8 +36,8 @@ and are not plugin targets for this bridge.
 
 | Module | Responsibility |
 |---|---|
-| `main.rs` | CLI entry. `--surface browser\|computer`, `--mode mcp\|cli\|discover\|doctor`, `tools`, `call`, `batch`; loads config |
-| `native.rs` | Installed native `cua_repl` discovery, filtered raw MCP relay, CLI/doctor worker and owned process cleanup |
+| `main.rs` | CLI entry. `--surface browser\|native-browser\|computer`, `--mode mcp\|cli\|discover\|doctor`, `tools`, `call`, `batch`; loads config |
+| `native.rs` | Shared launcher, stdio MCP relay, CLI/doctor worker and process cleanup for installed `node_repl` and `cua_repl` |
 | `client.rs` | The pipe `Client`: requests, `execute_cdp`, reconnect, event subscriptions |
 | `pipe.rs` | Platform transport and dialing; Windows named pipe or validated Unix stream; `dial_named_pipe` remains a compatibility entrypoint |
 | `protocol.rs` | Length-prefixed frame encode/decode, `Request`/`Response`, session-param merge |

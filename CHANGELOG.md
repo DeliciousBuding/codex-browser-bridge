@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Relay the installed Codex Browser/Chrome `node_repl` with
+  `--surface native-browser`, using the same launcher and MCP forwarding as
+  native Computer Use. Existing extension tools keep their current entry.
+
+### Fixed
+
+- Report an unanswered native tool call as interrupted when its MCP connection
+  closes, and reject malformed tool calls before forwarding.
+- Report locator checkbox postcondition timeouts consistently without replaying
+  the click.
+
 ## [2.1.1] - 2026-11-18
 
 ### Changed

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "codex-native-browser": {
+      "command": "codex-browser-bridge",
+      "args": ["--surface", "native-browser", "--mode", "mcp"]
+    }
+  }
+}

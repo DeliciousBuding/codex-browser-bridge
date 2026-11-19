@@ -1,10 +1,12 @@
-# Native Computer Use
+# Native Codex runtimes
 
-Configure a separate MCP server entry running
-`codex-browser-bridge --surface computer --mode mcp` (see
-`examples/native-computer-use.json`). This surface exposes the installed native
-`cua_repl` tools (`js`, `js_reset`, `js_add_node_module_dir`, `turn_ended`) rather
-than the browser `codex_*` tools.
+Use `--surface computer --mode mcp` for the installed `cua_repl` and its `cua`
+API. With a unified Browser and Computer Use configuration, this one entry
+handles both surfaces. Add `--surface native-browser --mode mcp` only for
+workflows that need the installed Browser/Chrome plugin's `node_repl` JavaScript
+API. Follow the installed Browser plugin's bootstrap instructions in that
+worker. Tool names and schemas come from each service's `tools/list`; enabled
+tools can differ. Objects stay in their owning worker.
 
 1. Start with the native `js` tool instructions. Inspect the returned API
    documentation and AX/screenshot state before sending UI input. Under

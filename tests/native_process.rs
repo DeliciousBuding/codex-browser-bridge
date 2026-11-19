@@ -75,9 +75,13 @@ impl Fixture {
     }
 
     fn command(&self) -> Command {
+        self.command_for("computer")
+    }
+
+    fn command_for(&self, surface: &str) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_codex-browser-bridge"));
         command
-            .args(["--surface", "computer", "--native-config"])
+            .args(["--surface", surface, "--native-config"])
             .arg(self.root.path().join("config.json"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -189,17 +193,81 @@ fn wait(child: &mut std::process::Child, timeout: Duration) -> std::process::Exi
 
 #[test]
 fn native_mcp_eof_keeps_actual_context_and_terminates_the_owned_tree() {
-    mcp_eof(false);
+    mcp_eof("computer", false);
 }
 
 #[test]
 fn native_mcp_eof_terminates_descendants_after_launcher_exit() {
-    mcp_eof(true);
+    mcp_eof("computer", true);
 }
 
-fn mcp_eof(launcher_exits: bool) {
+#[test]
+fn native_browser_uses_node_repl_catalog_policy_and_cleanup() {
+    mcp_eof("native-browser", true);
+}
+
+#[test]
+fn native_browser_discovers_its_own_toml_launch_row() {
     let fixture = Fixture::new();
-    let mut command = fixture.command();
+    let config_path = fixture.root.path().join("config.json");
+    let mut config: Value = serde_json::from_slice(&std::fs::read(config_path).unwrap()).unwrap();
+    let computer = &mut config["mcpServers"]["cua_repl"];
+    let mut browser = computer.clone();
+    browser["env"]
+        .as_object_mut()
+        .unwrap()
+        .remove("CUA_REPL_NODE_REPL_PATH");
+    computer["enabled"] = json!(false);
+    let path = fixture.root.path().join("config.toml");
+    let write_config = |servers: Value| {
+        std::fs::write(
+            &path,
+            toml::to_string(&json!({"mcp_servers": servers})).unwrap(),
+        )
+        .unwrap();
+    };
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_codex-browser-bridge"))
+            .args(["--surface", "native-browser", "--mode", "doctor"])
+            .env("CODEX_HOME", fixture.root.path())
+            .output()
+            .unwrap()
+    };
+    write_config(json!({"cua_repl": computer}));
+    let missing = run();
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr)
+        .contains("native node_repl launch configuration unavailable"));
+    assert!(!fixture.root.path().join("pids.json").exists());
+
+    write_config(json!({"cua_repl": computer, "node_repl": browser}));
+    let doctor = run();
+    assert!(
+        doctor.status.success(),
+        "{}",
+        String::from_utf8_lossy(&doctor.stderr)
+    );
+    let report: Value = serde_json::from_slice(&doctor.stdout).unwrap();
+    assert_eq!(report["tools"], json!(["js", "turn_ended"]));
+    assert_eq!(report["cleanup_confirmed"], true);
+    fixture.assert_processes_exited();
+}
+
+fn mcp_eof(surface: &str, launcher_exits: bool) {
+    let fixture = Fixture::new();
+    if surface == "native-browser" {
+        let path = fixture.root.path().join("config.json");
+        let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let mut row = config["mcpServers"]["cua_repl"].clone();
+        row["env"]
+            .as_object_mut()
+            .unwrap()
+            .remove("CUA_REPL_NODE_REPL_PATH");
+        config["mcpServers"]["cua_repl"]["enabled"] = json!(false);
+        config["mcpServers"]["node_repl"] = row;
+        std::fs::write(path, config.to_string()).unwrap();
+    }
+    let mut command = fixture.command_for(surface);
     let diagnostic = fixture.root.path().join("stderr.log");
     command
         .args(["--mode", "mcp"])
@@ -342,10 +410,6 @@ fn mcp_eof(launcher_exits: bool) {
 #[test]
 fn native_doctor_catalog_timeout_exits_and_terminates_the_owned_tree() {
     let fixture = Fixture::new();
-    let config_path = fixture.root.path().join("config.json");
-    let mut config: Value = serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
-    config["mcpServers"]["cua_repl"]["startup_timeout_ms"] = json!(300);
-    std::fs::write(&config_path, config.to_string()).unwrap();
     let log = fixture.root.path().join("catalog-timeout.stderr");
     let mut child = fixture
         .command()
@@ -354,8 +418,12 @@ fn native_doctor_catalog_timeout_exits_and_terminates_the_owned_tree() {
         .stderr(Stdio::from(std::fs::File::create(&log).unwrap()))
         .spawn()
         .unwrap();
-    assert!(!wait(&mut child, Duration::from_secs(15)).success());
+    assert!(!wait(&mut child, Duration::from_secs(25)).success());
     fixture.assert_processes_exited();
+    assert!(fixture
+        .frames()
+        .iter()
+        .any(|frame| frame["method"] == "tools/list"));
     let diagnostic = std::fs::read_to_string(log).unwrap();
     assert!(
         diagnostic.contains("native catalog pagination timed out"),
@@ -701,7 +769,7 @@ fn native_image_dir_conflict_error_identifies_the_required_command() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("--image-dir requires a Computer Use call or batch command"),
+        stderr.contains("--image-dir requires a native call or batch command"),
         "{stderr}"
     );
     assert!(!fixture.root.path().join("pids.json").exists());

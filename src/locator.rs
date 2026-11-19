@@ -423,9 +423,15 @@ async fn run_until(
                         "set_checked postcondition; click was not replayed".into(),
                     ));
                 }
-                let state = timeout_at(deadline, evaluate(client, tab, &probe, deadline))
-                    .await
-                    .map_err(|_| BridgeError::Timeout("set_checked postcondition".into()))??;
+                let state =
+                    match timeout_at(deadline, evaluate(client, tab, &probe, deadline)).await {
+                        Ok(Err(BridgeError::Timeout(_))) | Err(_) => {
+                            return Err(BridgeError::Timeout(
+                                "set_checked postcondition; click was not replayed".into(),
+                            ));
+                        }
+                        Ok(result) => result?,
+                    };
                 if state.get("ok") == Some(&json!(false)) {
                     return Err(result_error(&state));
                 }

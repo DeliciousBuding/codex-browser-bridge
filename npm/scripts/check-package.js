@@ -18,6 +18,7 @@ function requiredFilesForEnv(env = process.env) {
     "examples/claude-code.json",
     "examples/cursor.json",
     "examples/hermes-agent.json",
+    "examples/native-browser.json",
     "examples/native-computer-use.json",
     "examples/openclaw.json",
     "skills/codex-browser/SKILL.md",

@@ -6,7 +6,7 @@
 
 <p align="center">
   Unlock <b>Codex Browser Use</b> and <b>Codex Native Computer Use</b> for Claude Code, Antigravity, Cursor, OpenClaw, Hermes Agent, and shell scripts.
-  <br>One Rust binary: 66 <code>codex_*</code> tools over your logged-in Chromium session, plus the installed <code>cua_repl</code> desktop runtime.
+  <br>One MCP bridge for the installed Codex runtimes, with a structured browser adapter for existing clients.
 </p>
 
 <p align="center">
@@ -20,17 +20,15 @@
 
 ---
 
-## Two Surfaces, One Binary
+## Choose an entry
 
-`codex-browser-bridge` is a thin MCP adapter with two entry points. The browser surface reuses the Chromium session you are already signed into. The computer surface reuses the Codex desktop runtime already installed on the machine. No WebDriver, no profile copying, no second browser extension.
+| Entry | Use it for |
+|---|---|
+| `--surface computer` | The installed `cua_repl` and its `cua` API. A unified installation can cover desktop and browser tasks in one worker. |
+| `--surface native-browser` | Workflows that need the installed Browser/Chrome plugin's `node_repl` JavaScript API. |
+| `--surface browser` (default) | The existing 66 structured `codex_*` tools over the Chromium extension transport. |
 
-| | `--surface browser` (default) | `--surface computer` (opt-in) |
-|---|---|---|
-| Transport | Direct Chromium extension native-messaging pipe/socket (`codex-browser-use`). No Codex desktop app process required. | Launches and relays the installed Codex `cua_repl` service (`[mcp_servers.cua_repl]` or `unified-computer-use`). |
-| Interface | 66 declarative MCP tools (`basic` 46 / `network` 65 / `full` 66) plus CLI (`call`, `batch`, `--session-file`). | Stateful `js` REPL: `cua.listApps()`, `cua.listWindows()`, `cua.getApp({windowId})`, `cua.listBrowsers()`, `cua.getTab()`, `getAXStateAndScreenshot()`, `click()`, `typeText()`, `pressKey()`, `scroll()`, `drag()`. |
-| Behavior | Background focus emulation (`Emulation.setFocusEmulationEnabled`); input and screenshots do not steal window focus. | Forwards native `elicitation/create` app approval prompts; `turn_ended` plus owned process-tree cleanup (Windows Job Object / Unix process group). |
-
-Use the browser surface for web work: tabs, navigation, DOM/AX trees, trusted clicks and typing, screenshots, uploads, dialogs, cookies, network capture, and allowlisted CDP diagnostics against pages that need your real session. Use the computer surface for desktop apps and cross-application flows. They run as separate MCP servers and do not share a turn.
+[Native setup](docs/native-computer-use.md) explains which runtime to choose, approvals and per-client registration. Most clients only need one entry.
 
 ## Quick Start
 
@@ -42,7 +40,7 @@ claude plugin install codex-browser --marketplace DeliciousBuding/codex-browser-
 
 One command installs the skill and the MCP server; no JSON editing. The plugin starts on the 66-tool full profile because Claude Code loads schemas on demand through tool search, and `codex_doctor` is the only always-loaded schema. The first start pulls the pinned npm package through `npx`; later starts reuse the cache or a global binary.
 
-The plugin registers the browser surface only. Add `codex-computer` from the config below to enable Computer Use.
+The plugin registers the structured extension adapter. For the original tools, use the [native examples](examples/README.md).
 
 ### Manual MCP configuration
 
@@ -263,18 +261,7 @@ codex-browser-bridge --mode doctor                   # diagnostics
 
 ## Architecture
 
-```
-MCP client (Claude Code / Cursor / OpenClaw)
-        │ stdio JSON-RPC
-        ▼
-codex-browser-bridge (Rust binary)
-        │ length-prefixed JSON-RPC frames
-        ▼
-codex-browser-use pipe/socket  ──▶  ChatGPT extension  ── CDP ──▶  Chromium tabs
-        │ (--surface computer)
-        ▼
-cua_repl worker  ──▶  desktop apps + browser targets
-```
+See [Architecture](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/ARCHITECTURE.md) for the shared native relay and separate extension transport.
 
 Upgrading from 1.x? Read [docs/upgrade-v2.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v2.md) before updating an installation with saved continuation files or numeric-only tab claims.
 

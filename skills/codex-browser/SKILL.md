@@ -1,6 +1,6 @@
 ---
 name: codex-browser
-description: Control an existing logged-in Chromium browser through the native browser extension, or explicitly configured native Codex Computer Use. Use for tabs, DOM, screenshots, input, network diagnostics, browser-session debugging, or native application automation.
+description: Use the Codex Browser and Computer Use runtimes when explicitly registered, or the extension adapter for structured browser tools.
 ---
 
 # Codex Browser
@@ -10,9 +10,9 @@ ChatGPT desktop app. It reuses the extension's browser profile, cookies, and
 logged-in tabs. Do not add Playwright, a second extension, or copied browser
 profiles.
 
-The default plugin registration exposes the browser surface only. Native
-Computer Use requires the separate `--surface computer` MCP registration
-described in [references/native-computer-use.md](references/native-computer-use.md).
+The default plugin registers the extension adapter. To use the original tools,
+read [the native runtime reference](references/native-computer-use.md) and
+select the registered native service for the task.
 
 ## Progressive Loading
 

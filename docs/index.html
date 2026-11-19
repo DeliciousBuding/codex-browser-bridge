@@ -9,7 +9,7 @@
 <link rel="canonical" href="https://deliciousbuding.github.io/codex-browser-bridge/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="codex-browser-bridge — Break the Wall">
-<meta property="og:description" content="Codex Browser Use + Native Computer Use for every MCP agent. Single Rust binary, 66 browser tools, 4 native cua tools.">
+<meta property="og:description" content="A stdio bridge for installed Codex Browser and Computer Use, with a structured Chromium extension adapter.">
 <meta property="og:url" content="https://deliciousbuding.github.io/codex-browser-bridge/">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23090b10'/%3E%3Cpath d='M8 11h9a5 5 0 0 1 0 10H8' stroke='%237aa2ff' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Cpath d='M8 21h9a5 5 0 0 0 0-10H8' stroke='%235eead4' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
@@ -650,8 +650,8 @@
   <!-- ================= STATS ================= -->
   <div class="stats" aria-hidden="true">
     <div class="wrap stats-in">
-      <div class="stat"><div class="n">66<em>+4</em></div><div class="l" data-en="MCP tools" data-zh="MCP 工具">MCP tools</div></div>
-      <div class="stat"><div class="n">2<em>surfaces</em></div><div class="l" data-en="Browser · Computer" data-zh="浏览器 · 电脑">Browser · Computer</div></div>
+      <div class="stat"><div class="n">2<em> native</em></div><div class="l">node_repl · cua_repl</div></div>
+      <div class="stat"><div class="n">66<em> tools</em></div><div class="l" data-en="Extension adapter" data-zh="扩展适配入口">Extension adapter</div></div>
       <div class="stat"><div class="n">2<em>eras</em></div><div class="l" data-en="MCP protocol" data-zh="MCP 协议">MCP protocol</div></div>
       <div class="stat"><div class="n">0<em>copies</em></div><div class="l" data-en="of your profile" data-zh="复制你的配置">of your profile</div></div>
     </div>
@@ -662,7 +662,7 @@
     <div class="wrap">
       <div class="sec-head">
         <div class="kicker"><span class="hash">//</span><span data-en="Dual-surface architecture" data-zh="双表面架构">Dual-surface architecture</span></div>
-        <h2 data-en="One binary. Two surfaces. The wall is gone." data-zh="一个二进制，两个表面。墙已经不存在。">One binary. Two surfaces. The wall is gone.</h2>
+        <h2 data-en="One bridge for installed Codex runtimes." data-zh="一个桥接器，复用已安装的 Codex 运行时。">One bridge for installed Codex runtimes.</h2>
         <p data-en="Codex keeps its browser and computer runtimes behind the desktop app. The bridge speaks their native protocols directly, so Claude Code and every other MCP client can reach both — with the host's own configuration, permissions and cleanup semantics preserved." data-zh="Codex 把浏览器与电脑运行时藏在桌面应用后面。桥接器直接与它们的原生协议通信，让 Claude Code 和其他任何 MCP 客户端都能触达两者，同时保留宿主自身的配置、权限与清理语义。">Codex keeps its browser and computer runtimes behind the desktop app. The bridge speaks their native protocols directly, so Claude Code and every other MCP client can reach both — with the host's own configuration, permissions and cleanup semantics preserved.</p>
       </div>
 
@@ -735,16 +735,11 @@ Linux    /tmp/codex-browser-use/*.sock
           </div>
           <div class="arch-arrow" aria-hidden="true">→</div>
           <div class="arch-node">
-            <div class="t">--surface browser</div>
-            <div class="v" data-en="pipe / socket → extension → Chromium" data-zh="管道 / socket → 扩展 → Chromium">pipe / socket → extension → Chromium</div>
-          </div>
-          <div class="arch-arrow" aria-hidden="true">→</div>
-          <div class="arch-node">
-            <div class="t">--surface computer</div>
-            <div class="v" data-en="stdio relay → cua_repl → desktop + tabs" data-zh="stdio 中继 → cua_repl → 桌面 + 标签页">stdio relay → cua_repl → desktop + tabs</div>
+            <div class="t" data-en="Choose one entry" data-zh="按需选择入口">Choose one entry</div>
+            <div class="v"><code>--surface computer</code> → <code>cua_repl</code><br><code>--surface native-browser</code> → <code>node_repl</code><br><code>--surface browser</code> → Chromium extension</div>
           </div>
         </div>
-        <div class="arch-note" data-en="Both surfaces can be registered side by side in the same MCP client. Codex itself controls these runtimes natively; the bridge exists for every other agent." data-zh="两个表面可以并排注册在同一个 MCP 客户端里。Codex 自身原生控制这些运行时；桥接器服务于其他所有 Agent。">Both surfaces can be registered side by side in the same MCP client. Codex itself controls these runtimes natively; the bridge exists for every other agent.</div>
+        <div class="arch-note" data-en="One unified runtime can handle desktop and browser tasks. Use native-browser when you need the installed Browser plugin's JavaScript API." data-zh="统一运行时可同时处理桌面和浏览器任务。需要已安装 Browser 插件的 JavaScript API 时，使用 native-browser。">One unified runtime can handle desktop and browser tasks. Use native-browser when you need the installed Browser plugin's JavaScript API.</div>
       </div>
     </div>
   </section>
@@ -755,7 +750,7 @@ Linux    /tmp/codex-browser-use/*.sock
       <div class="sec-head">
         <div class="kicker"><span class="hash">//</span><span data-en="Three ways in" data-zh="三种接入方式">Three ways in</span></div>
         <h2 data-en="Plug it in. Then hand it real work." data-zh="接上它，然后把真实工作交给它。">Plug it in. Then hand it real work.</h2>
-        <p data-en="The Claude plugin wires the browser surface automatically. Add the native surface only when you want desktop automation — the two entries coexist." data-zh="Claude 插件会自动接好浏览器表面。只有需要桌面自动化时再添加原生表面——两个条目可以共存。">The Claude plugin wires the browser surface automatically. Add the native surface only when you want desktop automation — the two entries coexist.</p>
+        <p data-en="The Claude plugin registers the structured extension adapter. Register the native service you need separately." data-zh="Claude 插件注册结构化扩展工具。原生服务按需单独注册。">The Claude plugin registers the structured extension adapter. Register the native service you need separately.</p>
       </div>
 
       <div class="code-shell">
@@ -820,7 +815,7 @@ npm i -g @delicious233/codex-browser-bridge</pre>
   }
 }</pre>
           </div>
-          <div class="panel-note"><span class="i">!</span><span data-en="The default plugin registers the browser surface only. Add codex-computer when you want desktop automation; both entries can live in the same client." data-zh="默认插件只注册浏览器表面。需要桌面自动化时再加 codex-computer；两个条目可以并存于同一客户端。">The default plugin registers the browser surface only. Add codex-computer when you want desktop automation; both entries can live in the same client.</span></div>
+          <div class="panel-note"><span class="i">!</span><a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/examples/native-browser.json" data-en="Original Browser registration (node_repl)" data-zh="原版 Browser 注册示例（node_repl）">Original Browser registration (node_repl)</a></div>
         </div>
 
         <!-- panel 2 -->
@@ -906,7 +901,7 @@ JSONL</pre>
       <div class="sec-head">
         <div class="kicker"><span class="hash">//</span><span data-en="Tool explorer" data-zh="工具浏览">Tool explorer</span></div>
         <h2 data-en="Every tool, on this page. No manual required." data-zh="全部工具都在这一页，无需翻手册。">Every tool, on this page. No manual required.</h2>
-        <p data-en="66 browser tools plus the 4 native cua methods. Filter by surface, or search a name and a keyword in either language." data-zh="66 个浏览器工具，外加 4 个原生 cua 方法。按表面筛选，或用任意语言搜索名称与关键词。">66 browser tools plus the 4 native cua methods. Filter by surface, or search a name and a keyword in either language.</p>
+        <p data-en="Browse the 66 extension tools and examples of native tool names. Use the installed runtime's catalog to see which native tools are enabled." data-zh="浏览 66 个扩展工具及原生工具名称示例。实际启用的原生工具以已安装运行时的目录为准。">Browse the 66 extension tools and examples of native tool names. Use the installed runtime's catalog to see which native tools are enabled.</p>
       </div>
 
       <div class="tools-top">
@@ -1000,7 +995,7 @@ JSONL</pre>
           <div class="h" data-en="At a glance" data-zh="速览">At a glance</div>
           <div class="cta-row"><span>version</span><b>v2.1.1</b></div>
           <div class="cta-row"><span>browser</span><b>66 tools</b></div>
-          <div class="cta-row"><span>computer</span><b>4 methods</b></div>
+          <div class="cta-row"><span>native</span><b>node_repl · cua_repl</b></div>
           <div class="cta-row"><span>MCP</span><b>dual-era</b></div>
           <div class="cta-row"><span>license</span><b>MIT</b></div>
         </aside>
@@ -1056,7 +1051,7 @@ JSONL</pre>
   "use strict";
 
   /* ------------------------------------------------------------------ */
-  /* Data: 70 tools (66 browser + 4 native cua)                          */
+  /* Extension catalog plus examples of native tool names.             */
   /* ------------------------------------------------------------------ */
   var CATS = [
     { key: "all",       en: "All",                      zh: "全部",        color: "#7aa2ff" },
