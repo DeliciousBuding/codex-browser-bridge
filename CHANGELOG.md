@@ -14,6 +14,7 @@ Format: one bullet per change, no hard line wraps. 中文版见 [CHANGELOG.zh-CN
 ### Changed
 
 - Archived the completed Rust rewrite design and task plan under the historical documentation archive.
+- Recorded Windows x64 3.0.2 execution evidence from a second host, where the sandbox block seen during release verification did not reproduce.
 
 ## [3.0.2] - 2026-11-19
 

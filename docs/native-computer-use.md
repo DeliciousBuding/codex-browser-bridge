@@ -290,11 +290,19 @@ blocked by native Windows sandbox initialization. Normal postinstall downloads
 also hit GitHub CDN timeouts and are recorded as a transport failure, not a
 pass. Native sandbox state and entitlement were not modified.
 
+A second Windows x64 host (2026-11-20) installed the same published 3.0.2
+package from the npm registry and executed JavaScript on both surfaces. The
+sandbox-initialization block recorded above did not reproduce there, so it is
+treated as a property of the original verification environment rather than a
+3.0.2 defect. These were CLI calls; model-driven host UI acceptance was not
+part of this check.
+
 The table below retains earlier 2026-11-18 evidence. Windows GUI/input passes
 belong to the 2.1.1 iteration and do not establish 3.0.2 Windows GUI acceptance.
 
 | Platform / runtime | Protocol & observation | Input & lifecycle | Notes |
 | --- | --- | --- | --- |
+| Windows x64 3.0.2 (2026-11-20) | Both doctor checks returned `native_mcp_connected` with protocol `2025-06-18` and confirmed worker cleanup | `js` executed on both surfaces: `console.log(6*7)` returned `42`; Computer Use returned its first-use documentation without an error | Published npm package, global install; CLI only, no GUI or model-driven UI acceptance |
 | Windows x64 (`node_repl`) | Native handshake and catalog, official Browser client bootstrap and extension discovery passed | Localhost fixture click (`0 -> 1`), tab close, cross-call bindings, `js_reset`, and clean MCP exit passed | Claude Code verified both native connections; its model-driven operation and prompt UI were not part of the test |
 | Linux ARM64 X11 (`node_repl`) | Native handshake and catalog, Browser client bootstrap and extension discovery passed | Browser navigation acceptance stopped at the installed runtime's permission check | Claude Code verified both native connections |
 | Windows x64 (`cua-repl` 0.1.5 / Sky 0.7.21) | `initialize`, catalog filtering, fresh `accept`/`decline`/`cancel` elicitation, `js_reset`, synthetic AX state, screenshot, and CLI non-interactive rejection passed | Unlocked desktop synthetic Win32 click (`0 -> 1`), `typeText`, active-call cancel without replay, owned worker process-tree cleanup, and fresh-worker retry passed | Verified against a running Codex desktop host pipe; standalone helper spawn without the host returned `spawn EPERM` |
