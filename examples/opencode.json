@@ -3,12 +3,12 @@
   "mcp": {
     "codex-browser": {
       "type": "local",
-      "command": ["npx", "-y", "@delicious233/codex-browser-bridge@3.0.0", "--surface", "native-browser", "--mode", "mcp"],
+      "command": ["npx", "-y", "@delicious233/codex-browser-bridge@3.0.2", "--surface", "native-browser", "--mode", "mcp"],
       "enabled": true
     },
     "codex-computer": {
       "type": "local",
-      "command": ["npx", "-y", "@delicious233/codex-browser-bridge@3.0.0", "--surface", "computer", "--mode", "mcp"],
+      "command": ["npx", "-y", "@delicious233/codex-browser-bridge@3.0.2", "--surface", "computer", "--mode", "mcp"],
       "enabled": true
     }
   }

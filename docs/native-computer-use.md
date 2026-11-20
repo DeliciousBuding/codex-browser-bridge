@@ -278,16 +278,17 @@ not the exact source of every installed Codex binary. Tracking and
 remaining platform checks live in
 [issue #57](https://github.com/DeliciousBuding/codex-browser-bridge/issues/57).
 
-The 3.0.2 candidate passed both runtimes' startup/catalogs, batch bindings,
+The published 3.0.2 Linux ARM64 binary passed both runtimes' startup/catalogs, batch bindings,
 reset, explicit turn hooks, and Browser client bootstrap on Linux ARM64 X11.
 Direct native and bridge transports both passed a synthetic GTK button
 `0 -> 1`, AX, screenshot, turn hook, and fixture/worker cleanup. Browser
 inventory was empty, so webpage input was not verified.
 
-The Windows x64 3.0.2 candidate passed both doctor checks; actual JS execution
-remained blocked by native Windows sandbox initialization. Package verification
-and current published-binary readbacks are recorded in issue #57. Native
-sandbox state and entitlement were not modified.
+The Windows x64 3.0.2 package passed registry signature/provenance verification,
+checksum installation, and both doctor checks; actual JS execution remained
+blocked by native Windows sandbox initialization. Normal postinstall downloads
+also hit GitHub CDN timeouts and are recorded as a transport failure, not a
+pass. Native sandbox state and entitlement were not modified.
 
 The table below retains earlier 2026-11-18 evidence. Windows GUI/input passes
 belong to the 2.1.1 iteration and do not establish 3.0.2 Windows GUI acceptance.

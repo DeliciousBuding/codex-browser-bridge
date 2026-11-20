@@ -7,7 +7,7 @@ MCP server and CLI for reusing the installed Codex **Browser Use** (`node_repl`)
 [![CI](https://img.shields.io/github/actions/workflow/status/DeliciousBuding/codex-browser-bridge/ci.yml?style=flat-square)](https://github.com/DeliciousBuding/codex-browser-bridge/actions)
 [![Coverage](https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square)](https://codecov.io/gh/DeliciousBuding/codex-browser-bridge)
 
-[Website](https://deliciousbuding.github.io/codex-browser-bridge/) · [中文文档](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/README.zh-CN.md) · [Native Setup](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md) · [Upgrading to 3.0.1](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v3.md)
+[Website](https://deliciousbuding.github.io/codex-browser-bridge/) · [中文文档](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/README.zh-CN.md) · [Native Setup](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md) · [Upgrading to 3.0.x](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v3.md)
 
 ## Choose an entry
 
@@ -72,13 +72,13 @@ Use `batch` for several native JS calls that share one worker. `tools`, `call`, 
 
 ## Scope
 
-The binary is a thin, stateless Rust stdio relay of roughly 1,700 lines. It discovers the selected launch row, spawns one owned worker, forwards MCP frames in both directions, applies the launch row's tool filters and environment policy, and tears the worker tree down on exit.
+The binary is a thin, stateless Rust stdio relay. It discovers the selected launch row, spawns one owned worker, forwards MCP frames in both directions, applies the launch row's tool filters and environment policy, and tears the worker tree down on exit.
 
 It does not implement CDP, DOM snapshots, locators, observation cursors, tool profiles, or browser sessions. Those belong to the installed runtime, and their behavior, permissions, and catalog are what clients see. The only transport path is stdio to that runtime.
 
 ## Upgrading
 
-- **From 2.x or 3.0.0 to 3.0.1:** read [docs/upgrade-v3.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v3.md) (the compatibility browser adapter and its structured tools were removed).
+- **From 2.x or 3.0.0 to 3.0.x:** read [docs/upgrade-v3.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v3.md) (the compatibility browser adapter and its structured tools were removed in 3.0.1).
 - **From 1.x to 2.x:** read [docs/upgrade-v2.md](https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/upgrade-v2.md).
 
 ## Platform support
@@ -115,7 +115,7 @@ This tool acts inside your live browser and desktop session.
 
 - Never expose it on a network port; run it only for trusted MCP clients.
 - The installed runtime's permissions and approval prompts are authoritative. The bridge adds no second permission layer and does not re-implement CDP access control.
-- Review agent actions before allowing sensitive operations; avoid password, payment, and admin pages.
+- Review agent actions before allowing sensitive operations; avoid payment and admin flows.
 - Redact tab titles, URLs, DOM text, and screenshots before sharing output.
 - No telemetry and no hidden fallback runtime.
 

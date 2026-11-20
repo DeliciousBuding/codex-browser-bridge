@@ -6,6 +6,15 @@ Format: one bullet per change, no hard line wraps. 中文版见 [CHANGELOG.zh-CN
 
 ## [Unreleased]
 
+### Fixed
+
+- Aligned current installation docs and versioned client examples with the published npm package name and version.
+- Corrected stale CLI approval, protocol, lifecycle, and release-order descriptions.
+
+### Changed
+
+- Archived the completed Rust rewrite design and task plan under the historical documentation archive.
+
 ## [3.0.2] - 2026-11-19
 
 ### Fixed

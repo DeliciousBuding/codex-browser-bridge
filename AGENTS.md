@@ -44,14 +44,14 @@ Codex / ChatGPT desktop 已经能通过内置原生运行时直接控制浏览�
 ```bash
 cargo check --locked              # 快速检查
 cargo test --locked                # 全量测试
-cargo clippy --locked -- -D warnings  # lint
+cargo clippy --locked --all-targets -- -D warnings  # lint
 cargo build --locked --release     # 发布构建 → target/release/codex-browser-bridge.exe
 npm --prefix npm test              # npm installer/package helper 测试
 ```
 
-Release 时遵循 `docs/release-process.md`：确保 `Cargo.toml`、`npm/package.json`、`.claude-plugin/plugin.json` 的版本号与 tag 一致，`CHANGELOG.md` 有对应段，npm 包 dry-run 包含完整的 `skills/codex-browser/` bundle 和 `examples/` 多客户端模板。npm 发布走 Trusted Publishing/OIDC，不在 GitHub secrets 中放 npm write token。
+Release 时遵循 `docs/release-process.md` 的版本、changelog、资产和 npm 合同；那里维护完整文件清单与发布顺序，本文件不复刻。
 
-发布前运行 `node scripts/check-plugin-surface.js` 与 `claude plugin validate --strict .`。前者在 CI 中验证 Claude manifest、唯一 MCP 配置和 marketplace 不漂移，并阻止 Codex 插件分发文件重新进入仓库。
+发布前运行 `node scripts/check-plugin-surface.js` 与 `claude plugin validate --strict .`。前者在 CI 中验证 Claude manifest、唯一 MCP 配置、marketplace 和示例 npm pins 不漂移，并阻止 Codex 插件分发文件重新进入仓库。
 
 `mcp.json` 的 npm 包版本必须与 `.claude-plugin/plugin.json`、`npm/package.json` 和 release tag 一致；`check-plugin-surface.js` 会拒绝漂移。
 
@@ -73,7 +73,7 @@ src/
   logging.rs    日志初始化
 tests/
   native_process.rs  自有进程树集成测试
-  fixtures/          mock worker 与测试页面
+  fixtures/          mock native worker
 ```
 
 ## 分支策略

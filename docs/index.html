@@ -619,7 +619,7 @@
         <div class="term">
           <div class="term-bar">
             <div class="tl"><i></i><i></i><i></i></div>
-            <div class="term-title">codex-browser-bridge v3.0</div>
+            <div class="term-title">codex-browser-bridge / bridge</div>
             <div class="term-live"><i></i>STDIO</div>
           </div>
           <div class="term-body">
@@ -681,7 +681,7 @@ nodeRepl.write(<span class="k">await</span> browser.documentation());</div>
             <li><span data-en="Reads [mcp_servers.node_repl] from ~/.codex/config.toml (or --native-config) without modifying user config." data-zh="读取 ~/.codex/config.toml 中的 [mcp_servers.node_repl]（或 --native-config），从不改写用户配置。">Reads <b>[mcp_servers.node_repl]</b> from ~/.codex/config.toml (or --native-config) without modifying user config.</span></li>
             <li><span data-en="Preserves the runtime's own catalog, schemas, images, and bidirectional elicitation/create approval prompts." data-zh="原样保留运行时的工具目录、schema、图片与双向 elicitation/create 审批弹窗。">Preserves the runtime's own catalog, schemas, images, and bidirectional <b>elicitation/create</b> approval prompts.</span></li>
             <li><span data-en="Reports boolean browser_access_env diagnostics in discover/doctor without exposing host token values." data-zh="在 discover/doctor 中输出 browser_access_env 布尔诊断字段，不暴露宿主环境变量值。">Reports boolean <b>browser_access_env</b> diagnostics in discover/doctor without exposing host token values.</span></li>
-            <li><span data-en="Runs turn_ended cleanup and closes the owned worker process tree on EOF, SIGINT, or SIGTERM." data-zh="在 EOF、SIGINT 或 SIGTERM 时执行 turn_ended 清理并关闭自有 worker 进程树。">Runs <b>turn_ended</b> cleanup and closes the owned worker process tree on EOF, SIGINT, or SIGTERM.</span></li>
+            <li><span data-en="When turn_ended is enabled, a confirmed result commits cleanup and an unknown outcome is reported without replay; the owned worker tree then closes." data-zh="启用 turn_ended 时，成功回执提交清理，未知结果如实报告且不重放；随后关闭自有 worker 进程树。">When <b>turn_ended</b> is enabled, a confirmed result commits cleanup and an unknown outcome is reported without replay; the owned worker tree then closes.</span></li>
           </ul>
           <div class="s-foot">
             <a href="https://github.com/DeliciousBuding/codex-browser-bridge/blob/main/docs/native-computer-use.md">
@@ -851,7 +851,7 @@ codex-browser-bridge --surface computer --image-dir ./captures batch &lt;&lt;'JS
 {"name":"js","arguments":{"code":"await cua.computer.launch_app({ name: 'Calculator' });"}}
 JSONL</pre>
           </div>
-          <div class="panel-note"><span class="i">!</span><span data-en="Application approval requires an MCP host that supports elicitation. The CLI is non-interactive and rejects elicitation/create with a JSON-RPC error." data-zh="应用授权需要支持 elicitation 的 MCP 宿主。CLI 是非交互式的，会以 JSON-RPC 错误拒绝 elicitation/create。">Application approval requires an MCP host that supports elicitation. The CLI is non-interactive and rejects elicitation/create with a JSON-RPC error.</span></div>
+          <div class="panel-note"><span class="i">!</span><span data-en="Application approval requires an MCP host that supports elicitation. The CLI is non-interactive and answers elicitation/create with {&quot;action&quot;:&quot;cancel&quot;}." data-zh="应用授权需要支持 elicitation 的 MCP 宿主。CLI 是非交互式的，会以 {&quot;action&quot;:&quot;cancel&quot;} 应答 elicitation/create。">Application approval requires an MCP host that supports elicitation. The CLI is non-interactive and answers elicitation/create with {"action":"cancel"}.</span></div>
         </div>
 
         <!-- panel 3 -->
@@ -921,7 +921,7 @@ nodeRepl.<span class="tk-f">write</span>(<span class="tk-k">await</span> browser
     <div class="wrap">
       <div class="sec-head">
         <div class="kicker"><span class="hash">//</span><span data-en="Trust model" data-zh="可信边界">Trust model</span></div>
-        <h2 data-en="Thin adapter. Hard boundaries." data-zh="薄适配层，硬边界。">Thin adapter. Hard boundaries.</h2>
+        <h2 data-en="Thin relay. Hard boundaries." data-zh="薄中继，硬边界。">Thin relay. Hard boundaries.</h2>
         <p data-en="This binary holds the keys to a logged-in browser and a desktop session. Every design choice assumes that." data-zh="这个二进制握着你已登录浏览器和桌面会话的钥匙。每一个设计选择都以此为前提。">This binary holds the keys to a logged-in browser and a desktop session. Every design choice assumes that.</p>
       </div>
 
@@ -944,7 +944,7 @@ nodeRepl.<span class="tk-f">write</span>(<span class="tk-k">await</span> browser
         <div class="trust">
           <div class="ti"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 8h3l1.5-4 2 8 1.5-4h3"/></svg></div>
           <h3 data-en="Deterministic cleanup" data-zh="确定性收尾">Deterministic cleanup</h3>
-          <p data-en="EOF, SIGINT and SIGTERM cancel in-flight work, send turn_ended, close stdin, then tear down the owned process tree — Job Object on Windows." data-zh="EOF、SIGINT、SIGTERM 会取消进行中的任务，发送 turn_ended，关闭 stdin，然后收掉自有的进程树——Windows 上使用 Job Object。">EOF, SIGINT and SIGTERM cancel in-flight work, send turn_ended, close stdin, then tear down the owned process tree — Job Object on Windows.</p>
+          <p data-en="EOF, SIGINT and SIGTERM cancel in-flight work. An enabled turn_ended is confirmed or reported unknown without replay; stdin then closes and the owned process tree is terminated — Job Object on Windows." data-zh="EOF、SIGINT、SIGTERM 会取消进行中的任务；启用的 turn_ended 成功确认或报告未知且不重放，随后关闭 stdin 并收掉自有进程树——Windows 上使用 Job Object。">EOF, SIGINT and SIGTERM cancel in-flight work. An enabled turn_ended is confirmed or reported unknown without replay; stdin then closes and the owned process tree is terminated — Job Object on Windows.</p>
         </div>
         <div class="trust">
           <div class="ti"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 4.5h11v7h-11z"/><path d="M5 7h2M5 9.2h4"/><path d="M10.5 2.5v2M12.5 2.5v2"/></svg></div>
@@ -1056,7 +1056,7 @@ nodeRepl.<span class="tk-f">write</span>(<span class="tk-k">await</span> browser
     ["js_add_node_module_dir", "native", "Register an additional Node module directory for the native runtime.", "为原生运行时注册额外的 Node 模块目录。"],
 
     /* worker lifecycle · 1 */
-    ["turn_ended", "lifecycle", "Execution-context cleanup hook; Stop or Interrupt is sent with a fresh callId and no progressToken, then the owned process tree closes.", "执行上下文清理钩子；以新的 callId、不带 progressToken 发送 Stop 或 Interrupt，随后收掉自有进程树。"]
+    ["turn_ended", "lifecycle", "Execution-context cleanup hook. A successful matching result commits cleanup; errors retain context, and an unanswered hook is reported unknown without replay.", "执行上下文清理钩子。匹配成功回执后提交清理；失败保留 context，未确认 hook 报告未知且不重放。"]
   ].map(function (t) {
     return { name: t[0], cat: t[1], en: t[2], zh: t[3] };
   });

@@ -7,7 +7,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/DeliciousBuding/codex-browser-bridge/ci.yml?style=flat-square)](https://github.com/DeliciousBuding/codex-browser-bridge/actions)
 [![Coverage](https://img.shields.io/codecov/c/github/DeliciousBuding/codex-browser-bridge?style=flat-square)](https://codecov.io/gh/DeliciousBuding/codex-browser-bridge)
 
-[项目网站](https://deliciousbuding.github.io/codex-browser-bridge/) · [English](README.md) · [原生接入指南](docs/native-computer-use.md) · [升级到 3.0.1](docs/upgrade-v3.md)
+[项目网站](https://deliciousbuding.github.io/codex-browser-bridge/) · [English](README.md) · [原生接入指南](docs/native-computer-use.md) · [升级到 3.0.x](docs/upgrade-v3.md)
 
 ## 选择入口
 
@@ -72,13 +72,13 @@ codex-browser-bridge --surface computer call js '{"code":"await cua.listWindows(
 
 ## 范围
 
-二进制是一个约 1,700 行的薄无状态 Rust stdio 中继：发现所选 launch row、启动一个自有 worker、双向转发 MCP 帧、应用该行声明的工具过滤与环境策略，并在退出时收掉 worker 进程树。
+二进制是一个薄无状态 Rust stdio 中继：发现所选 launch row、启动一个自有 worker、双向转发 MCP 帧、应用该行声明的工具过滤与环境策略，并在退出时收掉 worker 进程树。
 
 它不实现 CDP、DOM 快照、定位器、观察游标、工具 profile 或浏览器 session；这些属于已安装运行时，客户端看到的行为、权限和目录都以运行时为准。传输路径只有一条：stdio 直连该运行时。
 
 ## 升级说明
 
-- **从 2.x 或 3.0.0 升级到 3.0.1：** 阅读 [docs/upgrade-v3.md](docs/upgrade-v3.md)（兼容浏览器适配层及其结构化工具已移除）。
+- **从 2.x 或 3.0.0 升级到 3.0.x：** 阅读 [docs/upgrade-v3.md](docs/upgrade-v3.md)（兼容浏览器适配层及其结构化工具已在 3.0.1 移除）。
 - **从 1.x 升级到 2.x：** 阅读 [docs/upgrade-v2.md](docs/upgrade-v2.md)。
 
 ## 平台支持
@@ -98,6 +98,7 @@ codex-browser-bridge --surface computer call js '{"code":"await cua.listWindows(
 - `enabled_tools` 先于 `disabled_tools` 生效，覆盖对外工具目录、直接 `tools/call` 请求和会话结束时的 `turn_ended` 钩子。
 - 应用授权使用双向 MCP form elicitation（`elicitation/create`），`accept`、`decline`、`cancel` 原样透传；CLI 非交互，返回标准 MCP 结果 `{"action": "cancel"}`。
 - 在 EOF、`SIGINT` 或 `SIGTERM` 时取消进行中的任务、发送 `turn_ended`、关闭 worker stdin，并收掉自有进程树（Windows Job Object、Unix 进程组）。超时或中断的调用绝不重放。
+- 显式 turn hook 仅在匹配成功回执后清空对应 context；未确认的 hook 报告未知结果且不重放。CLI 将原生 RPC 错误帧原样写到 stdout 并非零退出。模型 token 预算、工具暴露与 UI 渲染由接收宿主负责；详见[原生接入指南](docs/native-computer-use.md)。
 
 ## 维护
 

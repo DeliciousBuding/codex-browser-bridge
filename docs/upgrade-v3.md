@@ -12,7 +12,9 @@ negotiation remains the receiving host's responsibility. See
 `3.0.0` made the installed Codex `node_repl` (Browser Use) and `cua_repl`
 (Computer Use) runtimes the default entries while retaining the explicit
 `--surface browser` compatibility adapter. `3.0.1` removes that adapter and its
-structured `codex_*` tools. The bridge now relays only the two native runtimes.
+structured `codex_*` tools. `3.0.2` aligns turn acknowledgement, CLI errors and
+protocol validation, and CUA entry/tab guidance. The bridge relays only the two
+native runtimes.
 
 The compatibility removal is included in `3.0.1` despite the patch version.
 If your configuration uses `--surface browser` or any of the removed flags
@@ -35,7 +37,7 @@ below, update it before upgrading from 2.x or 3.0.0.
      ```
    - See [docs/native-computer-use.md](native-computer-use.md) for discovery, environment policy, and elicitation approvals.
 
-3. **Compatibility surface removed in 3.0.1**
+3. **Compatibility surface removed in 3.0.1 and later**
    - `--surface browser`, `--mode cli`, `--pipe`, `--browser-family`, `--browser-instance`, `--profile`, `--upload-base`, `--max-text-bytes`, `--max-image-bytes`, `--max-output-bytes`, `--network-policy`, `--finalize`, `--session-file`, and `--keep-turn` no longer exist.
    - The structured `codex_*` tools, their `basic`/`network`/`full` profiles, the `codex://tabs` resource, the `login`/`extract-table` prompts, extension pipe discovery, and the extension-backed upload/download helpers are gone.
    - Bare CLI invocations without `--surface` now default to `--surface native-browser`.
@@ -49,4 +51,4 @@ below, update it before upgrading from 2.x or 3.0.0.
    - The bundled skill routes to `native-computer-use.md`.
 
 If you depend on `codex_*` tools, keep the version you already use until you
-have migrated. `3.0.1` provides no compatibility surface.
+have migrated. `3.0.1` and later provide no compatibility surface.

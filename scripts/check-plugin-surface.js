@@ -163,6 +163,27 @@ for (const readme of ["README.md", "README.zh-CN.md"]) {
   if (!readText(readme).includes(installCommand)) {
     failures.push(`${readme} must include the one-command Claude plugin install`);
   }
+  if (!readText(readme).includes(packageJson.name)) {
+    failures.push(`${readme} must reference the canonical npm package ${packageJson.name}`);
+  }
+}
+
+const examplesRoot = path.join(root, "examples");
+for (const filename of fs.readdirSync(examplesRoot).filter((name) => name.endsWith(".json"))) {
+  const text = readText(path.join("examples", filename));
+  JSON.parse(text);
+  for (const match of text.matchAll(/@delicious233\/[A-Za-z0-9._-]+@[^"'\s,\]]+/g)) {
+    const token = match[0];
+    const at = token.lastIndexOf("@");
+    const name = token.slice(0, at);
+    const version = token.slice(at + 1);
+    if (name !== packageJson.name) {
+      failures.push(`examples/${filename} uses stale package ${name}; expected ${packageJson.name}`);
+    }
+    if (name === packageJson.name && version !== packageJson.version) {
+      failures.push(`examples/${filename} pins ${token}; expected ${packageJson.name}@${packageJson.version}`);
+    }
+  }
 }
 
 const skillRoot = path.join(root, "skills", "codex-browser");

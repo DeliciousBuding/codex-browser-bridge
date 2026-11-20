@@ -75,9 +75,10 @@ pagination, handles interactive elicitation, and enforces its own request
 deadlines. The bridge owns none of those policies.
 
 The CLI/doctor paths are the exception: they need a catalog without a client,
-so they initialize the worker themselves (protocol version `2025-06-18`) and
-traverse paginated `tools/list` responses within bounded page, item, and
-cursor limits.
+so they request legacy `2025-06-18`, accept the initialize-based versions known
+to the native SDK, and traverse paginated `tools/list` responses within bounded
+page, item, and cursor limits. Unsupported or missing protocol versions fail
+before `notifications/initialized`.
 
 ### Tool policy from the launch row
 
@@ -86,6 +87,11 @@ direct `tools/call` requests, and the end-of-session `turn_ended` hook. A
 disabled tool request fails locally with `-32602` instead of reaching the
 worker. If `turn_ended` is disabled, cleanup skips the hook and terminates
 the owned worker tree.
+
+An explicit `turn_ended` is tracked by request ID. The matching execution
+context clears and the generated turn rotates only after a successful result.
+JSON-RPC errors and `isError: true` retain the context for exit cleanup; an
+unanswered hook is cancelled and reported as an unknown outcome without replay.
 
 ### Call correlation metadata
 
@@ -199,9 +205,9 @@ dependency under an unlisted license fails the check and forces review) + bans
 
 ## Release
 
-Tagging `v*` triggers `release.yml`: test → build Windows and Linux x64 + arm64 → checksums and
-attestations → draft GitHub Release → npm publish (`--provenance`) → publish
-the GitHub Release. The npm package embeds release checksums and downloads the
-matching binary on install. CI and release also validate that all plugin
-manifests, MCP files, marketplace entries, skill references, and npm versions
+Tagging `v*` triggers `release.yml`: test → build all six assets → checksums
+and attestations → stage and publish the GitHub Release → publish npm with
+provenance. The npm package embeds release checksums and downloads the matching
+binary on install. CI and release also validate that all plugin manifests, MCP
+files, marketplace entries, example pins, skill references, and npm versions
 remain one coherent distribution surface.

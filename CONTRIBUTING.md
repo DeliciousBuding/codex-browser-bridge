@@ -31,7 +31,7 @@ git clone https://github.com/DeliciousBuding/codex-browser-bridge.git
 cd codex-browser-bridge
 cargo check --locked           # fast check
 cargo test --locked             # run all tests
-cargo clippy --locked -- -D warnings  # lint
+cargo clippy --locked --all-targets -- -D warnings  # lint
 cargo build --locked --release  # release build
 ```
 
@@ -43,7 +43,7 @@ compilation alone does not establish runtime support.
 The root directory is an installable Claude Code plugin. Its MCP entry uses
 `npx` with the npm package version pinned to the plugin version; keep the pin,
 `plugin.json`, and `npm/package.json` aligned. Validate the plugin contract
-after changing a manifest, MCP launch config, marketplace, or skill:
+after changing a manifest, MCP launch config, marketplace, skill, or versioned example:
 
 ```bash
 node scripts/check-plugin-surface.js
@@ -66,7 +66,7 @@ interchangeable.
 
 - Run `cargo fmt` before committing. CI enforces clippy with zero warnings.
 - `cargo test --locked` runs all unit and integration tests.
-- `cargo clippy --locked -- -D warnings` is wired into CI; run it locally before pushing.
+- `cargo clippy --locked --all-targets -- -D warnings` is wired into CI; run it locally before pushing.
 
 ## Commits
 
